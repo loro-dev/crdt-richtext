@@ -82,7 +82,13 @@ impl CrdtRange {
     ///
     /// - The first returned element is the alive element at the pos
     /// - The rest of the elements are tombstones at the position filtered by `anchors`
-    pub fn insert_text<F>(&mut self, pos: usize, len: usize, get_ops_at_pos: F) -> Vec<Patch>
+    pub fn insert_text<F>(
+        &mut self,
+        pos: usize,
+        len: usize,
+        first_op_id: OpID,
+        get_ops_at_pos: F,
+    ) -> Vec<Patch>
     where
         F: FnOnce(&[OpID]) -> (OpID, Vec<OpID>),
     {
