@@ -1,4 +1,8 @@
-use std::ops::{Bound, RangeBounds};
+use std::{
+    collections::HashMap,
+    ops::{Bound, RangeBounds},
+    sync::Arc,
+};
 
 use range_map::{RangeMap, Span};
 
@@ -24,6 +28,13 @@ impl RangeOp {
         match self {
             RangeOp::Patch(x) => x.id = id,
             RangeOp::Annotate(x) => x.id = id,
+        }
+    }
+
+    fn lamport(&self) -> Lamport {
+        match self {
+            RangeOp::Patch(x) => x.lamport,
+            RangeOp::Annotate(x) => x.lamport,
         }
     }
 }
@@ -259,6 +270,20 @@ impl<R: RangeMap> CrdtRange<R> {
             .get_annotations(start, end - start)
             .into_iter()
             .filter_map(|mut x| {
+                let mut annotations: HashMap<String, (Lamport, Vec<Arc<Annotation>>)> =
+                    HashMap::new();
+                for a in std::mem::take(&mut x.annotations) {
+                    if let Some(x) = annotations.get_mut(&a.type_) {
+                        if a.merge_method == RangeMergeRule::Inclusive {
+                            x.1.push(a);
+                        } else if a.lamport > x.0 {
+                            *x = (a.lamport, vec![a]);
+                        }
+                    } else {
+                        annotations.insert(a.type_.clone(), (a.lamport, vec![a]));
+                    }
+                }
+                x.annotations = annotations.into_values().flat_map(|x| x.1).collect();
                 let is_odd = x.len % 2 == 1;
                 if text_at_even_start {
                     x.len = (x.len + 1) / 2;
@@ -306,7 +331,17 @@ mod test {
         fn from(value: &Span) -> Self {
             Self {
                 len: value.len,
-                annotations: value.annotations.iter().map(|x| x.type_.clone()).collect(),
+                annotations: value
+                    .annotations
+                    .iter()
+                    .filter_map(|x| {
+                        if x.merge_method == RangeMergeRule::Delete {
+                            None
+                        } else {
+                            Some(x.type_.clone())
+                        }
+                    })
+                    .collect(),
             }
         }
     }
@@ -429,7 +464,22 @@ mod test {
             self.range.delete_text(pos, len);
         }
 
+        #[inline(always)]
         pub fn annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {
+            self.annotate_with_type(range, type_, RangeMergeRule::Merge);
+        }
+
+        #[inline(always)]
+        fn un_annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {
+            self.annotate_with_type(range, type_, RangeMergeRule::Delete);
+        }
+
+        fn annotate_with_type(
+            &mut self,
+            range: impl RangeBounds<usize>,
+            type_: &str,
+            merge_method: RangeMergeRule,
+        ) {
             let id = self._use_next_id();
             let lamport = self._use_next_lamport();
             let start = match range.start_bound() {
@@ -456,7 +506,7 @@ mod test {
                     id,
                     lamport,
                     range: AnchorRange { start, end },
-                    merge_method: RangeMergeRule::Merge,
+                    merge_method,
                     type_: type_.to_string(),
                     meta: None,
                 },
@@ -588,6 +638,8 @@ mod test {
                     self.range.delete_text(*index, 1);
                 }
             };
+
+            self.next_lamport = std::cmp::max(self.next_lamport, other.next_lamport);
         }
 
         fn integrate_insert_op(&mut self, op: &Op, update_range: bool) {
@@ -611,6 +663,10 @@ mod test {
         fn check(&self) {
             assert_eq!(self.len, self.list.content.real_len());
             assert_eq!(self.len * 2 + 2, self.range.range_map.len());
+            assert!(self
+                .range_ops
+                .iter()
+                .all(|x| x.lamport() < self.next_lamport));
             let range_op_id_set: HashSet<OpID> = self.range_ops.iter().map(|x| x.id()).collect();
             for op in self.list.content.iter() {
                 // no intersection
@@ -643,6 +699,7 @@ mod test {
         } else {
             container.content.real_index(pos)
         };
+
         insert_pos
     }
 
@@ -697,5 +754,20 @@ mod test {
         actor_b.merge(&actor);
         actor.check();
         actor.check_eq(&actor_b);
+    }
+
+    #[test]
+    fn test_delete_annotation() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        actor.annotate(0..5, "bold");
+        actor.un_annotate(0..3, "bold");
+        let spans = actor.get_annotations(..);
+        assert_eq!(
+            spans,
+            make_spans(&[((vec![]), 3), ((vec!["bold"]), 2), ((vec![]), 5),])
+        );
+        actor.un_annotate(3..6, "bold");
+        assert_eq!(actor.get_annotations(..), make_spans(&[((vec![]), 10),]));
     }
 }
