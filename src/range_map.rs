@@ -100,7 +100,10 @@ pub mod dumb {
                     offset: self.arr[last_index].len,
                 }
             } else {
-                panic!("Index out of bound");
+                panic!(
+                    "Index out of bound. Target {char_index}, but the len is {}",
+                    self.len
+                );
             }
         }
 
@@ -374,13 +377,15 @@ pub mod dumb {
             Annotation {
                 id: id(n),
                 lamport: 0,
-                start: Anchor {
-                    id: Some(id(n)),
-                    type_: AnchorType::Before,
-                },
-                end: Anchor {
-                    id: Some(id(n)),
-                    type_: AnchorType::Before,
+                range: crate::AnchorRange {
+                    start: Anchor {
+                        id: Some(id(n)),
+                        type_: AnchorType::Before,
+                    },
+                    end: Anchor {
+                        id: Some(id(n)),
+                        type_: AnchorType::Before,
+                    },
                 },
                 merge_method: crate::RangeMergeRule::Merge,
                 type_: String::new(),
