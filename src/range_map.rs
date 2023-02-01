@@ -57,7 +57,7 @@ pub trait RangeMap {
 pub mod dumb {
     use super::*;
 
-    #[derive(Debug)]
+    #[derive(Debug, PartialEq, Eq)]
     pub struct DumbRangeMap {
         arr: Vec<Span>,
         len: usize,

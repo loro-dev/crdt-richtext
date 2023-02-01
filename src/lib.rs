@@ -278,7 +278,7 @@ impl<R: RangeMap> CrdtRange<R> {
     }
 
     pub fn delete_text(&mut self, pos: usize, len: usize) {
-        self.range_map.delete(pos * 2 + 1, len * 2);
+        self.range_map.delete(pos * 2, len * 2);
     }
 
     pub fn annotate(&mut self, annotation: Annotation, range: impl RangeBounds<usize>) -> RangeOp {
@@ -1063,6 +1063,10 @@ mod test {
         b.annotate(0..=3, "link");
         b.insert(3, 2);
         a.merge(&b);
+        b.merge(&a);
+        assert_eq!(a.get_annotations(..), b.get_annotations(..));
+        assert_eq!(a.range.range_map, b.range.range_map);
+        a.insert(4, 1);
         b.merge(&a);
         assert_eq!(a.get_annotations(..), b.get_annotations(..));
     }
