@@ -214,11 +214,11 @@ impl<R: RangeMap> CrdtRange<R> {
         F: FnOnce(&[OpID]) -> (Option<OpID>, Option<OpID>, Vec<OpID>),
     {
         let mut ans = vec![];
-        let spans = self.range_map.get_annotations((pos * 2).max(1) - 1, 2);
+        let spans = self.range_map.get_annotations(pos * 3, 2);
         let (left_id, right_id, tombstones) = get_ops_at_pos(
             &self
                 .range_map
-                .get_annotations(pos * 2, 2)
+                .get_annotations(pos * 3, 2)
                 .iter()
                 .flat_map(|x| x.annotations.iter().map(|x| x.0.id))
                 .collect::<Vec<_>>(),
@@ -229,47 +229,56 @@ impl<R: RangeMap> CrdtRange<R> {
             .unwrap();
 
         if is_local {
-            for span in spans {
-                for (annotation, pos) in span.annotations {
-                    patch(pos, annotation, left_id, right_id, &mut ans);
+            if spans.len() == 2 {
+                for span in spans {
+                    for (annotation, pos) in span.annotations {
+                        patch(pos, annotation, left_id, right_id, &mut ans);
+                    }
                 }
+            } else {
+                assert_eq!(spans.len(), 1);
             }
-            self.range_map.insert(pos * 2, len * 2);
+            self.range_map.insert(pos * 3 + 1, len * 3);
         } else {
             let mut range_shift = Vec::new();
-            for span in spans {
-                for (annotation, pos) in span.annotations {
-                    if pos.end_here && !pos.begin_here {
-                        let end_id = annotation.range.end.id;
-                        if end_id != left_id && end_id != right_id {
-                            let ann_index =
-                                tombstones.iter().position(|x| Some(*x) == end_id).unwrap();
-                            if ann_index > insert_pos {
-                                range_shift.push((annotation, len as isize));
+            if spans.len() == 2 {
+                for span in spans {
+                    // TODO: simplify
+                    for (annotation, pos) in span.annotations {
+                        if pos.end_here && !pos.begin_here {
+                            let end_id = annotation.range.end.id;
+                            if end_id != left_id && end_id != right_id {
+                                let ann_index =
+                                    tombstones.iter().position(|x| Some(*x) == end_id).unwrap();
+                                if ann_index > insert_pos {
+                                    range_shift.push((annotation, len as isize));
+                                }
                             }
-                        }
-                    } else if pos.begin_here && !pos.end_here {
-                        let start_id = annotation.range.start.id;
-                        if start_id != left_id && start_id != right_id {
-                            let ann_index = tombstones
-                                .iter()
-                                .position(|x| Some(*x) == start_id)
-                                .unwrap();
-                            if ann_index < insert_pos {
-                                range_shift.push((annotation, -(len as isize)));
+                        } else if pos.begin_here && !pos.end_here {
+                            let start_id = annotation.range.start.id;
+                            if start_id != left_id && start_id != right_id {
+                                let ann_index = tombstones
+                                    .iter()
+                                    .position(|x| Some(*x) == start_id)
+                                    .unwrap();
+                                if ann_index < insert_pos {
+                                    range_shift.push((annotation, -(len as isize)));
+                                }
                             }
                         }
                     }
                 }
+            } else {
+                assert_eq!(spans.len(), 1);
             }
-            self.range_map.insert(pos * 2, len * 2);
+            self.range_map.insert(pos * 3 + 1, len * 3);
             for (ann, expand) in range_shift {
                 if expand > 0 {
                     self.range_map
-                        .expand_annotation(ann.id, 2 * expand as usize, false);
+                        .expand_annotation(ann.id, 3 * expand as usize, false);
                 } else {
                     self.range_map
-                        .expand_annotation(ann.id, 2 * (-expand as usize), true);
+                        .expand_annotation(ann.id, 3 * (-expand as usize), true);
                 }
             }
         }
@@ -278,20 +287,20 @@ impl<R: RangeMap> CrdtRange<R> {
     }
 
     pub fn delete_text(&mut self, pos: usize, len: usize) {
-        self.range_map.delete(pos * 2, len * 2);
+        self.range_map.delete(pos * 3 + 1, len * 3);
     }
 
     pub fn annotate(&mut self, annotation: Annotation, range: impl RangeBounds<usize>) -> RangeOp {
         let start = match range.start_bound() {
-            Bound::Included(x) => *x * 2 + 1,
-            Bound::Excluded(_) => unreachable!("Excluded start bound is not supported"),
-            Bound::Unbounded => unreachable!("Unbound start bound is not supported"),
+            Bound::Included(x) => *x * 3 + 2,
+            Bound::Excluded(x) => *x * 3 + 3,
+            Bound::Unbounded => 0,
         };
         assert!(annotation.range.start.type_ != AnchorType::After);
         assert!(annotation.range.start.id.is_some());
         let end = match range.end_bound() {
-            Bound::Included(x) => *x * 2 + 2,
-            Bound::Excluded(x) => *x * 2 + 1,
+            Bound::Included(x) => *x * 3 + 3,
+            Bound::Excluded(x) => *x * 3 + 2,
             Bound::Unbounded => self.range_map.len(),
         };
         self.range_map
@@ -324,37 +333,32 @@ impl<R: RangeMap> CrdtRange<R> {
                     .start
                     .id
                     .map(|x| match index(x) {
-                        Ok(x) => x * 2 + 1,
-                        Err(x) => (x * 2).max(1) - 1,
+                        Ok(x) => {
+                            if a.range.start.type_ == AnchorType::Before {
+                                x * 3 + 2
+                            } else {
+                                x * 3 + 3
+                            }
+                        }
+                        Err(x) => x * 3 + 1,
                     })
                     .unwrap_or(0);
-                let mut zero = false;
-                let mut end = a
+                let end = a
                     .range
                     .end
                     .id
                     .map(|x| match index(x) {
-                        Ok(x) => x,
-                        Err(x) => {
-                            if x == 0 {
-                                assert_eq!(start, 0);
-                                zero = true;
-                                0
+                        Ok(x) => {
+                            if a.range.end.type_ == AnchorType::Before {
+                                x * 3 + 2
                             } else {
-                                x - 1
+                                x * 3 + 3
                             }
                         }
+
+                        Err(x) => x * 3 + 1,
                     })
                     .unwrap_or(self.range_map.len());
-
-                if zero {
-                    return;
-                }
-
-                match a.range.end.type_ {
-                    AnchorType::Before => end = end * 2 + 1,
-                    AnchorType::After => end = end * 2 + 2,
-                }
 
                 self.range_map.annotate(start, end - start, a)
             }
@@ -363,51 +367,46 @@ impl<R: RangeMap> CrdtRange<R> {
 
     pub fn get_annotations(&self, range: impl RangeBounds<usize>) -> Vec<Span> {
         let start = match range.start_bound() {
-            std::ops::Bound::Included(x) => x * 2 + 1,
+            std::ops::Bound::Included(x) => x * 3 + 2,
             std::ops::Bound::Excluded(_) => unreachable!(),
-            std::ops::Bound::Unbounded => 1,
+            std::ops::Bound::Unbounded => 2,
         };
         let end = match range.end_bound() {
-            std::ops::Bound::Included(x) => x * 2 + 3,
-            std::ops::Bound::Excluded(x) => x * 2 + 1,
-            std::ops::Bound::Unbounded => self.range_map.len() - 1,
+            std::ops::Bound::Included(x) => x * 3 + 3,
+            std::ops::Bound::Excluded(x) => x * 3,
+            std::ops::Bound::Unbounded => self.range_map.len(),
         };
-        let mut text_at_even_start = true;
-        self.range_map
+
+        let mut last_index = 0;
+        let mut ans = vec![];
+        for mut span in self
+            .range_map
             .get_annotations(start, end - start)
             .into_iter()
-            .filter_map(|mut x| {
-                let mut annotations: HashMap<String, (Lamport, Vec<(Arc<Annotation>, AnnPos)>)> =
-                    HashMap::new();
-                for a in std::mem::take(&mut x.annotations) {
-                    if let Some(x) = annotations.get_mut(&a.0.type_) {
-                        if a.0.merge_method == RangeMergeRule::Inclusive {
-                            x.1.push(a);
-                        } else if a.0.lamport > x.0 {
-                            *x = (a.0.lamport, vec![a]);
-                        }
-                    } else {
-                        annotations.insert(a.0.type_.clone(), (a.0.lamport, vec![a]));
-                    }
-                }
-                x.annotations = annotations.into_values().flat_map(|x| x.1).collect();
-                let is_odd = x.len % 2 == 1;
-                if text_at_even_start {
-                    x.len = (x.len + 1) / 2;
-                } else {
-                    x.len /= 2;
-                }
-                if is_odd {
-                    text_at_even_start = !text_at_even_start;
-                }
+        {
+            let next_index = last_index + span.len;
+            let len = (next_index + 2) / 3 - (last_index + 2) / 3;
+            span.len = len;
 
-                if x.len == 0 {
-                    None
+            let mut annotations: HashMap<String, (Lamport, Vec<(Arc<Annotation>, AnnPos)>)> =
+                HashMap::new();
+            for a in std::mem::take(&mut span.annotations) {
+                if let Some(x) = annotations.get_mut(&a.0.type_) {
+                    if a.0.merge_method == RangeMergeRule::Inclusive {
+                        x.1.push(a);
+                    } else if a.0.lamport > x.0 {
+                        *x = (a.0.lamport, vec![a]);
+                    }
                 } else {
-                    Some(x)
+                    annotations.insert(a.0.type_.clone(), (a.0.lamport, vec![a]));
                 }
-            })
-            .collect()
+            }
+            span.annotations = annotations.into_values().flat_map(|x| x.1).collect();
+            ans.push(span);
+            last_index = next_index;
+        }
+
+        ans
     }
 }
 
@@ -421,6 +420,7 @@ fn patch(
     if pos.end_here && !pos.begin_here {
         let end_id = annotation.range.end.id;
         if end_id != left_id && end_id != right_id {
+            // TODO: simplify
             if let AnchorType::Before = annotation.range.end.type_ {
                 ans.push(RangeOp::Patch(Patch {
                     id: OpID {
@@ -900,7 +900,7 @@ mod test {
 
         fn check(&self) {
             assert_eq!(self.len, self.list.content.real_len());
-            assert_eq!(self.len * 2 + 2, self.range.range_map.len());
+            assert_eq!(self.len * 3 + 2, self.range.range_map.len());
             assert!(self
                 .range_ops
                 .iter()
@@ -1028,11 +1028,22 @@ mod test {
     fn test_delete_text_1() {
         let mut actor = Actor::new(0);
         actor.insert(0, 10);
-        actor.annotate(0..5, "bold");
+        //**01234**56789
+        actor.annotate(0..3, "bold");
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 7)])
+        );
+        actor.insert(2, 2);
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 5), ((vec![]), 7)])
+        );
+        //**012**6789
         actor.delete(3, 3);
         assert_eq!(
             actor.get_annotations(..),
-            make_spans(&[((vec!["bold"]), 3), ((vec![]), 4)])
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 6)])
         );
     }
 

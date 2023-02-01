@@ -361,7 +361,7 @@ pub mod dumb {
                             },
                         );
                         self.arr[index] = b;
-                        insert_span(&mut self.arr, index - 1, a);
+                        insert_span(&mut self.arr, index, a);
                         break;
                     } else {
                         let end_here = left_len == self.arr[index].len;
