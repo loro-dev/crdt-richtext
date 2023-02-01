@@ -1,18 +1,42 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{Annotation, OpID};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AnnPos {
+    pub begin_here: bool,
+    pub end_here: bool,
+}
+
+impl AnnPos {
+    pub fn merge(&mut self, other: &Self) {
+        self.begin_here = self.begin_here || other.begin_here;
+        self.end_here = self.end_here || other.end_here;
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Span {
-    pub annotations: BTreeSet<Arc<Annotation>>,
+    pub annotations: BTreeMap<Arc<Annotation>, AnnPos>,
     pub len: usize,
 }
 
 impl Span {
     pub fn new(len: usize) -> Self {
         Span {
-            annotations: BTreeSet::new(),
+            annotations: BTreeMap::new(),
             len,
+        }
+    }
+
+    pub fn update_pos(&mut self, begin: Option<bool>, end: Option<bool>) {
+        for ann in self.annotations.iter_mut() {
+            if let Some(begin) = begin {
+                ann.1.begin_here = begin;
+            }
+            if let Some(end) = end {
+                ann.1.end_here = end;
+            }
         }
     }
 }
@@ -22,7 +46,7 @@ pub trait RangeMap {
     fn insert(&mut self, pos: usize, len: usize);
     fn delete(&mut self, pos: usize, len: usize);
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
-    fn expand_annotation(&mut self, id: OpID, len: usize);
+    fn expand_annotation(&mut self, id: OpID, len: usize, reverse: bool);
     fn shrink_annotation(&mut self, id: OpID, len: usize);
     fn delete_annotation(&mut self, id: OpID);
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span>;
@@ -46,8 +70,8 @@ pub mod dumb {
 
     fn push_span(arr: &mut Vec<Span>, span: Span) {
         match arr.last_mut() {
-            Some(x) if x.annotations == span.annotations => {
-                x.len += span.len;
+            Some(x) if x.annotations.keys().eq(span.annotations.keys()) => {
+                merge_span(x, &span);
             }
             _ => arr.push(span),
         }
@@ -56,17 +80,27 @@ pub mod dumb {
     fn insert_span(arr: &mut Vec<Span>, index: usize, span: Span) {
         if index == arr.len() {
             push_span(arr, span);
-        } else if arr[index].annotations == span.annotations {
-            arr[index].len += span.len;
+        } else if arr[index].annotations.keys().eq(span.annotations.keys()) {
+            merge_span(&mut arr[index], &span);
         } else {
             arr.insert(index, span);
         }
     }
 
+    /// a and b have the same annotations
+    fn merge_span(a: &mut Span, b: &Span) {
+        for (a, b) in a.annotations.iter_mut().zip(b.annotations.iter()) {
+            a.1.merge(b.1)
+        }
+        a.len += b.len;
+    }
+
     fn split_span(span: Span, offset: usize) -> (Span, Span) {
         let mut left = span.clone();
+        left.update_pos(None, Some(false));
         left.len = offset;
         let mut right = span;
+        right.update_pos(Some(false), None);
         right.len -= offset;
         (left, right)
     }
@@ -134,16 +168,32 @@ pub mod dumb {
         fn find_annotation_last_pos(&self, id: OpID) -> Option<(usize, Arc<Annotation>)> {
             let mut annotation = None;
             let last = self.arr.iter().rev().position(|x| {
-                match x.annotations.iter().find(|x| x.id == id) {
+                match x.annotations.iter().find(|x| x.0.id == id) {
                     Some(a) => {
-                        annotation = Some(a.clone());
+                        annotation = Some(a);
                         true
                     }
                     None => false,
                 }
             });
 
-            last.map(|last| (self.arr.len() - last - 1, annotation.unwrap()))
+            last.map(|last| (self.arr.len() - last - 1, annotation.unwrap().0.clone()))
+        }
+
+        fn find_annotation_first_pos(&self, id: OpID) -> Option<(usize, Arc<Annotation>)> {
+            let mut annotation = None;
+            let first =
+                self.arr
+                    .iter()
+                    .position(|x| match x.annotations.iter().find(|x| x.0.id == id) {
+                        Some(a) => {
+                            annotation = Some(a);
+                            true
+                        }
+                        None => false,
+                    });
+
+            first.map(|first| (first, annotation.unwrap().0.clone()))
         }
     }
 
@@ -217,7 +267,13 @@ pub mod dumb {
             let clean_end = end_offset == self.arr[end_index].len;
             if start_index == end_index {
                 if clean_start && clean_end {
-                    self.arr[start_index].annotations.insert(annotation);
+                    self.arr[start_index].annotations.insert(
+                        annotation,
+                        AnnPos {
+                            end_here: true,
+                            begin_here: true,
+                        },
+                    );
                 } else {
                     let mut splitted: Vec<Span> = vec![];
                     let start_len = start_offset;
@@ -226,15 +282,27 @@ pub mod dumb {
                     if !clean_start {
                         let mut span = self.arr[start_index].clone();
                         span.len = start_len;
+                        span.update_pos(None, Some(false));
                         splitted.push(span);
                     }
                     let mut span = self.arr[start_index].clone();
+                    span.update_pos(
+                        if clean_start { None } else { Some(false) },
+                        if clean_end { None } else { Some(false) },
+                    );
                     span.len = left_len;
-                    span.annotations.insert(annotation);
+                    span.annotations.insert(
+                        annotation,
+                        AnnPos {
+                            begin_here: true,
+                            end_here: true,
+                        },
+                    );
                     splitted.push(span);
                     if !clean_end {
                         let mut span = self.arr[start_index].clone();
                         span.len = end_len;
+                        span.update_pos(Some(false), None);
                         splitted.push(span);
                     }
 
@@ -243,6 +311,8 @@ pub mod dumb {
             } else {
                 if !clean_end {
                     let mut span = self.arr[end_index].clone();
+                    span.update_pos(Some(false), None);
+                    self.arr[end_index].update_pos(None, Some(false));
                     span.len -= end_offset;
                     self.arr[end_index].len = end_offset;
                     self.arr.insert(end_index + 1, span);
@@ -250,6 +320,8 @@ pub mod dumb {
 
                 if !clean_start {
                     let mut span = self.arr[start_index].clone();
+                    span.update_pos(Some(false), None);
+                    self.arr[start_index].update_pos(None, Some(false));
                     span.len -= start_offset;
                     self.arr[start_index].len = start_offset;
                     self.arr.insert(start_index + 1, span);
@@ -258,32 +330,93 @@ pub mod dumb {
                 }
 
                 for i in start_index..=end_index {
-                    self.arr[i].annotations.insert(annotation.clone());
+                    self.arr[i].annotations.insert(
+                        annotation.clone(),
+                        AnnPos {
+                            begin_here: i == start_index,
+                            end_here: i == end_index,
+                        },
+                    );
                 }
             }
         }
 
-        fn expand_annotation(&mut self, id: OpID, len: usize) {
-            let (mut index, annotation) = self.find_annotation_last_pos(id).unwrap();
-            let mut left_len = len;
-            index += 1;
-            while left_len > 0 {
-                if self.arr[index].len > left_len {
-                    let (mut a, b) = split_span(std::mem::take(&mut self.arr[index]), left_len);
-                    a.annotations.insert(annotation);
-                    self.arr[index] = a;
-                    insert_span(&mut self.arr, index + 1, b);
-                    break;
-                } else {
-                    self.arr[index].annotations.insert(annotation.clone());
-                }
+        fn expand_annotation(&mut self, id: OpID, len: usize, reverse: bool) {
+            if len == 0 {
+                return;
+            }
 
-                left_len -= self.arr[index].len;
+            if !reverse {
+                let (mut index, annotation) = self.find_annotation_last_pos(id).unwrap();
+                let mut left_len = len;
                 index += 1;
+                while left_len > 0 {
+                    if self.arr[index].len > left_len {
+                        let (mut a, b) = split_span(std::mem::take(&mut self.arr[index]), left_len);
+                        a.annotations.insert(
+                            annotation,
+                            AnnPos {
+                                begin_here: false,
+                                end_here: true,
+                            },
+                        );
+                        self.arr[index] = a;
+                        insert_span(&mut self.arr, index + 1, b);
+                        break;
+                    } else {
+                        let end_here = left_len == self.arr[index].len;
+                        self.arr[index].annotations.insert(
+                            annotation.clone(),
+                            AnnPos {
+                                begin_here: false,
+                                end_here,
+                            },
+                        );
+                    }
+
+                    left_len -= self.arr[index].len;
+                    index += 1;
+                }
+            } else {
+                let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
+                let mut left_len = len;
+                index -= 1;
+                while left_len > 0 {
+                    if self.arr[index].len > left_len {
+                        let (mut a, b) = split_span(std::mem::take(&mut self.arr[index]), left_len);
+                        a.annotations.insert(
+                            annotation,
+                            AnnPos {
+                                begin_here: true,
+                                end_here: false,
+                            },
+                        );
+                        self.arr[index] = a;
+                        insert_span(&mut self.arr, index, b);
+                        break;
+                    } else {
+                        let begin_here = left_len == self.arr[index].len;
+                        self.arr[index].annotations.insert(
+                            annotation.clone(),
+                            AnnPos {
+                                begin_here,
+                                end_here: false,
+                            },
+                        );
+                    }
+
+                    left_len -= self.arr[index].len;
+                    index -= 1;
+                }
             }
         }
 
+        // FIXME: update pos
         fn shrink_annotation(&mut self, id: OpID, len: usize) {
+            if len == 0 {
+                return;
+            }
+
             let (mut index, _) = self.find_annotation_last_pos(id).unwrap();
             let mut left_len = len;
             while left_len > 0 {
@@ -291,12 +424,12 @@ pub mod dumb {
                     let len = self.arr[index].len;
                     let (a, mut b) =
                         split_span(std::mem::take(&mut self.arr[index]), len - left_len);
-                    b.annotations.retain(|f| f.id != id);
+                    b.annotations.retain(|f, _| f.id != id);
                     self.arr[index] = b;
                     insert_span(&mut self.arr, index, a);
                     break;
                 } else {
-                    self.arr[index].annotations.retain(|f| f.id != id);
+                    self.arr[index].annotations.retain(|f, _| f.id != id);
                 }
 
                 left_len -= self.arr[index].len;
@@ -306,7 +439,7 @@ pub mod dumb {
 
         fn delete_annotation(&mut self, id: OpID) {
             for i in 0..self.arr.len() {
-                self.arr[i].annotations.retain(|f| f.id != id);
+                self.arr[i].annotations.retain(|f, _| f.id != id);
             }
         }
 
@@ -396,15 +529,25 @@ pub mod dumb {
         fn make_spans(spans: Vec<(Vec<u64>, usize)>) -> Vec<Span> {
             let mut map = HashMap::new();
             let mut ans = Vec::new();
-            for (annotations, len) in spans {
-                let annotations = annotations
-                    .into_iter()
-                    .map(|x| {
-                        let a = map.entry(x).or_insert_with(|| Arc::new(a(x))).clone();
-                        a
-                    })
-                    .collect();
-                ans.push(Span { annotations, len });
+            for i in 0..spans.len() {
+                let (annotations, len) = &spans[i];
+                let mut new_annotations = BTreeMap::new();
+                for ann in annotations {
+                    let a = map.entry(*ann).or_insert_with(|| Arc::new(a(*ann))).clone();
+                    let start = i == 0 || spans[i - 1].0.contains(ann);
+                    let end = i == spans.len() - 1 || spans[i + 1].0.contains(ann);
+                    new_annotations.insert(
+                        a,
+                        AnnPos {
+                            begin_here: start,
+                            end_here: end,
+                        },
+                    );
+                }
+                ans.push(Span {
+                    annotations: new_annotations,
+                    len: *len,
+                });
             }
 
             ans
@@ -417,7 +560,7 @@ pub mod dumb {
                     (
                         annotations
                             .into_iter()
-                            .map(|x| x.id.client)
+                            .map(|x| x.0.id.client)
                             .collect::<Vec<_>>(),
                         *len,
                     )
@@ -442,7 +585,10 @@ pub mod dumb {
             range_map.insert(0, 10);
             range_map.annotate(0, 10, a(0));
             assert_eq!(range_map.arr.len(), 1);
-            assert_eq!(&**range_map.arr[0].annotations.first().unwrap(), &a(0));
+            assert_eq!(
+                &**range_map.arr[0].annotations.iter().next().unwrap().0,
+                &a(0)
+            );
             // 0..2..4..10
             //  1  2  1
             range_map.annotate(2, 2, a(1));
@@ -468,12 +614,21 @@ pub mod dumb {
             range_map.insert(0, 10);
             range_map.annotate(0, 2, a(0));
             assert_eq!(range_map.arr.len(), 2);
-            assert_eq!(&**range_map.arr[0].annotations.first().unwrap(), &a(0));
+            assert_eq!(
+                &**range_map.arr[0].annotations.iter().next().unwrap().0,
+                &a(0)
+            );
             range_map.annotate(6, 4, a(1));
             assert_eq!(range_map.arr.len(), 3);
-            assert_eq!(&**range_map.arr[0].annotations.first().unwrap(), &a(0));
+            assert_eq!(
+                &**range_map.arr[0].annotations.iter().next().unwrap().0,
+                &a(0)
+            );
             assert_eq!(range_map.arr[1].annotations.len(), 0);
-            assert_eq!(&**range_map.arr[2].annotations.first().unwrap(), &a(1));
+            assert_eq!(
+                &**range_map.arr[2].annotations.iter().next().unwrap().0,
+                &a(1)
+            );
         }
 
         #[test]
@@ -481,7 +636,7 @@ pub mod dumb {
             let mut range_map = DumbRangeMap::init();
             range_map.insert(0, 10);
             range_map.annotate(2, 2, a(0));
-            range_map.expand_annotation(id(0), 2);
+            range_map.expand_annotation(id(0), 2, false);
             let spans = range_map.get_annotations(0, 10);
             assert_eq!(
                 from_spans(&spans),
@@ -496,7 +651,7 @@ pub mod dumb {
                 (vec![(vec![], 2), (vec![0, 1], 4), (vec![1], 1), (vec![], 3)])
             );
 
-            range_map.expand_annotation(id(0), 2);
+            range_map.expand_annotation(id(0), 2, false);
             let spans = range_map.get_annotations(0, 10);
             assert_eq!(
                 from_spans(&spans),

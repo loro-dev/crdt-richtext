@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use range_map::{RangeMap, Span};
+use range_map::{AnnPos, RangeMap, Span};
 
 mod range_map;
 type Lamport = u32;
@@ -35,6 +35,13 @@ impl RangeOp {
         match self {
             RangeOp::Patch(x) => x.lamport,
             RangeOp::Annotate(x) => x.lamport,
+        }
+    }
+
+    fn set_lamport(&mut self, lamport: Lamport) {
+        match self {
+            RangeOp::Patch(x) => x.lamport = lamport,
+            RangeOp::Annotate(x) => x.lamport = lamport,
         }
     }
 }
@@ -141,6 +148,8 @@ pub enum RangeMergeRule {
 pub struct Patch {
     pub id: OpID,
     pub target_range_id: OpID,
+    pub move_start: bool,
+    pub move_end: bool,
     pub move_start_to: Option<OpID>,
     pub move_end_to: Option<OpID>,
     pub lamport: Lamport,
@@ -185,20 +194,86 @@ impl<R: RangeMap> CrdtRange<R> {
 
     /// `get_ops_at_pos(anchors)` returns the list of ops at `pos`.
     ///
-    /// - The first returned element is the alive element at the pos
-    /// - The rest of the elements are tombstones at the position filtered by `anchors` || is `first_new_op_id`
+    /// - The first returned element is the left alive element's op id
+    /// - The second returned element is the right alive element's op id
+    /// - The rest of the elements are tombstones/new element at the position filtered by `anchors`.
+    ///     - It should be tombstone or `first_new_op_id` (other new elements should be omitted)
+    ///
+    /// It may generate Patch only when is_local=true
+    ///
+    /// TODO: get next_id and lamport
     pub fn insert_text<F>(
         &mut self,
         pos: usize,
         len: usize,
+        is_local: bool,
         first_new_op_id: OpID,
         get_ops_at_pos: F,
     ) -> Vec<RangeOp>
     where
-        F: FnOnce(&[OpID]) -> (Option<OpID>, Vec<OpID>),
+        F: FnOnce(&[OpID]) -> (Option<OpID>, Option<OpID>, Vec<OpID>),
     {
         let mut ans = vec![];
-        self.range_map.insert(pos * 2, len * 2);
+        let spans = self.range_map.get_annotations((pos * 2).max(1) - 1, 2);
+        let (left_id, right_id, tombstones) = get_ops_at_pos(
+            &self
+                .range_map
+                .get_annotations(pos * 2, 2)
+                .iter()
+                .flat_map(|x| x.annotations.iter().map(|x| x.0.id))
+                .collect::<Vec<_>>(),
+        );
+        let insert_pos = tombstones
+            .iter()
+            .position(|x| x == &first_new_op_id)
+            .unwrap();
+
+        if is_local {
+            for span in spans {
+                for (annotation, pos) in span.annotations {
+                    patch(pos, annotation, left_id, right_id, &mut ans);
+                }
+            }
+            self.range_map.insert(pos * 2, len * 2);
+        } else {
+            let mut range_shift = Vec::new();
+            for span in spans {
+                for (annotation, pos) in span.annotations {
+                    if pos.end_here && !pos.begin_here {
+                        let end_id = annotation.range.end.id;
+                        if end_id != left_id && end_id != right_id {
+                            let ann_index =
+                                tombstones.iter().position(|x| Some(*x) == end_id).unwrap();
+                            if ann_index > insert_pos {
+                                range_shift.push((annotation, len as isize));
+                            }
+                        }
+                    } else if pos.begin_here && !pos.end_here {
+                        let start_id = annotation.range.start.id;
+                        if start_id != left_id && start_id != right_id {
+                            let ann_index = tombstones
+                                .iter()
+                                .position(|x| Some(*x) == start_id)
+                                .unwrap();
+                            if ann_index < insert_pos {
+                                range_shift.push((annotation, -(len as isize)));
+                            }
+                        }
+                    }
+                }
+            }
+            self.range_map.insert(pos * 2, len * 2);
+            for (ann, expand) in range_shift {
+                if expand > 0 {
+                    self.range_map
+                        .expand_annotation(ann.id, expand as usize, false);
+                } else {
+                    self.range_map
+                        .expand_annotation(ann.id, -expand as usize, true);
+                }
+            }
+        }
+
         ans
     }
 
@@ -229,6 +304,8 @@ impl<R: RangeMap> CrdtRange<R> {
         RangeOp::Patch(Patch {
             id: op_id,
             target_range_id: target_id,
+            move_end: true,
+            move_start: true,
             move_start_to: None,
             move_end_to: None,
             lamport,
@@ -270,17 +347,17 @@ impl<R: RangeMap> CrdtRange<R> {
             .get_annotations(start, end - start)
             .into_iter()
             .filter_map(|mut x| {
-                let mut annotations: HashMap<String, (Lamport, Vec<Arc<Annotation>>)> =
+                let mut annotations: HashMap<String, (Lamport, Vec<(Arc<Annotation>, AnnPos)>)> =
                     HashMap::new();
                 for a in std::mem::take(&mut x.annotations) {
-                    if let Some(x) = annotations.get_mut(&a.type_) {
-                        if a.merge_method == RangeMergeRule::Inclusive {
+                    if let Some(x) = annotations.get_mut(&a.0.type_) {
+                        if a.0.merge_method == RangeMergeRule::Inclusive {
                             x.1.push(a);
-                        } else if a.lamport > x.0 {
-                            *x = (a.lamport, vec![a]);
+                        } else if a.0.lamport > x.0 {
+                            *x = (a.0.lamport, vec![a]);
                         }
                     } else {
-                        annotations.insert(a.type_.clone(), (a.lamport, vec![a]));
+                        annotations.insert(a.0.type_.clone(), (a.0.lamport, vec![a]));
                     }
                 }
                 x.annotations = annotations.into_values().flat_map(|x| x.1).collect();
@@ -301,6 +378,78 @@ impl<R: RangeMap> CrdtRange<R> {
                 }
             })
             .collect()
+    }
+}
+
+fn patch(
+    pos: AnnPos,
+    annotation: Arc<Annotation>,
+    left_id: Option<OpID>,
+    right_id: Option<OpID>,
+    ans: &mut Vec<RangeOp>,
+) {
+    if pos.end_here && !pos.begin_here {
+        let end_id = annotation.range.end.id;
+        if end_id != left_id && end_id != right_id {
+            if let AnchorType::Before = annotation.range.end.type_ {
+                ans.push(RangeOp::Patch(Patch {
+                    id: OpID {
+                        client: 0,
+                        counter: 0,
+                    },
+                    lamport: 0,
+                    target_range_id: annotation.id,
+                    move_start: false,
+                    move_end: true,
+                    move_start_to: None,
+                    move_end_to: right_id,
+                }))
+            } else {
+                ans.push(RangeOp::Patch(Patch {
+                    id: OpID {
+                        client: 0,
+                        counter: 0,
+                    },
+                    lamport: 0,
+                    target_range_id: annotation.id,
+                    move_start: false,
+                    move_end: true,
+                    move_start_to: None,
+                    move_end_to: left_id,
+                }))
+            }
+        }
+    }
+    if pos.begin_here && !pos.end_here {
+        let start_id = annotation.range.start.id;
+        if start_id != left_id && start_id != right_id {
+            match annotation.range.start.type_ {
+                AnchorType::Before => ans.push(RangeOp::Patch(Patch {
+                    id: OpID {
+                        client: 0,
+                        counter: 0,
+                    },
+                    lamport: 0,
+                    target_range_id: annotation.id,
+                    move_start: true,
+                    move_end: false,
+                    move_start_to: right_id,
+                    move_end_to: None,
+                })),
+                AnchorType::After => ans.push(RangeOp::Patch(Patch {
+                    id: OpID {
+                        client: 0,
+                        counter: 0,
+                    },
+                    lamport: 0,
+                    target_range_id: annotation.id,
+                    move_start: true,
+                    move_end: false,
+                    move_start_to: right_id,
+                    move_end_to: None,
+                })),
+            }
+        }
     }
 }
 
@@ -335,10 +484,10 @@ mod test {
                     .annotations
                     .iter()
                     .filter_map(|x| {
-                        if x.merge_method == RangeMergeRule::Delete {
+                        if x.0.merge_method == RangeMergeRule::Delete {
                             None
                         } else {
-                            Some(x.type_.clone())
+                            Some(x.0.type_.clone())
                         }
                     })
                     .collect(),
@@ -405,52 +554,100 @@ mod test {
         }
 
         pub fn insert(&mut self, pos: usize, len: usize) {
-            let (list_insert_pos, op) = self._get_list_insert_op(pos);
+            let (arr_pos, op) = self._get_list_insert_op(pos);
 
-            self._range_insert(pos, len, &op, list_insert_pos);
-
-            self.integrate_insert_op(&op, false);
+            self.integrate_insert_op(&op, true);
             self.visited.insert(op.id.into());
-            self.list_ops.push(op);
+            self.list_ops.push(op.clone());
             for i in 1..len {
                 let (_, op) = self._get_list_insert_op(pos + i);
-                self.integrate_insert_op(&op, false);
+                self.integrate_insert_op(&op, true);
                 self.visited.insert(op.id.into());
                 self.list_ops.push(op);
             }
+
+            self._range_insert(pos, len, &op, arr_pos, true);
         }
 
-        fn _range_insert(&mut self, pos: usize, len: usize, op: &Op, insert_pos: usize) {
-            let mut range_ops = self.range.insert_text(pos, len, op.id.into(), |filter| {
-                let mut ans = vec![];
-                let mut index = insert_pos - 1;
-                while self
-                    .list
-                    .content
-                    .get(index)
-                    .map(|x| x.deleted)
-                    .unwrap_or(false)
-                {
-                    if index == 0 {
-                        break;
-                    }
-
-                    index -= 1;
-                }
-
-                for i in index..insert_pos {
-                    if self.list.content[i].deleted {
-                        let id: OpID = self.list.content[i].id.into();
-                        if !filter.contains(&id) {
-                            ans.push(id);
+        /// this should happen after the op is integrated to the list crdt
+        fn _range_insert(
+            &mut self,
+            text_pos: usize,
+            len: usize,
+            first_op: &Op,
+            arr_pos: usize,
+            is_local: bool,
+        ) {
+            let mut range_ops =
+                self.range
+                    .insert_text(text_pos, len, is_local, first_op.id.into(), |filter| {
+                        let mut ans = vec![];
+                        let mut next_alive_arr_index = arr_pos + len;
+                        while self
+                            .list
+                            .content
+                            .get(next_alive_arr_index)
+                            .map(|x| x.deleted)
+                            .unwrap_or(false)
+                        {
+                            next_alive_arr_index += 1;
                         }
-                    }
-                }
 
-                (self.list.content.get(index).map(|x| x.id.into()), ans)
-            });
+                        let left_op = if arr_pos != 0 {
+                            let mut last_alive_arr_index = arr_pos - 1;
+                            while self
+                                .list
+                                .content
+                                .get(last_alive_arr_index)
+                                .map(|x| x.deleted)
+                                .unwrap_or(false)
+                            {
+                                if last_alive_arr_index == 0 {
+                                    break;
+                                }
+
+                                last_alive_arr_index -= 1;
+                            }
+
+                            for i in last_alive_arr_index..arr_pos {
+                                if self.list.content[i].deleted {
+                                    let id: OpID = self.list.content[i].id.into();
+                                    if !filter.contains(&id) {
+                                        ans.push(id);
+                                    }
+                                }
+                            }
+
+                            self.list
+                                .content
+                                .get(last_alive_arr_index)
+                                .map(|x| x.id.into())
+                        } else {
+                            None
+                        };
+
+                        ans.push(self.list.content[arr_pos].id.into());
+                        for i in arr_pos + len..next_alive_arr_index {
+                            assert!(self.list.content[i].deleted);
+                            let id: OpID = self.list.content[i].id.into();
+                            if !filter.contains(&id) {
+                                ans.push(id);
+                            }
+                        }
+
+                        (
+                            left_op,
+                            self.list
+                                .content
+                                .get(next_alive_arr_index)
+                                .map(|x| x.id.into()),
+                            ans,
+                        )
+                    });
             for op in range_ops.iter_mut() {
+                dbg!(&op);
                 op.set_id(self._use_next_id());
+                op.set_lamport(self._use_next_lamport());
                 self.visited.insert(op.id());
             }
             self.range_ops.extend(range_ops);
@@ -598,9 +795,10 @@ mod test {
         }
 
         fn merge(&mut self, other: &Self) {
+            assert_ne!(self.list.id, other.list.id);
             for op in other.list_ops.iter() {
                 if !self.visited.contains(&op.id.into()) {
-                    self.integrate_insert_op(op, true);
+                    self.integrate_insert_op(op, false);
                     self.list_ops.push(op.clone());
                     self.visited.insert(op.id.into());
                 }
@@ -642,7 +840,7 @@ mod test {
             self.next_lamport = std::cmp::max(self.next_lamport, other.next_lamport);
         }
 
-        fn integrate_insert_op(&mut self, op: &Op, update_range: bool) {
+        fn integrate_insert_op(&mut self, op: &Op, is_local: bool) {
             assert!(!self.visited.contains(&op.id.into()));
             let container = &mut self.list;
             let op = op.clone();
@@ -654,9 +852,9 @@ mod test {
             yata::integrate::<YataImpl>(&mut self.list, op.clone(), &mut ());
             self.list.version_vector[id.client_id] = id.clock + 1;
             self.len += 1;
-            if update_range {
+            if !is_local {
                 let (text_index, arr_index) = index(&self.list, id.into());
-                self._range_insert(text_index, 1, &op, arr_index);
+                self._range_insert(text_index, 1, &op, arr_index, is_local);
             }
         }
 
@@ -717,12 +915,15 @@ mod test {
     fn test_insert_text_after_bold() {
         let mut actor = Actor::new(0);
         actor.insert(0, 10);
+        // **12345**67890
         actor.annotate(0..5, "bold");
         let spans = actor.get_annotations(..);
         assert_eq!(spans, make_spans(&[((vec!["bold"]), 5), ((vec![]), 5),]));
+        // **12345xx**67890
         actor.insert(5, 2);
         let spans = actor.get_annotations(..);
         assert_eq!(spans, make_spans(&[((vec!["bold"]), 7), ((vec![]), 5),]));
+        // **12345xx**6xx7890
         actor.insert(8, 2);
         let spans = actor.get_annotations(..);
         assert_eq!(spans, make_spans(&[((vec!["bold"]), 7), ((vec![]), 7),]));
@@ -769,5 +970,61 @@ mod test {
         );
         actor.un_annotate(3..6, "bold");
         assert_eq!(actor.get_annotations(..), make_spans(&[((vec![]), 10),]));
+    }
+
+    #[test]
+    fn test_delete_text_basic() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        actor.annotate(0..5, "bold");
+        actor.delete(0, 2);
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 5)])
+        );
+    }
+
+    #[test]
+    fn test_delete_text_1() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        actor.annotate(0..5, "bold");
+        actor.delete(3, 3);
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 4)])
+        );
+    }
+
+    #[test]
+    fn test_delete_text_then_insert() {
+        let mut actor = Actor::new(0);
+        let mut b = Actor::new(1);
+        actor.insert(0, 10);
+        // **ABCDE**FGHIJ
+        actor.annotate(0..5, "bold");
+        // **ABC**FGHIJ
+        actor.delete(3, 2);
+        // **ABCxx**FGHIJ
+        actor.insert(4, 2);
+        b.merge(&actor);
+        assert_eq!(
+            b.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 7)])
+        );
+    }
+
+    #[test]
+    fn test_patch() {
+        let mut a = Actor::new(0);
+        let mut b = Actor::new(1);
+        a.insert(0, 10);
+        b.merge(&a);
+        a.delete(3, 2);
+        b.annotate(0..=4, "link");
+        b.insert(4, 2);
+        a.merge(&b);
+        b.merge(&a);
+        assert_eq!(a.get_annotations(..), b.get_annotations(..));
     }
 }
