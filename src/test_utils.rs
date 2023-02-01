@@ -120,14 +120,15 @@ pub fn preprocess_action(actors: &[Actor], action: &mut Action) {
     match action {
         Action::Insert { actor, pos, len } => {
             *actor = *actor % actors.len() as u8;
-            *pos = *pos % actors[*actor as usize].len as u8;
+            *pos = (*pos as usize % (actors[*actor as usize].len + 1)) as u8;
             *len = (*len).min(10);
+            *len = (*len).max(1);
         }
         Action::Delete { actor, pos, len } => {
             *actor = *actor % actors.len() as u8;
-            *pos = *pos % actors[*actor as usize].len as u8;
+            *pos = (*pos as usize % (actors[*actor as usize].len + 1)) as u8;
             *len = (*len).min(10);
-            *len = *len % (actors[*actor as usize].len - *pos as usize) as u8;
+            *len %= (actors[*actor as usize].len.max(*pos as usize + 1) - *pos as usize) as u8;
         }
         Action::Annotate {
             actor,
@@ -136,9 +137,9 @@ pub fn preprocess_action(actors: &[Actor], action: &mut Action) {
             annotation,
         } => {
             *actor = *actor % actors.len() as u8;
-            *pos = *pos % actors[*actor as usize].len as u8;
+            *pos = (*pos as usize % (actors[*actor as usize].len + 1)) as u8;
             *len = (*len).min(10);
-            *len = *len % (actors[*actor as usize].len - *pos as usize) as u8;
+            *len %= (actors[*actor as usize].len.max(*pos as usize + 1) - *pos as usize) as u8;
         }
         Action::Sync(a, b) => {
             *a = *a % actors.len() as u8;
@@ -153,9 +154,16 @@ pub fn preprocess_action(actors: &[Actor], action: &mut Action) {
 pub fn apply_action(actors: &mut [Actor], action: Action) {
     match action {
         Action::Insert { actor, pos, len } => {
+            if len == 0 {
+                return;
+            }
             actors[actor as usize].insert(pos as usize, len as usize);
         }
         Action::Delete { actor, pos, len } => {
+            if len == 0 {
+                return;
+            }
+
             actors[actor as usize].delete(pos as usize, len as usize);
         }
         Action::Annotate {
@@ -163,25 +171,33 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
             pos,
             len,
             annotation,
-        } => match annotation {
-            AnnotationType::Link => {
-                actors[actor as usize].annotate(pos as usize..=pos as usize + len as usize, "link");
+        } => {
+            if len == 0 {
+                return;
             }
-            AnnotationType::Bold => {
-                actors[actor as usize].annotate(pos as usize..pos as usize + len as usize, "bold");
+
+            match annotation {
+                AnnotationType::Link => {
+                    actors[actor as usize]
+                        .annotate(pos as usize..=pos as usize + len as usize, "link");
+                }
+                AnnotationType::Bold => {
+                    actors[actor as usize]
+                        .annotate(pos as usize..pos as usize + len as usize, "bold");
+                }
+                AnnotationType::Comment => {
+                    // TODO:
+                }
+                AnnotationType::UnBold => {
+                    actors[actor as usize]
+                        .un_annotate(pos as usize..pos as usize + len as usize, "bold");
+                }
+                AnnotationType::UnLink => {
+                    actors[actor as usize]
+                        .un_annotate(pos as usize..=pos as usize + len as usize, "link");
+                }
             }
-            AnnotationType::Comment => {
-                // TODO:
-            }
-            AnnotationType::UnBold => {
-                actors[actor as usize]
-                    .un_annotate(pos as usize..pos as usize + len as usize, "bold");
-            }
-            AnnotationType::UnLink => {
-                actors[actor as usize]
-                    .un_annotate(pos as usize..=pos as usize + len as usize, "link");
-            }
-        },
+        }
         Action::Sync(a, b) => {
             let (a, b) = arref::array_mut_ref!(actors, [a as usize, b as usize]);
             a.merge(b);
@@ -735,4 +751,24 @@ fn madness() {
     );
     b.merge(&a);
     assert_eq!(a.get_annotations(..), b.get_annotations(..));
+}
+
+#[cfg(test)]
+mod failed_tests {
+    use super::*;
+    use Action::*;
+    use AnnotationType::*;
+
+    #[test]
+    fn fuzz() {
+        fuzzing(
+            2,
+            vec![Annotate {
+                actor: 0,
+                pos: 0,
+                len: 0,
+                annotation: UnLink,
+            }],
+        )
+    }
 }
