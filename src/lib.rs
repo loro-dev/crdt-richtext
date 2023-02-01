@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
     ops::{Bound, RangeBounds},
     sync::Arc,
 };
@@ -185,10 +186,10 @@ pub struct CrdtRange<R> {
     range_map: R,
 }
 
-impl<R: RangeMap> CrdtRange<R> {
+impl<R: RangeMap + Debug> CrdtRange<R> {
     pub fn new() -> Self {
         let mut r = R::init();
-        r.insert(0, 2);
+        r.insert(0, 2, None);
         CrdtRange { range_map: r }
     }
 
@@ -228,59 +229,137 @@ impl<R: RangeMap> CrdtRange<R> {
             .position(|x| x == &first_new_op_id)
             .unwrap();
 
-        if is_local {
-            if spans.len() == 2 {
-                for span in spans {
-                    for (annotation, pos) in span.annotations {
-                        patch(pos, annotation, left_id, right_id, &mut ans);
-                    }
-                }
-            } else {
-                assert_eq!(spans.len(), 1);
-            }
-            self.range_map.insert(pos * 3 + 1, len * 3);
-        } else {
-            let mut range_shift = Vec::new();
-            if spans.len() == 2 {
-                for span in spans {
-                    // TODO: simplify
-                    for (annotation, pos) in span.annotations {
-                        if pos.end_here && !pos.begin_here {
-                            let end_id = annotation.range.end.id;
-                            if end_id != left_id && end_id != right_id {
-                                let ann_index =
-                                    tombstones.iter().position(|x| Some(*x) == end_id).unwrap();
-                                if ann_index > insert_pos {
-                                    range_shift.push((annotation, len as isize));
-                                }
+        if spans.len() == 1 {
+            self.range_map.insert(pos * 3 + 1, len * 3, None);
+        } else if is_local {
+            for span in spans {
+                for (annotation, pos) in span.annotations {
+                    let ans: &mut Vec<RangeOp> = &mut ans;
+                    if pos.end_here && !pos.begin_here {
+                        let end_id = annotation.range.end.id;
+                        if end_id != left_id && end_id != right_id {
+                            // TODO: simplify
+                            if let AnchorType::Before = annotation.range.end.type_ {
+                                ans.push(RangeOp::Patch(Patch {
+                                    id: OpID {
+                                        client: 0,
+                                        counter: 0,
+                                    },
+                                    lamport: 0,
+                                    target_range_id: annotation.id,
+                                    move_start: false,
+                                    move_end: true,
+                                    move_start_to: None,
+                                    move_end_to: right_id,
+                                }));
+                                self.range_map.expand_annotation(annotation.id, 1, false);
+                            } else {
+                                ans.push(RangeOp::Patch(Patch {
+                                    id: OpID {
+                                        client: 0,
+                                        counter: 0,
+                                    },
+                                    lamport: 0,
+                                    target_range_id: annotation.id,
+                                    move_start: false,
+                                    move_end: true,
+                                    move_start_to: None,
+                                    move_end_to: left_id,
+                                }));
+                                self.range_map.shrink_annotation(annotation.id, 1);
                             }
-                        } else if pos.begin_here && !pos.end_here {
-                            let start_id = annotation.range.start.id;
-                            if start_id != left_id && start_id != right_id {
-                                let ann_index = tombstones
-                                    .iter()
-                                    .position(|x| Some(*x) == start_id)
-                                    .unwrap();
-                                if ann_index < insert_pos {
-                                    range_shift.push((annotation, -(len as isize)));
+                        }
+                    }
+                    if pos.begin_here && !pos.end_here {
+                        let start_id = annotation.range.start.id;
+                        if start_id != left_id && start_id != right_id {
+                            match annotation.range.start.type_ {
+                                AnchorType::Before => {
+                                    ans.push(RangeOp::Patch(Patch {
+                                        id: OpID {
+                                            client: 0,
+                                            counter: 0,
+                                        },
+                                        lamport: 0,
+                                        target_range_id: annotation.id,
+                                        move_start: true,
+                                        move_end: false,
+                                        move_start_to: right_id,
+                                        move_end_to: None,
+                                    }));
+                                    todo!()
+                                }
+                                AnchorType::After => {
+                                    ans.push(RangeOp::Patch(Patch {
+                                        id: OpID {
+                                            client: 0,
+                                            counter: 0,
+                                        },
+                                        lamport: 0,
+                                        target_range_id: annotation.id,
+                                        move_start: true,
+                                        move_end: false,
+                                        move_start_to: right_id,
+                                        move_end_to: None,
+                                    }));
+                                    self.range_map.expand_annotation(annotation.id, 1, true);
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                assert_eq!(spans.len(), 1);
             }
-            self.range_map.insert(pos * 3 + 1, len * 3);
-            for (ann, expand) in range_shift {
-                if expand > 0 {
-                    self.range_map
-                        .expand_annotation(ann.id, 3 * expand as usize, false);
-                } else {
-                    self.range_map
-                        .expand_annotation(ann.id, 3 * (-expand as usize), true);
+            self.range_map.insert(pos * 3 + 1, len * 3, None);
+        } else {
+            let mut must_have = BTreeMap::new();
+            let mut iter = spans.iter().filter(|x| x.len != 0);
+            let a = iter.next().unwrap();
+            let b = iter.next().unwrap();
+            for (ann, pos) in a.annotations.iter() {
+                if b.annotations.contains_key(ann) {
+                    must_have.insert(
+                        ann.clone(),
+                        AnnPos {
+                            begin_here: false,
+                            end_here: false,
+                        },
+                    );
                 }
             }
+
+            for span in spans.into_iter() {
+                // TODO: simplify
+                for (annotation, pos) in span.annotations {
+                    if pos.end_here && !pos.begin_here {
+                        let end_id = annotation.range.end.id;
+                        if end_id != left_id && end_id != right_id {
+                            let ann_index =
+                                tombstones.iter().position(|x| Some(*x) == end_id).unwrap();
+                            if ann_index > insert_pos {
+                                must_have.insert(
+                                    annotation,
+                                    AnnPos {
+                                        begin_here: false,
+                                        end_here: true,
+                                    },
+                                );
+                            }
+                        }
+                    } else if pos.begin_here && !pos.end_here {
+                        let start_id = annotation.range.start.id;
+                        if start_id != left_id && start_id != right_id {
+                            let ann_index = tombstones
+                                .iter()
+                                .position(|x| Some(*x) == start_id)
+                                .unwrap();
+                            if ann_index < insert_pos {
+                                must_have.remove(&annotation);
+                            }
+                        }
+                    }
+                }
+            }
+            self.range_map.insert(pos * 3 + 1, len * 3, Some(must_have));
         }
 
         ans
@@ -326,40 +405,57 @@ impl<R: RangeMap> CrdtRange<R> {
         Index: Fn(OpID) -> Result<usize, usize>,
     {
         match op {
-            RangeOp::Patch(_) => todo!(),
-            RangeOp::Annotate(a) => {
-                let start = a
-                    .range
-                    .start
-                    .id
-                    .map(|x| match index(x) {
-                        Ok(x) => {
-                            if a.range.start.type_ == AnchorType::Before {
-                                x * 3 + 2
-                            } else {
-                                x * 3 + 3
-                            }
-                        }
-                        Err(x) => x * 3 + 1,
-                    })
-                    .unwrap_or(0);
-                let end = a
-                    .range
-                    .end
-                    .id
-                    .map(|x| match index(x) {
-                        Ok(x) => {
-                            if a.range.end.type_ == AnchorType::Before {
-                                x * 3 + 2
-                            } else {
-                                x * 3 + 3
-                            }
-                        }
-
-                        Err(x) => x * 3 + 1,
-                    })
+            RangeOp::Patch(patch) => {
+                if patch.move_start {
+                    let (ann, pos) = self
+                        .range_map
+                        .get_annotation_pos(patch.target_range_id)
+                        .unwrap();
+                    let new_start = index_start(
+                        Anchor {
+                            id: patch.move_start_to,
+                            type_: ann.range.start.type_,
+                        },
+                        index,
+                    );
+                    if new_start < pos.start {
+                        self.range_map.expand_annotation(
+                            patch.target_range_id,
+                            pos.start - new_start,
+                            true,
+                        );
+                    } else {
+                        unimplemented!()
+                    }
+                }
+                if patch.move_end {
+                    let (ann, pos) = self
+                        .range_map
+                        .get_annotation_pos(patch.target_range_id)
+                        .unwrap();
+                    let new_end = index_end(
+                        Anchor {
+                            id: patch.move_end_to,
+                            type_: ann.range.end.type_,
+                        },
+                        index,
+                    )
                     .unwrap_or(self.range_map.len());
-
+                    if new_end > pos.end {
+                        self.range_map.expand_annotation(
+                            patch.target_range_id,
+                            new_end - pos.end,
+                            false,
+                        );
+                    } else {
+                        self.range_map
+                            .shrink_annotation(patch.target_range_id, pos.end - new_end);
+                    }
+                }
+            }
+            RangeOp::Annotate(a) => {
+                let start = index_start(a.range.start, index);
+                let end = index_end(a.range.end, index).unwrap_or(self.range_map.len());
                 self.range_map.annotate(start, end - start, a)
             }
         }
@@ -410,80 +506,43 @@ impl<R: RangeMap> CrdtRange<R> {
     }
 }
 
-fn patch(
-    pos: AnnPos,
-    annotation: Arc<Annotation>,
-    left_id: Option<OpID>,
-    right_id: Option<OpID>,
-    ans: &mut Vec<RangeOp>,
-) {
-    if pos.end_here && !pos.begin_here {
-        let end_id = annotation.range.end.id;
-        if end_id != left_id && end_id != right_id {
-            // TODO: simplify
-            if let AnchorType::Before = annotation.range.end.type_ {
-                ans.push(RangeOp::Patch(Patch {
-                    id: OpID {
-                        client: 0,
-                        counter: 0,
-                    },
-                    lamport: 0,
-                    target_range_id: annotation.id,
-                    move_start: false,
-                    move_end: true,
-                    move_start_to: None,
-                    move_end_to: right_id,
-                }))
-            } else {
-                ans.push(RangeOp::Patch(Patch {
-                    id: OpID {
-                        client: 0,
-                        counter: 0,
-                    },
-                    lamport: 0,
-                    target_range_id: annotation.id,
-                    move_start: false,
-                    move_end: true,
-                    move_start_to: None,
-                    move_end_to: left_id,
-                }))
+fn index_start<Index>(start: Anchor, index: &Index) -> usize
+where
+    Index: Fn(OpID) -> Result<usize, usize>,
+{
+    start
+        .id
+        .map(|x| match index(x) {
+            Ok(x) => {
+                if start.type_ == AnchorType::Before {
+                    x * 3 + 2
+                } else {
+                    x * 3 + 3
+                }
             }
-        }
-    }
-    if pos.begin_here && !pos.end_here {
-        let start_id = annotation.range.start.id;
-        if start_id != left_id && start_id != right_id {
-            match annotation.range.start.type_ {
-                AnchorType::Before => ans.push(RangeOp::Patch(Patch {
-                    id: OpID {
-                        client: 0,
-                        counter: 0,
-                    },
-                    lamport: 0,
-                    target_range_id: annotation.id,
-                    move_start: true,
-                    move_end: false,
-                    move_start_to: right_id,
-                    move_end_to: None,
-                })),
-                AnchorType::After => ans.push(RangeOp::Patch(Patch {
-                    id: OpID {
-                        client: 0,
-                        counter: 0,
-                    },
-                    lamport: 0,
-                    target_range_id: annotation.id,
-                    move_start: true,
-                    move_end: false,
-                    move_start_to: right_id,
-                    move_end_to: None,
-                })),
-            }
-        }
-    }
+            Err(x) => x * 3 + 1,
+        })
+        .unwrap_or(0)
 }
 
-impl<R: RangeMap> Default for CrdtRange<R> {
+fn index_end<Index>(end: Anchor, index: &Index) -> Option<usize>
+where
+    Index: Fn(OpID) -> Result<usize, usize>,
+{
+    end.id.map(|x| match index(x) {
+        Ok(x) => {
+            if end.type_ == AnchorType::Before {
+                x * 3 + 2
+            } else {
+                x * 3 + 3
+            }
+        }
+
+        Err(x) => x * 3 + 1,
+    })
+}
+
+impl<R: RangeMap + Debug> Default for CrdtRange<R> {
     fn default() -> Self {
         Self::new()
     }
@@ -759,6 +818,9 @@ mod test {
                 .iter()
                 .map(|x| -> SimpleSpan { x.into() })
             {
+                if span.len == 0 {
+                    continue;
+                }
                 if spans
                     .last()
                     .map(|x: &SimpleSpan| x.annotations == span.annotations)
@@ -1061,7 +1123,7 @@ mod test {
         b.merge(&actor);
         assert_eq!(
             b.get_annotations(..),
-            make_spans(&[((vec!["bold"]), 3), ((vec![]), 7)])
+            make_spans(&[(vec!["bold"], 3), (vec![], 7)])
         );
     }
 
@@ -1083,5 +1145,22 @@ mod test {
         c.merge(&a);
         a.merge(&c);
         assert_eq!(a.get_annotations(..), c.get_annotations(..));
+    }
+
+    #[test]
+    fn madness() {
+        let mut a = Actor::new(0);
+        let mut b = Actor::new(1);
+        a.insert(0, 5);
+        a.annotate(0..2, "bold");
+        a.annotate(0..=3, "link");
+        a.delete(2, 2);
+        a.insert(2, 1);
+        assert_eq!(
+            a.get_annotations(..),
+            make_spans(&[(vec!["bold", "link"], 2), (vec!["bold"], 1), (vec![], 1)])
+        );
+        b.merge(&a);
+        assert_eq!(a.get_annotations(..), b.get_annotations(..));
     }
 }

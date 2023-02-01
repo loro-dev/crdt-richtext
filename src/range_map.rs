@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::Range, sync::Arc};
 
 use crate::{Annotation, OpID};
 
@@ -43,13 +43,19 @@ impl Span {
 
 pub trait RangeMap {
     fn init() -> Self;
-    fn insert(&mut self, pos: usize, len: usize);
+    fn insert(
+        &mut self,
+        pos: usize,
+        len: usize,
+        annotations: Option<BTreeMap<Arc<Annotation>, AnnPos>>,
+    );
     fn delete(&mut self, pos: usize, len: usize);
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
     fn expand_annotation(&mut self, id: OpID, len: usize, reverse: bool);
     fn shrink_annotation(&mut self, id: OpID, len: usize);
     fn delete_annotation(&mut self, id: OpID);
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span>;
+    fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, Range<usize>)>;
     fn len(&self) -> usize;
 }
 
@@ -205,10 +211,35 @@ pub mod dumb {
             }
         }
 
-        fn insert(&mut self, pos: usize, len: usize) {
+        fn insert(
+            &mut self,
+            pos: usize,
+            len: usize,
+            annotations: Option<BTreeMap<Arc<Annotation>, AnnPos>>,
+        ) {
             let Position { index, offset } = self.find_pos(pos);
             if offset == 0 {
-                insert_span(&mut self.arr, index, Span::new(len));
+                if self.arr.is_empty() {
+                    self.arr.push(Span::new(len));
+                } else if let Some(ann) = annotations {
+                    insert_span(
+                        &mut self.arr,
+                        index,
+                        Span {
+                            annotations: ann,
+                            len,
+                        },
+                    )
+                } else {
+                    if index > 0 {
+                        assert!(self.arr[index]
+                            .annotations
+                            .keys()
+                            .eq(self.arr[index - 1].annotations.keys()));
+                    }
+
+                    self.arr[index].len += len;
+                }
             } else {
                 self.arr[index].len += len;
             }
@@ -503,6 +534,30 @@ pub mod dumb {
         fn len(&self) -> usize {
             self.len
         }
+
+        fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, Range<usize>)> {
+            let mut index = 0;
+            let mut start_index = 0;
+            let mut end_index = 0;
+            let mut found = false;
+            let mut ann = None;
+            for span in self.arr.iter() {
+                if let Some(annotation) = span.annotations.keys().find(|x| x.id == id) {
+                    if !found {
+                        start_index = index;
+                        found = true;
+                        ann = Some(annotation.clone());
+                    }
+                } else if found {
+                    end_index = index;
+                    break;
+                }
+
+                index += span.len;
+            }
+
+            ann.map(|x| (x, start_index..end_index))
+        }
     }
 
     #[cfg(test)]
@@ -588,7 +643,7 @@ pub mod dumb {
         #[test]
         fn test_insert_delete() {
             let mut range_map = DumbRangeMap::init();
-            range_map.insert(0, 10);
+            range_map.insert(0, 10, None);
             range_map.delete(0, 10);
             assert_eq!(range_map.len(), 0);
             assert!(range_map.arr.len() == 1);
@@ -599,7 +654,7 @@ pub mod dumb {
         #[test]
         fn test_annotating() {
             let mut range_map = DumbRangeMap::init();
-            range_map.insert(0, 10);
+            range_map.insert(0, 10, None);
             range_map.annotate(0, 10, a(0));
             assert_eq!(range_map.arr.len(), 1);
             assert_eq!(
@@ -628,7 +683,7 @@ pub mod dumb {
         #[test]
         fn test_annotate_inner() {
             let mut range_map = DumbRangeMap::init();
-            range_map.insert(0, 10);
+            range_map.insert(0, 10, None);
             range_map.annotate(0, 2, a(0));
             assert_eq!(range_map.arr.len(), 2);
             assert_eq!(
@@ -651,7 +706,7 @@ pub mod dumb {
         #[test]
         fn test_expand() {
             let mut range_map = DumbRangeMap::init();
-            range_map.insert(0, 10);
+            range_map.insert(0, 10, None);
             range_map.annotate(2, 2, a(0));
             range_map.expand_annotation(id(0), 2, false);
             let spans = range_map.get_annotations(0, 10);
