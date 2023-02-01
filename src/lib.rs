@@ -266,10 +266,10 @@ impl<R: RangeMap> CrdtRange<R> {
             for (ann, expand) in range_shift {
                 if expand > 0 {
                     self.range_map
-                        .expand_annotation(ann.id, expand as usize, false);
+                        .expand_annotation(ann.id, 2 * expand as usize, false);
                 } else {
                     self.range_map
-                        .expand_annotation(ann.id, -expand as usize, true);
+                        .expand_annotation(ann.id, 2 * (-expand as usize), true);
                 }
             }
         }
@@ -683,11 +683,12 @@ mod test {
                             ans,
                         )
                     });
-            for op in range_ops.iter_mut() {
-                dbg!(&op);
-                op.set_id(self._use_next_id());
-                op.set_lamport(self._use_next_lamport());
-                self.visited.insert(op.id());
+            if is_local {
+                for op in range_ops.iter_mut() {
+                    op.set_id(self._use_next_id());
+                    op.set_lamport(self._use_next_lamport());
+                    self.visited.insert(op.id());
+                }
             }
             self.range_ops.extend(range_ops);
         }
@@ -1054,20 +1055,22 @@ mod test {
     }
 
     #[test]
-    fn test_patch() {
+    fn test_patch_expand() {
         let mut a = Actor::new(0);
         let mut b = Actor::new(1);
+        let mut c = Actor::new(2);
         a.insert(0, 5);
         b.merge(&a);
         a.delete(2, 2);
         b.annotate(0..=3, "link");
         b.insert(3, 2);
+        c.merge(&b);
+        c.insert(5, 1);
         a.merge(&b);
         b.merge(&a);
         assert_eq!(a.get_annotations(..), b.get_annotations(..));
-        assert_eq!(a.range.range_map, b.range.range_map);
-        a.insert(4, 1);
-        b.merge(&a);
-        assert_eq!(a.get_annotations(..), b.get_annotations(..));
+        c.merge(&a);
+        a.merge(&c);
+        assert_eq!(a.get_annotations(..), c.get_annotations(..));
     }
 }

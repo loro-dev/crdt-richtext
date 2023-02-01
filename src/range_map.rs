@@ -360,8 +360,8 @@ pub mod dumb {
                                 end_here: true,
                             },
                         );
-                        self.arr[index] = a;
-                        insert_span(&mut self.arr, index + 1, b);
+                        self.arr[index] = b;
+                        insert_span(&mut self.arr, index - 1, a);
                         break;
                     } else {
                         let end_here = left_len == self.arr[index].len;
@@ -465,8 +465,17 @@ pub mod dumb {
 
             if start_index == end_index {
                 start.len = end_offset - start_offset;
+                start.update_pos(
+                    if start_offset > 0 { Some(false) } else { None },
+                    if end_offset != self.arr[end_index].len {
+                        Some(false)
+                    } else {
+                        None
+                    },
+                );
             } else {
                 start.len -= start_offset;
+                start.update_pos(if start_offset > 0 { Some(false) } else { None }, None);
             }
 
             push_span(&mut ans, start);
@@ -477,6 +486,14 @@ pub mod dumb {
             if end_index != start_index {
                 let mut end = self.arr[end_index].clone();
                 end.len = end_offset;
+                end.update_pos(
+                    None,
+                    if end_offset != self.arr[end_index].len {
+                        Some(false)
+                    } else {
+                        None
+                    },
+                );
                 push_span(&mut ans, end);
             }
 
