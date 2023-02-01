@@ -314,18 +314,48 @@ impl<R: RangeMap> CrdtRange<R> {
 
     pub fn apply_remote_op<Index>(&mut self, op: RangeOp, index: &Index)
     where
-        Index: Fn(OpID) -> usize,
+        Index: Fn(OpID) -> Result<usize, usize>,
     {
         match op {
             RangeOp::Patch(_) => todo!(),
             RangeOp::Annotate(a) => {
-                let start = a.range.start.id.map(index).unwrap_or(0);
-                let start = start * 2 + 1;
-                let mut end = a.range.end.id.map(index).unwrap_or(self.range_map.len());
+                let start = a
+                    .range
+                    .start
+                    .id
+                    .map(|x| match index(x) {
+                        Ok(x) => x * 2 + 1,
+                        Err(x) => (x * 2).max(1) - 1,
+                    })
+                    .unwrap_or(0);
+                let mut zero = false;
+                let mut end = a
+                    .range
+                    .end
+                    .id
+                    .map(|x| match index(x) {
+                        Ok(x) => x,
+                        Err(x) => {
+                            if x == 0 {
+                                assert_eq!(start, 0);
+                                zero = true;
+                                0
+                            } else {
+                                x - 1
+                            }
+                        }
+                    })
+                    .unwrap_or(self.range_map.len());
+
+                if zero {
+                    return;
+                }
+
                 match a.range.end.type_ {
                     AnchorType::Before => end = end * 2 + 1,
                     AnchorType::After => end = end * 2 + 2,
                 }
+
                 self.range_map.annotate(start, end - start, a)
             }
         }
@@ -516,14 +546,16 @@ mod test {
     }
 
     /// return text_index, arr_index
-    fn index(list: &Container, target_id: OpID) -> (usize, usize) {
+    fn index(list: &Container, target_id: OpID) -> (Result<usize, usize>, usize) {
         let mut text_index = 0;
         let mut arr_index = 0;
         let mut found = false;
+        let mut deleted = false;
         for op in list.content.iter() {
             let id: ListOpId = op.id;
             if OpID::from(id) == target_id {
                 found = true;
+                deleted = op.deleted;
                 break;
             }
             if !op.deleted {
@@ -536,7 +568,14 @@ mod test {
             panic!("target not found");
         }
 
-        (text_index, arr_index)
+        (
+            if deleted {
+                Err(text_index)
+            } else {
+                Ok(text_index)
+            },
+            arr_index,
+        )
     }
 
     impl Actor {
@@ -854,7 +893,7 @@ mod test {
             self.len += 1;
             if !is_local {
                 let (text_index, arr_index) = index(&self.list, id.into());
-                self._range_insert(text_index, 1, &op, arr_index, is_local);
+                self._range_insert(text_index.unwrap(), 1, &op, arr_index, is_local);
             }
         }
 
@@ -1018,11 +1057,11 @@ mod test {
     fn test_patch() {
         let mut a = Actor::new(0);
         let mut b = Actor::new(1);
-        a.insert(0, 10);
+        a.insert(0, 5);
         b.merge(&a);
-        a.delete(3, 2);
-        b.annotate(0..=4, "link");
-        b.insert(4, 2);
+        a.delete(2, 2);
+        b.annotate(0..=3, "link");
+        b.insert(3, 2);
         a.merge(&b);
         b.merge(&a);
         assert_eq!(a.get_annotations(..), b.get_annotations(..));
