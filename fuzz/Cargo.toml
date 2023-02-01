@@ -13,13 +13,14 @@ libfuzzer-sys = "0.4"
 
 [dependencies.crdt-range]
 path = ".."
+features = ["test"]
 
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
 
 [[bin]]
-name = "fuzz_target_1"
-path = "fuzz_targets/fuzz_target_1.rs"
+name = "basic"
+path = "fuzz_targets/basic.rs"
 test = false
 doc = false
