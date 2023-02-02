@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::RangeBounds};
 
 use crate::{Anchor, AnchorType};
 
@@ -185,6 +185,32 @@ impl DumbRangeMap {
             last_annotations = span.annotations.clone();
         }
     }
+
+    fn update_ann_pos(&mut self, range: Range<usize>) {
+        for i in range {
+            if i > 0 {
+                let (last, this) = arref::array_mut_ref!(&mut self.arr, [i - 1, i]);
+                for (ann, pos) in this.annotations.iter_mut() {
+                    pos.begin_here = !last.annotations.contains_key(ann);
+                }
+            } else {
+                for (_, pos) in self.arr[i].annotations.iter_mut() {
+                    pos.begin_here = true;
+                }
+            }
+
+            if i != self.arr.len() - 1 {
+                let (this, next) = arref::array_mut_ref!(&mut self.arr, [i, i + 1]);
+                for (ann, pos) in this.annotations.iter_mut() {
+                    pos.end_here = !next.annotations.contains_key(ann);
+                }
+            } else {
+                for (_, pos) in self.arr[i].annotations.iter_mut() {
+                    pos.end_here = true;
+                }
+            }
+        }
+    }
 }
 
 impl RangeMap for DumbRangeMap {
@@ -205,7 +231,6 @@ impl RangeMap for DumbRangeMap {
         let mut last = None;
         let mut next = None;
         let mut middle = None;
-        dbg!(&self.arr);
 
         if offset != 0 {
             self.arr[index].len += len;
@@ -372,6 +397,7 @@ impl RangeMap for DumbRangeMap {
             self.try_merge_empty_spans(start_index);
         }
 
+        self.update_ann_pos(start_index.saturating_sub(1)..(start_index + 2).min(self.arr.len()));
         self.len -= len;
         self.check();
     }

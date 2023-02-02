@@ -213,7 +213,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        // println!("{:?}", &action);
+        // println!("{:?},", &action);
         apply_action(&mut actors, action);
     }
 
@@ -893,6 +893,47 @@ mod test {
                         actor: 0,
                         pos: 114,
                         len: 57,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_3() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 10,
+                    },
+                    Annotate {
+                        actor: 0,
+                        pos: 1,
+                        len: 3,
+                        annotation: Link,
+                    },
+                    Annotate {
+                        actor: 0,
+                        pos: 3,
+                        len: 3,
+                        annotation: Link,
+                    },
+                    Insert {
+                        actor: 0,
+                        pos: 2,
+                        len: 10,
+                    },
+                    Insert {
+                        actor: 1,
+                        pos: 0,
+                        len: 10,
+                    },
+                    Delete {
+                        actor: 0,
+                        pos: 7,
+                        len: 10,
                     },
                 ],
             )
