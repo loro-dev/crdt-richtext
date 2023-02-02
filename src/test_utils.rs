@@ -490,7 +490,8 @@ impl Actor {
         assert_ne!(self.list.id, other.list.id);
         // insert text
         for op in other.list_ops.iter() {
-            if !self.visited.contains(&op.id.into()) {
+            let id = op.id.into();
+            if !self.visited.contains(&id) {
                 self.integrate_insert_op(op, false);
                 self.list_ops.push(op.clone());
                 self.visited.insert(op.id.into());
@@ -937,6 +938,89 @@ mod test {
                     },
                 ],
             )
+        }
+
+        #[test]
+        fn fuzz_4() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 3,
+                    },
+                    Annotate {
+                        actor: 98,
+                        pos: 0,
+                        len: 52,
+                        annotation: Bold,
+                    },
+                    Sync(251, 255),
+                    Insert {
+                        actor: 57,
+                        pos: 57,
+                        len: 57,
+                    },
+                    Insert {
+                        actor: 57,
+                        pos: 57,
+                        len: 57,
+                    },
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 255,
+                    },
+                    Delete {
+                        actor: 6,
+                        pos: 6,
+                        len: 6,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_5() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 5,
+                    },
+                    Annotate {
+                        actor: 0,
+                        pos: 1,
+                        len: 1,
+                        annotation: UnLink,
+                    },
+                    Annotate {
+                        actor: 0,
+                        pos: 2,
+                        len: 2,
+                        annotation: UnBold,
+                    },
+                    Sync(1, 0),
+                    Insert {
+                        actor: 1,
+                        pos: 3,
+                        len: 2,
+                    },
+                    Delete {
+                        actor: 0,
+                        pos: 2,
+                        len: 2,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_empty() {
+            fuzzing(2, vec![])
         }
     }
 }

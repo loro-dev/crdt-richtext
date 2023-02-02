@@ -60,6 +60,7 @@ impl Span {
 
 pub trait RangeMap {
     fn init() -> Self;
+    /// f is used to position the annotations when they ends in the insert range
     fn insert<F>(&mut self, pos: usize, len: usize, f: F)
     where
         F: FnMut(&Annotation, AnnPos, RelativeSpanPos) -> AnnPosRelativeToInsert;

@@ -317,37 +317,26 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
 
         self.range_map
             .insert(pos * 3 + 1, len * 3, |ann, pos, relative| {
-                let mut start_before_insert = true;
-                let mut end_after_insert = true;
-                if (relative == RelativeSpanPos::Middle || relative == RelativeSpanPos::After)
-                    && pos.begin_here
-                {
-                    if ann.range.start.id == right_id {
-                        start_before_insert = false;
-                    } else {
-                        start_before_insert = ann.range.start.id == left_id
-                            || ann.range.start.id.is_none()
-                            || tombstones
-                                .iter()
-                                .position(|x| x == &ann.range.start.id.unwrap())
-                                .unwrap()
-                                < insert_pos;
-                    }
+                let mut start_before_insert = relative == RelativeSpanPos::Before;
+                let mut end_after_insert = relative == RelativeSpanPos::After;
+                if !start_before_insert {
+                    start_before_insert = ann.range.start.id == left_id
+                        || ann.range.start.id.is_none()
+                        || tombstones
+                            .iter()
+                            .position(|x| x == &ann.range.start.id.unwrap())
+                            .unwrap()
+                            < insert_pos;
                 }
-                if (relative == RelativeSpanPos::Middle || relative == RelativeSpanPos::Before)
-                    && pos.end_here
-                {
-                    if ann.range.end.id == left_id {
-                        end_after_insert = false;
-                    } else {
-                        end_after_insert = ann.range.end.id == right_id
-                            || ann.range.end.id.is_none()
-                            || tombstones
-                                .iter()
-                                .position(|x| x == &ann.range.end.id.unwrap())
-                                .unwrap()
-                                > insert_pos;
-                    }
+                if !end_after_insert && pos.end_here {
+                    dbg!(&tombstones, ann.range.end.id, right_id);
+                    end_after_insert = ann.range.end.id == right_id
+                        || ann.range.end.id.is_none()
+                        || tombstones
+                            .iter()
+                            .position(|x| x == &ann.range.end.id.unwrap())
+                            .unwrap()
+                            > insert_pos;
                 }
                 match (start_before_insert, end_after_insert) {
                     (true, true) => AnnPosRelativeToInsert::IncludeInsert,

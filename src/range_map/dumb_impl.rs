@@ -1,4 +1,7 @@
-use std::{collections::HashMap, ops::RangeBounds};
+use std::{
+    collections::{BTreeSet, HashMap},
+    ops::RangeBounds,
+};
 
 use crate::{Anchor, AnchorType};
 
@@ -188,6 +191,9 @@ impl DumbRangeMap {
 
     fn update_ann_pos(&mut self, range: Range<usize>) {
         for i in range {
+            if i >= self.arr.len() {
+                continue;
+            }
             if i > 0 {
                 let (last, this) = arref::array_mut_ref!(&mut self.arr, [i - 1, i]);
                 for (ann, pos) in this.annotations.iter_mut() {
@@ -260,13 +266,38 @@ impl RangeMap for DumbRangeMap {
         }
 
         if !done {
+            let mut shared: Option<BTreeMap<_, _>> = None;
+            for a in last.iter().chain(middle.iter()).chain(last.iter()) {
+                match &mut shared {
+                    Some(shared) => shared.retain(|x, _| self.arr[*a].annotations.contains_key(x)),
+                    None => {
+                        shared = Some(self.arr[*a].annotations.clone());
+                    }
+                }
+            }
+
+            let shared = shared.unwrap();
             let mut new_insert_span = Span::new(len);
+            for (ann, _) in shared.iter() {
+                new_insert_span.annotations.insert(
+                    ann.clone(),
+                    AnnPos {
+                        begin_here: false,
+                        end_here: false,
+                    },
+                );
+            }
+
             let mut next_empty_span = Span::new(0);
             let mut use_next = false;
             // middle
             if let Some(middle) = middle {
                 let annotations = std::mem::take(&mut self.arr[middle].annotations);
                 for (ann, pos) in annotations {
+                    if shared.contains_key(&ann) {
+                        continue;
+                    }
+
                     match f(&ann, pos, RelativeSpanPos::Middle) {
                         AnnPosRelativeToInsert::EndBeforeInsert => {
                             self.arr[middle].annotations.insert(ann, pos);
@@ -311,6 +342,10 @@ impl RangeMap for DumbRangeMap {
             // left
             if let Some(last) = last {
                 for (ann, pos) in self.arr[last].annotations.iter_mut() {
+                    if shared.contains_key(ann) {
+                        continue;
+                    }
+
                     match f(ann, *pos, RelativeSpanPos::Before) {
                         AnnPosRelativeToInsert::EndBeforeInsert => {}
                         AnnPosRelativeToInsert::StartAfterInsert => unreachable!(),
@@ -340,6 +375,10 @@ impl RangeMap for DumbRangeMap {
             // right
             if let Some(next) = next {
                 for (ann, pos) in self.arr[next].annotations.iter_mut() {
+                    if shared.contains_key(ann) {
+                        continue;
+                    }
+
                     match f(ann, *pos, RelativeSpanPos::After) {
                         AnnPosRelativeToInsert::EndBeforeInsert => unreachable!(),
                         AnnPosRelativeToInsert::StartAfterInsert => {}
@@ -361,6 +400,11 @@ impl RangeMap for DumbRangeMap {
             if use_next {
                 insert_span(&mut self.arr, index + 1, next_empty_span);
             }
+
+            // TODO: Perf
+            let last = last.unwrap_or_else(|| middle.unwrap());
+            let next = next.unwrap_or_else(|| middle.unwrap()) + len;
+            self.update_ann_pos(last..next + 1);
         }
 
         self.check();
