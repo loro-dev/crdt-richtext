@@ -317,26 +317,29 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
 
         self.range_map
             .insert(pos * 3 + 1, len * 3, |ann, pos, relative| {
+                // dbg!(&tombstones, first_new_op_id, ann, relative);
                 let mut start_before_insert = relative == RelativeSpanPos::Before;
                 let mut end_after_insert = relative == RelativeSpanPos::After;
                 if !start_before_insert {
                     start_before_insert = ann.range.start.id == left_id
                         || ann.range.start.id.is_none()
+                        || !pos.begin_here
                         || tombstones
                             .iter()
                             .position(|x| x == &ann.range.start.id.unwrap())
                             .unwrap()
                             < insert_pos;
                 }
-                if !end_after_insert && pos.end_here {
-                    dbg!(&tombstones, ann.range.end.id, right_id);
+                // dbg!(start_before_insert, left_id, right_id);
+                if !end_after_insert {
                     end_after_insert = ann.range.end.id == right_id
                         || ann.range.end.id.is_none()
+                        || !pos.end_here
                         || tombstones
                             .iter()
                             .position(|x| x == &ann.range.end.id.unwrap())
                             .unwrap()
-                            > insert_pos;
+                            >= insert_pos;
                 }
                 match (start_before_insert, end_after_insert) {
                     (true, true) => AnnPosRelativeToInsert::IncludeInsert,
