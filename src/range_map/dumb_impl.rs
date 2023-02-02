@@ -158,6 +158,33 @@ impl DumbRangeMap {
 
         first.map(|first| (first, annotation.unwrap().0.clone()))
     }
+
+    fn check(&self) {
+        assert_eq!(self.len, self.arr.iter().map(|x| x.len).sum());
+
+        let mut last_annotations = BTreeMap::default();
+        for i in 0..self.arr.len() {
+            let next_annotations = self
+                .arr
+                .get(i + 1)
+                .map(|x| x.annotations.clone())
+                .unwrap_or_default();
+            let span = &self.arr[i];
+            for (ann, pos) in &span.annotations {
+                if pos.begin_here {
+                    assert!(!last_annotations.contains_key(ann));
+                } else {
+                    assert!(last_annotations.contains_key(ann));
+                }
+                if pos.end_here {
+                    assert!(!next_annotations.contains_key(ann));
+                } else {
+                    assert!(next_annotations.contains_key(ann));
+                }
+            }
+            last_annotations = span.annotations.clone();
+        }
+    }
 }
 
 impl RangeMap for DumbRangeMap {
@@ -173,197 +200,121 @@ impl RangeMap for DumbRangeMap {
         F: FnMut(&Annotation, AnnPos, RelativeSpanPos) -> AnnPosRelativeToInsert,
     {
         let Position { index, offset } = self.find_pos(pos);
-        // TODO: Refactor
-        if offset == 0 {
-            if self.arr.is_empty() {
-                self.arr.push(Span::new(len));
-            } else if index == 0 {
-                self.arr[index].len += len;
-            } else if self.arr[index - 1].len == 0 {
-                // need to decide how to distribute the annotations on span with len of 0
-                // need to decide take which annotation from the neighbor spans
-                if index == 1 {
-                    let annotations = std::mem::take(&mut self.arr[index - 1].annotations);
-                    let mut new_insert_span = Span::new(len);
-                    let mut next_empty_span = Span::new(0);
-                    let mut use_next = false;
-                    for (ann, pos) in annotations {
-                        match f(&ann, pos, RelativeSpanPos::Middle) {
-                            AnnPosRelativeToInsert::EndBeforeInsert => {
-                                self.arr[index - 1].annotations.insert(ann, pos);
-                            }
-                            AnnPosRelativeToInsert::StartAfterInsert => {
-                                use_next = true;
-                                next_empty_span.annotations.insert(ann, pos);
-                            }
-                            AnnPosRelativeToInsert::IncludeInsert => {
-                                self.arr[index - 1].annotations.insert(
-                                    ann.clone(),
-                                    AnnPos {
-                                        begin_here: true,
-                                        end_here: false,
-                                    },
-                                );
-                                new_insert_span.annotations.insert(
-                                    ann.clone(),
-                                    AnnPos {
-                                        begin_here: false,
-                                        end_here: false,
-                                    },
-                                );
-                                next_empty_span.annotations.insert(
-                                    ann,
-                                    AnnPos {
-                                        begin_here: false,
-                                        end_here: pos.end_here,
-                                    },
-                                );
-                            }
-                        }
-                    }
+        self.len += len;
+        let mut done = false;
+        let mut last = None;
+        let mut next = None;
+        let mut middle = None;
+        dbg!(&self.arr);
 
-                    for (ann, pos) in self.arr[index].annotations.iter() {
-                        match f(&ann, *pos, RelativeSpanPos::After) {
-                            AnnPosRelativeToInsert::EndBeforeInsert => unreachable!(),
-                            AnnPosRelativeToInsert::StartAfterInsert => {}
-                            AnnPosRelativeToInsert::IncludeInsert => {
-                                new_insert_span
-                                    .annotations
-                                    .entry(ann.clone())
-                                    .or_insert(AnnPos {
-                                        begin_here: true,
-                                        end_here: false,
-                                    });
-                                if use_next {
-                                    next_empty_span.annotations.entry(ann.clone()).or_insert(
-                                        AnnPos {
-                                            begin_here: false,
-                                            end_here: false,
-                                        },
-                                    );
-                                }
-                            }
-                        }
-                    }
+        if offset != 0 {
+            self.arr[index].len += len;
+            done = true;
+        } else if self.arr.is_empty() {
+            self.arr.push(Span::new(len));
+            done = true;
+        } else if index == 0 {
+            self.arr[index].len += len;
+            done = true;
+        } else if self.arr[index - 1].len == 0 {
+            // need to decide how to distribute the annotations on span with len of 0
+            // need to decide take which annotation from the neighbor spans
+            if index == 1 {
+                middle = Some(index - 1);
+                next = Some(index);
+            } else {
+                assert!(self.arr[index - 2].len > 0);
+                assert!(self.arr[index].len > 0);
+                last = Some(index - 2);
+                middle = Some(index - 1);
+                next = Some(index);
+            }
+        } else {
+            last = Some(index - 1);
+            next = Some(index);
+        }
 
-                    insert_span(&mut self.arr, index, new_insert_span);
-                    if use_next {
-                        insert_span(&mut self.arr, index + 1, next_empty_span);
-                    }
-                } else {
-                    assert!(self.arr[index - 2].len > 0);
-                    assert!(self.arr[index].len > 0);
-                    let annotations = std::mem::take(&mut self.arr[index - 1].annotations);
-                    let mut new_insert_span = Span::new(len);
-                    let mut next_empty_span = Span::new(0);
-                    let mut use_next = false;
-                    // middle
-                    for (ann, pos) in annotations {
-                        match f(&ann, pos, RelativeSpanPos::Middle) {
-                            AnnPosRelativeToInsert::EndBeforeInsert => {
-                                self.arr[index - 1].annotations.insert(ann, pos);
-                            }
-                            AnnPosRelativeToInsert::StartAfterInsert => {
-                                use_next = true;
-                                next_empty_span.annotations.insert(ann, pos);
-                            }
-                            AnnPosRelativeToInsert::IncludeInsert => {
-                                self.arr[index - 1].annotations.insert(
-                                    ann.clone(),
-                                    AnnPos {
-                                        begin_here: true,
-                                        end_here: false,
-                                    },
-                                );
-                                new_insert_span.annotations.insert(
-                                    ann.clone(),
-                                    AnnPos {
-                                        begin_here: false,
-                                        end_here: false,
-                                    },
-                                );
-                                next_empty_span.annotations.insert(
-                                    ann,
-                                    AnnPos {
-                                        begin_here: false,
-                                        end_here: pos.end_here,
-                                    },
-                                );
-                            }
+        if !done {
+            let mut new_insert_span = Span::new(len);
+            let mut next_empty_span = Span::new(0);
+            let mut use_next = false;
+            // middle
+            if let Some(middle) = middle {
+                let annotations = std::mem::take(&mut self.arr[middle].annotations);
+                for (ann, pos) in annotations {
+                    match f(&ann, pos, RelativeSpanPos::Middle) {
+                        AnnPosRelativeToInsert::EndBeforeInsert => {
+                            self.arr[middle].annotations.insert(ann, pos);
                         }
-                    }
-
-                    // left
-                    for (ann, pos) in self.arr[index - 2].annotations.iter() {
-                        match f(ann, *pos, RelativeSpanPos::Before) {
-                            AnnPosRelativeToInsert::EndBeforeInsert => {}
-                            AnnPosRelativeToInsert::StartAfterInsert => unreachable!(),
-                            AnnPosRelativeToInsert::IncludeInsert => {
-                                assert!(self.arr[index - 1].annotations.contains_key(ann));
-                                new_insert_span
-                                    .annotations
-                                    .entry(ann.clone())
-                                    .or_insert(AnnPos {
-                                        begin_here: true,
-                                        end_here: false,
-                                    });
-                            }
+                        AnnPosRelativeToInsert::StartAfterInsert => {
+                            use_next = true;
+                            next_empty_span.annotations.insert(ann, pos);
                         }
-                    }
-
-                    // right
-                    for (ann, pos) in self.arr[index].annotations.iter() {
-                        match f(ann, *pos, RelativeSpanPos::After) {
-                            AnnPosRelativeToInsert::EndBeforeInsert => unreachable!(),
-                            AnnPosRelativeToInsert::StartAfterInsert => {}
-                            AnnPosRelativeToInsert::IncludeInsert => {
-                                new_insert_span
-                                    .annotations
-                                    .entry(ann.clone())
-                                    .or_insert(AnnPos {
-                                        begin_here: true,
-                                        end_here: false,
-                                    });
-                                if use_next {
-                                    next_empty_span.annotations.entry(ann.clone()).or_insert(
-                                        AnnPos {
-                                            begin_here: false,
-                                            end_here: false,
-                                        },
-                                    );
-                                }
-                            }
+                        AnnPosRelativeToInsert::IncludeInsert => {
+                            self.arr[middle].annotations.insert(
+                                ann.clone(),
+                                AnnPos {
+                                    begin_here: pos.begin_here,
+                                    end_here: false,
+                                },
+                            );
+                            new_insert_span.annotations.insert(
+                                ann.clone(),
+                                AnnPos {
+                                    begin_here: false,
+                                    end_here: true,
+                                },
+                            );
+                            next_empty_span.annotations.insert(
+                                ann,
+                                AnnPos {
+                                    begin_here: false,
+                                    end_here: pos.end_here,
+                                },
+                            );
                         }
-                    }
-
-                    insert_span(&mut self.arr, index, new_insert_span);
-                    if use_next {
-                        insert_span(&mut self.arr, index + 1, next_empty_span);
                     }
                 }
-            } else {
-                // need to decide take which annotation from the neighbor spans
-                let mut new_insert_span = Span::new(len);
-                // left
-                for (ann, pos) in self.arr[index - 1].annotations.iter() {
+
+                if use_next {
+                    for (_, pos) in new_insert_span.annotations.iter_mut() {
+                        pos.end_here = false;
+                    }
+                }
+            }
+
+            // left
+            if let Some(last) = last {
+                for (ann, pos) in self.arr[last].annotations.iter_mut() {
                     match f(ann, *pos, RelativeSpanPos::Before) {
                         AnnPosRelativeToInsert::EndBeforeInsert => {}
                         AnnPosRelativeToInsert::StartAfterInsert => unreachable!(),
                         AnnPosRelativeToInsert::IncludeInsert => {
-                            assert!(self.arr[index - 1].annotations.contains_key(ann));
                             new_insert_span
                                 .annotations
                                 .entry(ann.clone())
                                 .or_insert(AnnPos {
-                                    begin_here: true,
-                                    end_here: false,
+                                    begin_here: false,
+                                    end_here: if use_next { false } else { pos.end_here },
                                 });
+                            if use_next {
+                                next_empty_span
+                                    .annotations
+                                    .entry(ann.clone())
+                                    .or_insert(AnnPos {
+                                        begin_here: false,
+                                        end_here: pos.end_here,
+                                    });
+                            }
+                            pos.end_here = false;
                         }
                     }
                 }
+            }
 
-                // right
-                for (ann, pos) in self.arr[index].annotations.iter() {
+            // right
+            if let Some(next) = next {
+                for (ann, pos) in self.arr[next].annotations.iter_mut() {
                     match f(ann, *pos, RelativeSpanPos::After) {
                         AnnPosRelativeToInsert::EndBeforeInsert => unreachable!(),
                         AnnPosRelativeToInsert::StartAfterInsert => {}
@@ -372,23 +323,26 @@ impl RangeMap for DumbRangeMap {
                                 .annotations
                                 .entry(ann.clone())
                                 .or_insert(AnnPos {
-                                    begin_here: true,
+                                    begin_here: pos.begin_here,
                                     end_here: false,
                                 });
+                            pos.begin_here = false;
                         }
                     }
                 }
-
-                insert_span(&mut self.arr, index, new_insert_span);
             }
-        } else {
-            self.arr[index].len += len;
+
+            insert_span(&mut self.arr, index, new_insert_span);
+            if use_next {
+                insert_span(&mut self.arr, index + 1, next_empty_span);
+            }
         }
 
-        self.len += len;
+        self.check();
     }
 
     fn delete(&mut self, pos: usize, len: usize) {
+        self.check();
         let Position {
             mut index,
             mut offset,
@@ -419,9 +373,11 @@ impl RangeMap for DumbRangeMap {
         }
 
         self.len -= len;
+        self.check();
     }
 
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation) {
+        self.check();
         let Position {
             index: mut start_index,
             offset: start_offset,
@@ -512,6 +468,7 @@ impl RangeMap for DumbRangeMap {
                 );
             }
         }
+        self.check();
     }
 
     fn delete_annotation(&mut self, id: OpID) {
@@ -607,6 +564,7 @@ impl RangeMap for DumbRangeMap {
 
     // TODO: Refactor
     fn adjust_annotation(&mut self, id: OpID, start: Option<isize>, end: Option<isize>) {
+        self.check();
         if let Some(end) = end {
             match end.cmp(&0) {
                 std::cmp::Ordering::Equal => {}
@@ -614,6 +572,11 @@ impl RangeMap for DumbRangeMap {
                     // move end forward, expand
                     let (mut index, annotation) = self.find_annotation_last_pos(id).unwrap();
                     let mut left_len = end as usize;
+                    self.arr[index]
+                        .annotations
+                        .get_mut(&annotation)
+                        .unwrap()
+                        .end_here = false;
                     index += 1;
                     while left_len > 0 {
                         if self.arr[index].len > left_len {
@@ -656,95 +619,118 @@ impl RangeMap for DumbRangeMap {
                     while left_len > 0 {
                         if self.arr[index].len > left_len {
                             let len = self.arr[index].len;
-                            let (a, mut b) =
+                            let (mut a, mut b) =
                                 split_span(std::mem::take(&mut self.arr[index]), len - left_len);
                             b.annotations.retain(|f, _| f.id != id);
+                            for (ann, pos) in a.annotations.iter_mut() {
+                                if ann.id == id {
+                                    pos.end_here = true;
+                                }
+                            }
                             self.arr[index] = b;
                             insert_span(&mut self.arr, index, a);
                             break;
                         } else {
                             self.arr[index].annotations.retain(|f, _| f.id != id);
+                            if left_len == self.arr[index].len {
+                                if let Some((index, annotation)) =
+                                    self.find_annotation_first_pos(id)
+                                {
+                                    if let Some(span) = self.arr.get_mut(index - 1) {
+                                        if let Some(pos) = span.annotations.get_mut(&annotation) {
+                                            pos.end_here = true;
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         left_len -= self.arr[index].len;
                         index -= 1;
                     }
-
-                    if let Some((index, annotation)) = self.find_annotation_first_pos(id) {
-                        if let Some(span) = self.arr.get_mut(index - 1) {
-                            if let Some(pos) = span.annotations.get_mut(&annotation) {
-                                pos.end_here = true;
-                            }
-                        }
-                    }
                 }
             }
         }
         if let Some(start) = start {
-            if start == 0 {
-                // ignore
-            } else if start > 0 {
-                // move start forward, shrink
-                let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
-                let mut left_len = start as usize;
-                while left_len > 0 {
-                    if self.arr[index].len > left_len {
-                        let (mut a, b) = split_span(std::mem::take(&mut self.arr[index]), left_len);
-                        a.annotations.retain(|f, _| f.id != id);
-                        self.arr[index] = b;
-                        insert_span(&mut self.arr, index, a);
-                        break;
-                    } else {
-                        self.arr[index].annotations.retain(|f, _| f.id != id);
-                    }
+            match start.cmp(&0) {
+                std::cmp::Ordering::Equal => {}
+                std::cmp::Ordering::Greater => {
+                    // move start forward, shrink
+                    let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
+                    let mut left_len = start as usize;
+                    while left_len > 0 {
+                        if self.arr[index].len > left_len {
+                            let (mut a, mut b) =
+                                split_span(std::mem::take(&mut self.arr[index]), left_len);
+                            a.annotations.retain(|f, _| f.id != id);
+                            for (ann, pos) in b.annotations.iter_mut() {
+                                if ann.id == id {
+                                    pos.begin_here = true;
+                                }
+                            }
+                            self.arr[index] = b;
+                            insert_span(&mut self.arr, index, a);
+                            break;
+                        } else {
+                            self.arr[index].annotations.retain(|f, _| f.id != id);
+                            if left_len == self.arr[index].len {
+                                if let Some(span) = self.arr.get_mut(index + 1) {
+                                    if let Some(pos) = span.annotations.get_mut(&annotation) {
+                                        pos.begin_here = true;
+                                    }
+                                }
+                            }
+                        }
 
-                    left_len -= self.arr[index].len;
-                    index += 1;
-                }
-                if let Some(span) = self.arr.get_mut(index + 1) {
-                    if let Some(pos) = span.annotations.get_mut(&annotation) {
-                        pos.begin_here = true;
+                        left_len -= self.arr[index].len;
+                        index += 1;
                     }
                 }
-            } else {
-                // move start backward, expand
-                let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
-                let mut left_len = (-start) as usize;
-                index -= 1;
-                while left_len > 0 {
-                    if self.arr[index].len > left_len {
-                        let (mut a, b) = split_span(std::mem::take(&mut self.arr[index]), left_len);
-                        a.annotations.insert(
-                            annotation,
-                            AnnPos {
-                                begin_here: true,
-                                end_here: false,
-                            },
-                        );
-                        self.arr[index] = a;
-                        insert_span(&mut self.arr, index, b);
-                        break;
-                    } else {
-                        let begin_here = left_len == self.arr[index].len;
-                        self.arr[index].annotations.insert(
-                            annotation.clone(),
-                            AnnPos {
-                                begin_here,
-                                end_here: false,
-                            },
-                        );
-                    }
+                std::cmp::Ordering::Less => {
+                    // move start backward, expand
+                    let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
+                    let mut left_len = (-start) as usize;
+                    self.arr[index]
+                        .annotations
+                        .get_mut(&annotation)
+                        .unwrap()
+                        .begin_here = false;
 
-                    left_len -= self.arr[index].len;
                     index -= 1;
+                    while left_len > 0 {
+                        if self.arr[index].len > left_len {
+                            let (mut a, b) =
+                                split_span(std::mem::take(&mut self.arr[index]), left_len);
+                            a.annotations.insert(
+                                annotation,
+                                AnnPos {
+                                    begin_here: true,
+                                    end_here: false,
+                                },
+                            );
+                            self.arr[index] = a;
+                            insert_span(&mut self.arr, index, b);
+                            break;
+                        } else {
+                            let begin_here = left_len == self.arr[index].len;
+                            self.arr[index].annotations.insert(
+                                annotation.clone(),
+                                AnnPos {
+                                    begin_here,
+                                    end_here: false,
+                                },
+                            );
+                        }
+
+                        left_len -= self.arr[index].len;
+                        index -= 1;
+                    }
                 }
             }
         }
-    }
-}
 
-fn check(r: &DumbRangeMap) {
-    assert_eq!(r.len, r.arr.iter().map(|x| x.len).sum())
+        self.check();
+    }
 }
 
 fn id(k: u64) -> OpID {
@@ -829,7 +815,7 @@ mod test {
         assert_eq!(range_map.len(), 0);
         assert!(range_map.arr.len() == 1);
         assert!(range_map.arr[0].len == 0);
-        check(&range_map);
+        range_map.check();
     }
 
     #[test]
@@ -858,7 +844,7 @@ mod test {
         assert_eq!(range_map.arr[2].annotations.len(), 3);
         assert_eq!(range_map.arr[3].annotations.len(), 2);
         assert_eq!(range_map.arr[4].annotations.len(), 1);
-        check(&range_map);
+        range_map.check();
     }
 
     #[test]
@@ -911,6 +897,6 @@ mod test {
             (vec![(vec![], 2), (vec![0, 1], 5), (vec![0], 1), (vec![], 2)])
         );
 
-        check(&range_map);
+        range_map.check();
     }
 }

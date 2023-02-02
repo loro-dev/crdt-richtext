@@ -861,5 +861,41 @@ mod test {
                 ],
             )
         }
+
+        #[test]
+        fn fuzz_2() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 188,
+                        pos: 128,
+                        len: 4,
+                    },
+                    Annotate {
+                        actor: 4,
+                        pos: 205,
+                        len: 1,
+                        annotation: UnLink,
+                    },
+                    Sync(255, 255),
+                    Insert {
+                        actor: 0,
+                        pos: 16,
+                        len: 5,
+                    },
+                    Delete {
+                        actor: 125,
+                        pos: 125,
+                        len: 125,
+                    },
+                    Insert {
+                        actor: 0,
+                        pos: 114,
+                        len: 57,
+                    },
+                ],
+            )
+        }
     }
 }
