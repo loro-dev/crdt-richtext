@@ -12,116 +12,17 @@ type Lamport = u32;
 type ClientID = u64;
 type Counter = u32;
 
+// TODO: make it generic?
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OpID {
+    client: ClientID,
+    counter: Counter,
+}
+
 #[derive(Debug, Clone)]
 pub enum RangeOp {
     Patch(Patch),
     Annotate(Annotation),
-}
-impl RangeOp {
-    fn id(&self) -> OpID {
-        match self {
-            RangeOp::Patch(x) => x.id,
-            RangeOp::Annotate(x) => x.id,
-        }
-    }
-
-    fn set_id(&mut self, id: OpID) {
-        match self {
-            RangeOp::Patch(x) => x.id = id,
-            RangeOp::Annotate(x) => x.id = id,
-        }
-    }
-
-    fn lamport(&self) -> Lamport {
-        match self {
-            RangeOp::Patch(x) => x.lamport,
-            RangeOp::Annotate(x) => x.lamport,
-        }
-    }
-
-    fn set_lamport(&mut self, lamport: Lamport) {
-        match self {
-            RangeOp::Patch(x) => x.lamport = lamport,
-            RangeOp::Annotate(x) => x.lamport = lamport,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Anchor {
-    /// if id is None, it means the anchor is at the beginning or the end of the document
-    pub id: Option<OpID>,
-    pub type_: AnchorType,
-}
-
-impl Anchor {
-    pub fn before(id: OpID) -> Self {
-        Self {
-            id: Some(id),
-            type_: AnchorType::Before,
-        }
-    }
-
-    pub fn after(id: OpID) -> Self {
-        Self {
-            id: Some(id),
-            type_: AnchorType::After,
-        }
-    }
-
-    pub fn before_none() -> Self {
-        Self {
-            id: None,
-            type_: AnchorType::Before,
-        }
-    }
-
-    pub fn after_none() -> Self {
-        Self {
-            id: None,
-            type_: AnchorType::After,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
-pub struct AnchorRange {
-    pub start: Anchor,
-    pub end: Anchor,
-}
-
-impl<T: RangeBounds<OpID>> From<T> for AnchorRange {
-    fn from(range: T) -> Self {
-        let start = match range.start_bound() {
-            Bound::Included(x) => Anchor {
-                id: Some(*x),
-                type_: AnchorType::Before,
-            },
-            Bound::Excluded(x) => Anchor {
-                id: Some(*x),
-                type_: AnchorType::After,
-            },
-            Bound::Unbounded => Anchor {
-                id: None,
-                type_: AnchorType::After,
-            },
-        };
-        let end = match range.end_bound() {
-            Bound::Included(x) => Anchor {
-                id: Some(*x),
-                type_: AnchorType::After,
-            },
-            Bound::Excluded(x) => Anchor {
-                id: Some(*x),
-                type_: AnchorType::Before,
-            },
-            Bound::Unbounded => Anchor {
-                id: None,
-                type_: AnchorType::Before,
-            },
-        };
-        Self { start, end }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -168,11 +69,111 @@ pub struct Annotation {
     pub meta: Option<Vec<u8>>,
 }
 
-// TODO: make it generic?
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OpID {
-    client: ClientID,
-    counter: Counter,
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
+pub struct AnchorRange {
+    pub start: Anchor,
+    pub end: Anchor,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Anchor {
+    /// if id is None, it means the anchor is at the beginning or the end of the document
+    pub id: Option<OpID>,
+    pub type_: AnchorType,
+}
+
+impl RangeOp {
+    fn id(&self) -> OpID {
+        match self {
+            RangeOp::Patch(x) => x.id,
+            RangeOp::Annotate(x) => x.id,
+        }
+    }
+
+    fn set_id(&mut self, id: OpID) {
+        match self {
+            RangeOp::Patch(x) => x.id = id,
+            RangeOp::Annotate(x) => x.id = id,
+        }
+    }
+
+    fn lamport(&self) -> Lamport {
+        match self {
+            RangeOp::Patch(x) => x.lamport,
+            RangeOp::Annotate(x) => x.lamport,
+        }
+    }
+
+    fn set_lamport(&mut self, lamport: Lamport) {
+        match self {
+            RangeOp::Patch(x) => x.lamport = lamport,
+            RangeOp::Annotate(x) => x.lamport = lamport,
+        }
+    }
+}
+
+impl Anchor {
+    pub fn before(id: OpID) -> Self {
+        Self {
+            id: Some(id),
+            type_: AnchorType::Before,
+        }
+    }
+
+    pub fn after(id: OpID) -> Self {
+        Self {
+            id: Some(id),
+            type_: AnchorType::After,
+        }
+    }
+
+    pub fn before_none() -> Self {
+        Self {
+            id: None,
+            type_: AnchorType::Before,
+        }
+    }
+
+    pub fn after_none() -> Self {
+        Self {
+            id: None,
+            type_: AnchorType::After,
+        }
+    }
+}
+
+impl<T: RangeBounds<OpID>> From<T> for AnchorRange {
+    fn from(range: T) -> Self {
+        let start = match range.start_bound() {
+            Bound::Included(x) => Anchor {
+                id: Some(*x),
+                type_: AnchorType::Before,
+            },
+            Bound::Excluded(x) => Anchor {
+                id: Some(*x),
+                type_: AnchorType::After,
+            },
+            Bound::Unbounded => Anchor {
+                id: None,
+                type_: AnchorType::After,
+            },
+        };
+        let end = match range.end_bound() {
+            Bound::Included(x) => Anchor {
+                id: Some(*x),
+                type_: AnchorType::After,
+            },
+            Bound::Excluded(x) => Anchor {
+                id: Some(*x),
+                type_: AnchorType::Before,
+            },
+            Bound::Unbounded => Anchor {
+                id: None,
+                type_: AnchorType::Before,
+            },
+        };
+        Self { start, end }
+    }
 }
 
 impl OpID {
@@ -229,7 +230,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             .position(|x| x == &first_new_op_id)
             .unwrap();
 
-        if is_local {
+        if is_local && spans.len() > 1 {
+            assert!(spans.iter().filter(|x| x.len == 0).count() <= 2);
             for span in spans {
                 for (annotation, pos) in span.annotations {
                     let ans: &mut Vec<RangeOp> = &mut ans;
@@ -250,7 +252,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                                     move_start_to: None,
                                     move_end_to: right_id,
                                 }));
-                                self.range_map.expand_annotation(annotation.id, 1, false);
+                                self.range_map
+                                    .adjust_annotation(annotation.id, None, Some(1));
                             } else {
                                 ans.push(RangeOp::Patch(Patch {
                                     id: OpID {
@@ -264,7 +267,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                                     move_start_to: None,
                                     move_end_to: left_id,
                                 }));
-                                self.range_map.shrink_annotation(annotation.id, 1);
+                                self.range_map
+                                    .adjust_annotation(annotation.id, None, Some(-1));
                             }
                         }
                     }
@@ -285,7 +289,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                                         move_start_to: right_id,
                                         move_end_to: None,
                                     }));
-                                    todo!()
+                                    self.range_map
+                                        .adjust_annotation(annotation.id, Some(1), None);
                                 }
                                 AnchorType::After => {
                                     ans.push(RangeOp::Patch(Patch {
@@ -300,7 +305,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                                         move_start_to: right_id,
                                         move_end_to: None,
                                     }));
-                                    self.range_map.expand_annotation(annotation.id, 1, true);
+                                    self.range_map
+                                        .adjust_annotation(annotation.id, Some(-1), None);
                                 }
                             }
                         }
@@ -407,15 +413,11 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                         },
                         index,
                     );
-                    if new_start < pos.start {
-                        self.range_map.expand_annotation(
-                            patch.target_range_id,
-                            pos.start - new_start,
-                            true,
-                        );
-                    } else {
-                        unimplemented!()
-                    }
+                    self.range_map.adjust_annotation(
+                        patch.target_range_id,
+                        Some(new_start as isize - pos.start as isize),
+                        None,
+                    );
                 }
                 if patch.move_end {
                     let (ann, pos) = self
@@ -430,16 +432,11 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                         index,
                     )
                     .unwrap_or(self.range_map.len());
-                    if new_end > pos.end {
-                        self.range_map.expand_annotation(
-                            patch.target_range_id,
-                            new_end - pos.end,
-                            false,
-                        );
-                    } else {
-                        self.range_map
-                            .shrink_annotation(patch.target_range_id, pos.end - new_end);
-                    }
+                    self.range_map.adjust_annotation(
+                        patch.target_range_id,
+                        None,
+                        Some(new_end as isize - pos.end as isize),
+                    );
                 }
             }
             RangeOp::Annotate(a) => {

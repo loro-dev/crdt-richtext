@@ -68,8 +68,7 @@ pub trait RangeMap {
     }
     fn delete(&mut self, pos: usize, len: usize);
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
-    fn expand_annotation(&mut self, id: OpID, len: usize, reverse: bool);
-    fn shrink_annotation(&mut self, id: OpID, len: usize);
+    fn adjust_annotation(&mut self, id: OpID, start_shift: Option<isize>, end_shift: Option<isize>);
     fn delete_annotation(&mut self, id: OpID);
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span>;
     fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, Range<usize>)>;

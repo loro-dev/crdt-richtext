@@ -179,7 +179,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
             match annotation {
                 AnnotationType::Link => {
                     actors[actor as usize]
-                        .annotate(pos as usize..=pos as usize + len as usize, "link");
+                        .annotate(pos as usize..=pos as usize + len as usize - 1, "link");
                 }
                 AnnotationType::Bold => {
                     actors[actor as usize]
@@ -213,7 +213,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        println!("{:?}", &action);
+        // println!("{:?}", &action);
         apply_action(&mut actors, action);
     }
 
@@ -488,6 +488,7 @@ impl Actor {
 
     fn merge(&mut self, other: &Self) {
         assert_ne!(self.list.id, other.list.id);
+        // insert text
         for op in other.list_ops.iter() {
             if !self.visited.contains(&op.id.into()) {
                 self.integrate_insert_op(op, false);
@@ -496,15 +497,7 @@ impl Actor {
             }
         }
 
-        for op in other.range_ops.iter() {
-            if !self.visited.contains(&op.id()) {
-                self.range
-                    .apply_remote_op(op.clone(), &|x| index(&self.list, x).0);
-                self.range_ops.push(op.clone());
-                self.visited.insert(op.id());
-            }
-        }
-
+        // delete text
         let mut new_deleted: HashSet<ListOpId> = HashSet::new();
         for id in other.deleted.iter() {
             if !self.deleted.contains(id) {
@@ -514,21 +507,31 @@ impl Actor {
             }
         }
 
-        {
-            let container = &mut self.list;
-            let mut deleted_text = vec![];
-            for (text_index, op) in container.content.iter_real_mut().enumerate() {
-                if new_deleted.contains(&op.id) {
-                    op.deleted = true;
-                    deleted_text.push(text_index);
-                }
+        let container = &mut self.list;
+        let mut deleted_text = vec![];
+        for (text_index, op) in container.content.iter_real_mut().enumerate() {
+            if new_deleted.contains(&op.id) {
+                op.deleted = true;
+                deleted_text.push(text_index);
             }
+        }
 
-            for index in deleted_text.iter().rev() {
-                self.range.delete_text(*index, 1);
+        for index in deleted_text.iter().rev() {
+            // TODO: connect continuous deletes
+            self.range.delete_text(*index, 1);
+        }
+
+        // annotation
+        for op in other.range_ops.iter() {
+            if !self.visited.contains(&op.id()) {
+                self.range
+                    .apply_remote_op(op.clone(), &|x| index(&self.list, x).0);
+                self.range_ops.push(op.clone());
+                self.visited.insert(op.id());
             }
-        };
+        }
 
+        // lamport
         self.next_lamport = std::cmp::max(self.next_lamport, other.next_lamport);
     }
 
@@ -765,6 +768,34 @@ mod test {
         assert_eq!(a.get_annotations(..), b.get_annotations(..));
     }
 
+    #[test]
+    fn weird_link() {
+        let mut a = Actor::new(0);
+        a.insert(0, 10);
+        a.annotate(3..=6, "link");
+        // 012<3456>789
+        assert_eq!(
+            a.get_annotations(..),
+            make_spans(&[(vec![], 3), (vec!["link"], 4), (vec![], 3)])
+        );
+        a.delete(3, 3);
+        // 012<6>789
+        assert_eq!(
+            a.get_annotations(..),
+            make_spans(&[(vec![], 3), (vec!["link"], 1), (vec![], 3)])
+        );
+        // 012<6>789
+        a.insert(3, 1);
+        // 012x<6>789
+        assert_eq!(
+            a.get_annotations(..),
+            make_spans(&[(vec![], 4), (vec!["link"], 1), (vec![], 3)])
+        );
+        let mut b = Actor::new(1);
+        b.merge(&a);
+        assert_eq!(a.get_annotations(..), b.get_annotations(..));
+    }
+
     #[cfg(test)]
     mod failed_tests {
         use super::*;
@@ -796,6 +827,36 @@ mod test {
                         actor: 190,
                         pos: 190,
                         len: 190,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_1() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 10,
+                    },
+                    Annotate {
+                        actor: 0,
+                        pos: 3,
+                        len: 4,
+                        annotation: Link,
+                    },
+                    Delete {
+                        actor: 0,
+                        pos: 0,
+                        len: 6,
+                    },
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 1,
                     },
                 ],
             )
