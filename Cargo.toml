@@ -17,3 +17,5 @@ test = ["crdt-list", "rand", "arbitrary"]
 
 [dev-dependencies]
 arbtest = "0.2.0"
+color-backtrace = "0.5.1"
+ctor = "0.1.26"

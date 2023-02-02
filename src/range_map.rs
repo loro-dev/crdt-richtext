@@ -2,10 +2,27 @@ use std::{collections::BTreeMap, ops::Range, sync::Arc};
 
 use crate::{Annotation, OpID};
 
+/// the position of annotation relative to its owner span
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AnnPos {
     pub begin_here: bool,
     pub end_here: bool,
+}
+
+/// the position of span relative to a new insert
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelativeSpanPos {
+    Before,
+    Middle,
+    After,
+}
+
+/// the position of annotation relative to a new insert
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnPosRelativeToInsert {
+    EndBeforeInsert,
+    StartAfterInsert,
+    IncludeInsert,
 }
 
 impl AnnPos {
@@ -43,12 +60,12 @@ impl Span {
 
 pub trait RangeMap {
     fn init() -> Self;
-    fn insert(
-        &mut self,
-        pos: usize,
-        len: usize,
-        annotations: Option<BTreeMap<Arc<Annotation>, AnnPos>>,
-    );
+    fn insert<F>(&mut self, pos: usize, len: usize, f: F)
+    where
+        F: FnMut(&Annotation, AnnPos, RelativeSpanPos) -> AnnPosRelativeToInsert;
+    fn insert_directly(&mut self, pos: usize, len: usize) {
+        self.insert(pos, len, |_, _, _| AnnPosRelativeToInsert::IncludeInsert);
+    }
     fn delete(&mut self, pos: usize, len: usize);
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
     fn expand_annotation(&mut self, id: OpID, len: usize, reverse: bool);
@@ -60,4 +77,4 @@ pub trait RangeMap {
 }
 
 #[cfg(feature = "test")]
-pub mod test;
+pub mod dumb_impl;

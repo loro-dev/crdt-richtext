@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use range_map::{AnnPos, RangeMap, Span};
+use range_map::{AnnPos, AnnPosRelativeToInsert, RangeMap, RelativeSpanPos, Span};
 
 mod range_map;
 type Lamport = u32;
@@ -189,7 +189,7 @@ pub struct CrdtRange<R> {
 impl<R: RangeMap + Debug> CrdtRange<R> {
     pub fn new() -> Self {
         let mut r = R::init();
-        r.insert(0, 2, None);
+        r.insert_directly(0, 2);
         CrdtRange { range_map: r }
     }
 
@@ -229,9 +229,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             .position(|x| x == &first_new_op_id)
             .unwrap();
 
-        if spans.len() == 1 {
-            self.range_map.insert(pos * 3 + 1, len * 3, None);
-        } else if is_local {
+        if is_local {
             for span in spans {
                 for (annotation, pos) in span.annotations {
                     let ans: &mut Vec<RangeOp> = &mut ans;
@@ -309,58 +307,49 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                     }
                 }
             }
-            self.range_map.insert(pos * 3 + 1, len * 3, None);
-        } else {
-            let mut must_have = BTreeMap::new();
-            let mut iter = spans.iter().filter(|x| x.len != 0);
-            let a = iter.next().unwrap();
-            let b = iter.next().unwrap();
-            for (ann, pos) in a.annotations.iter() {
-                if b.annotations.contains_key(ann) {
-                    must_have.insert(
-                        ann.clone(),
-                        AnnPos {
-                            begin_here: false,
-                            end_here: false,
-                        },
-                    );
-                }
-            }
+        }
 
-            for span in spans.into_iter() {
-                // TODO: simplify
-                for (annotation, pos) in span.annotations {
-                    if pos.end_here && !pos.begin_here {
-                        let end_id = annotation.range.end.id;
-                        if end_id != left_id && end_id != right_id {
-                            let ann_index =
-                                tombstones.iter().position(|x| Some(*x) == end_id).unwrap();
-                            if ann_index > insert_pos {
-                                must_have.insert(
-                                    annotation,
-                                    AnnPos {
-                                        begin_here: false,
-                                        end_here: true,
-                                    },
-                                );
-                            }
-                        }
-                    } else if pos.begin_here && !pos.end_here {
-                        let start_id = annotation.range.start.id;
-                        if start_id != left_id && start_id != right_id {
-                            let ann_index = tombstones
+        self.range_map
+            .insert(pos * 3 + 1, len * 3, |ann, pos, relative| {
+                let mut start_before_insert = true;
+                let mut end_after_insert = true;
+                if (relative == RelativeSpanPos::Middle || relative == RelativeSpanPos::After)
+                    && pos.begin_here
+                {
+                    if ann.range.start.id == right_id {
+                        start_before_insert = false;
+                    } else {
+                        start_before_insert = ann.range.start.id == left_id
+                            || ann.range.start.id.is_none()
+                            || tombstones
                                 .iter()
-                                .position(|x| Some(*x) == start_id)
-                                .unwrap();
-                            if ann_index < insert_pos {
-                                must_have.remove(&annotation);
-                            }
-                        }
+                                .position(|x| x == &ann.range.start.id.unwrap())
+                                .unwrap()
+                                < insert_pos;
                     }
                 }
-            }
-            self.range_map.insert(pos * 3 + 1, len * 3, Some(must_have));
-        }
+                if (relative == RelativeSpanPos::Middle || relative == RelativeSpanPos::Before)
+                    && pos.end_here
+                {
+                    if ann.range.end.id == left_id {
+                        end_after_insert = false;
+                    } else {
+                        end_after_insert = ann.range.end.id == right_id
+                            || ann.range.end.id.is_none()
+                            || tombstones
+                                .iter()
+                                .position(|x| x == &ann.range.end.id.unwrap())
+                                .unwrap()
+                                > insert_pos;
+                    }
+                }
+                match (start_before_insert, end_after_insert) {
+                    (true, true) => AnnPosRelativeToInsert::IncludeInsert,
+                    (true, false) => AnnPosRelativeToInsert::EndBeforeInsert,
+                    (false, true) => AnnPosRelativeToInsert::StartAfterInsert,
+                    (false, false) => unreachable!(),
+                }
+            });
 
         ans
     }

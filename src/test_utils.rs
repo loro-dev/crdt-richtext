@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::range_map::test::{DumbRangeMap, Position};
+use super::range_map::dumb_impl::{DumbRangeMap, Position};
 use super::*;
 use arbitrary::Arbitrary;
 use crdt_list::crdt::ListCrdt;
@@ -213,6 +213,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
+        println!("{:?}", &action);
         apply_action(&mut actors, action);
     }
 
@@ -602,173 +603,202 @@ pub fn make_spans(spans: &[(Vec<&str>, usize)]) -> Vec<SimpleSpan> {
         .collect()
 }
 
-#[test]
-fn test_insert_text_after_bold() {
-    let mut actor = Actor::new(0);
-    actor.insert(0, 10);
-    // **12345**67890
-    actor.annotate(0..5, "bold");
-    let spans = actor.get_annotations(..);
-    assert_eq!(spans, make_spans(&[((vec!["bold"]), 5), ((vec![]), 5),]));
-    // **12345xx**67890
-    actor.insert(5, 2);
-    let spans = actor.get_annotations(..);
-    assert_eq!(spans, make_spans(&[((vec!["bold"]), 7), ((vec![]), 5),]));
-    // **12345xx**6xx7890
-    actor.insert(8, 2);
-    let spans = actor.get_annotations(..);
-    assert_eq!(spans, make_spans(&[((vec!["bold"]), 7), ((vec![]), 7),]));
-}
-
-#[test]
-fn test_insert_after_link() {
-    let mut actor = Actor::new(0);
-    actor.insert(0, 10);
-    actor.annotate(0..=4, "link");
-    let spans = actor.get_annotations(..);
-    assert_eq!(spans, make_spans(&[((vec!["link"]), 5), ((vec![]), 5),]));
-    actor.insert(5, 2);
-    let spans = actor.get_annotations(..);
-    assert_eq!(spans, make_spans(&[((vec!["link"]), 5), ((vec![]), 7),]));
-    actor.insert(4, 2);
-    let spans = actor.get_annotations(..);
-    assert_eq!(spans, make_spans(&[((vec!["link"]), 7), ((vec![]), 7),]));
-}
-
-#[test]
-fn test_sync() {
-    let mut actor = Actor::new(0);
-    actor.insert(0, 10);
-    actor.annotate(0..=4, "link");
-    let mut actor_b = Actor::new(1);
-    actor.insert(0, 1);
-    actor.merge(&actor_b);
-    actor_b.merge(&actor);
-    actor.check();
-    actor.check_eq(&actor_b);
-}
-
-#[test]
-fn test_delete_annotation() {
-    let mut actor = Actor::new(0);
-    actor.insert(0, 10);
-    actor.annotate(0..5, "bold");
-    actor.un_annotate(0..3, "bold");
-    let spans = actor.get_annotations(..);
-    assert_eq!(
-        spans,
-        make_spans(&[((vec![]), 3), ((vec!["bold"]), 2), ((vec![]), 5),])
-    );
-    actor.un_annotate(3..6, "bold");
-    assert_eq!(actor.get_annotations(..), make_spans(&[((vec![]), 10),]));
-}
-
-#[test]
-fn test_delete_text_basic() {
-    let mut actor = Actor::new(0);
-    actor.insert(0, 10);
-    actor.annotate(0..5, "bold");
-    actor.delete(0, 2);
-    assert_eq!(
-        actor.get_annotations(..),
-        make_spans(&[((vec!["bold"]), 3), ((vec![]), 5)])
-    );
-}
-
-#[test]
-fn test_delete_text_1() {
-    let mut actor = Actor::new(0);
-    actor.insert(0, 10);
-    //**01234**56789
-    actor.annotate(0..3, "bold");
-    assert_eq!(
-        actor.get_annotations(..),
-        make_spans(&[((vec!["bold"]), 3), ((vec![]), 7)])
-    );
-    actor.insert(2, 2);
-    assert_eq!(
-        actor.get_annotations(..),
-        make_spans(&[((vec!["bold"]), 5), ((vec![]), 7)])
-    );
-    //**012**6789
-    actor.delete(3, 3);
-    assert_eq!(
-        actor.get_annotations(..),
-        make_spans(&[((vec!["bold"]), 3), ((vec![]), 6)])
-    );
-}
-
-#[test]
-fn test_delete_text_then_insert() {
-    let mut actor = Actor::new(0);
-    let mut b = Actor::new(1);
-    actor.insert(0, 10);
-    // **ABCDE**FGHIJ
-    actor.annotate(0..5, "bold");
-    // **ABC**FGHIJ
-    actor.delete(3, 2);
-    // **ABCxx**FGHIJ
-    actor.insert(4, 2);
-    b.merge(&actor);
-    assert_eq!(
-        b.get_annotations(..),
-        make_spans(&[(vec!["bold"], 3), (vec![], 7)])
-    );
-}
-
-#[test]
-fn test_patch_expand() {
-    let mut a = Actor::new(0);
-    let mut b = Actor::new(1);
-    let mut c = Actor::new(2);
-    a.insert(0, 5);
-    b.merge(&a);
-    a.delete(2, 2);
-    b.annotate(0..=3, "link");
-    b.insert(3, 2);
-    c.merge(&b);
-    c.insert(5, 1);
-    a.merge(&b);
-    b.merge(&a);
-    assert_eq!(a.get_annotations(..), b.get_annotations(..));
-    c.merge(&a);
-    a.merge(&c);
-    assert_eq!(a.get_annotations(..), c.get_annotations(..));
-}
-
-#[test]
-fn madness() {
-    let mut a = Actor::new(0);
-    let mut b = Actor::new(1);
-    a.insert(0, 5);
-    a.annotate(0..2, "bold");
-    a.annotate(0..=3, "link");
-    a.delete(2, 2);
-    a.insert(2, 1);
-    assert_eq!(
-        a.get_annotations(..),
-        make_spans(&[(vec!["bold", "link"], 2), (vec!["bold"], 1), (vec![], 1)])
-    );
-    b.merge(&a);
-    assert_eq!(a.get_annotations(..), b.get_annotations(..));
-}
-
 #[cfg(test)]
-mod failed_tests {
+mod test {
     use super::*;
-    use Action::*;
-    use AnnotationType::*;
+    use ctor::ctor;
+
+    #[ctor]
+    fn init_color_backtrace() {
+        color_backtrace::install();
+    }
 
     #[test]
-    fn fuzz() {
-        fuzzing(
-            2,
-            vec![Annotate {
-                actor: 0,
-                pos: 0,
-                len: 0,
-                annotation: UnLink,
-            }],
-        )
+    fn test_insert_text_after_bold() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        // **12345**67890
+        actor.annotate(0..5, "bold");
+        let spans = actor.get_annotations(..);
+        assert_eq!(spans, make_spans(&[((vec!["bold"]), 5), ((vec![]), 5),]));
+        // **12345xx**67890
+        actor.insert(5, 2);
+        let spans = actor.get_annotations(..);
+        assert_eq!(spans, make_spans(&[((vec!["bold"]), 7), ((vec![]), 5),]));
+        // **12345xx**6xx7890
+        actor.insert(8, 2);
+        let spans = actor.get_annotations(..);
+        assert_eq!(spans, make_spans(&[((vec!["bold"]), 7), ((vec![]), 7),]));
+    }
+
+    #[test]
+    fn test_insert_after_link() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        actor.annotate(0..=4, "link");
+        let spans = actor.get_annotations(..);
+        assert_eq!(spans, make_spans(&[((vec!["link"]), 5), ((vec![]), 5),]));
+        actor.insert(5, 2);
+        let spans = actor.get_annotations(..);
+        assert_eq!(spans, make_spans(&[((vec!["link"]), 5), ((vec![]), 7),]));
+        actor.insert(4, 2);
+        let spans = actor.get_annotations(..);
+        assert_eq!(spans, make_spans(&[((vec!["link"]), 7), ((vec![]), 7),]));
+    }
+
+    #[test]
+    fn test_sync() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        actor.annotate(0..=4, "link");
+        let mut actor_b = Actor::new(1);
+        actor.insert(0, 1);
+        actor.merge(&actor_b);
+        actor_b.merge(&actor);
+        actor.check();
+        actor.check_eq(&actor_b);
+    }
+
+    #[test]
+    fn test_delete_annotation() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        actor.annotate(0..5, "bold");
+        actor.un_annotate(0..3, "bold");
+        let spans = actor.get_annotations(..);
+        assert_eq!(
+            spans,
+            make_spans(&[((vec![]), 3), ((vec!["bold"]), 2), ((vec![]), 5),])
+        );
+        actor.un_annotate(3..6, "bold");
+        assert_eq!(actor.get_annotations(..), make_spans(&[((vec![]), 10),]));
+    }
+
+    #[test]
+    fn test_delete_text_basic() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        actor.annotate(0..5, "bold");
+        actor.delete(0, 2);
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 5)])
+        );
+    }
+
+    #[test]
+    fn test_delete_text_1() {
+        let mut actor = Actor::new(0);
+        actor.insert(0, 10);
+        //**01234**56789
+        actor.annotate(0..3, "bold");
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 7)])
+        );
+        actor.insert(2, 2);
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 5), ((vec![]), 7)])
+        );
+        //**012**6789
+        actor.delete(3, 3);
+        assert_eq!(
+            actor.get_annotations(..),
+            make_spans(&[((vec!["bold"]), 3), ((vec![]), 6)])
+        );
+    }
+
+    #[test]
+    fn test_delete_text_then_insert() {
+        let mut actor = Actor::new(0);
+        let mut b = Actor::new(1);
+        actor.insert(0, 10);
+        // **ABCDE**FGHIJ
+        actor.annotate(0..5, "bold");
+        // **ABC**FGHIJ
+        actor.delete(3, 2);
+        // **ABCxx**FGHIJ
+        actor.insert(4, 2);
+        b.merge(&actor);
+        assert_eq!(
+            b.get_annotations(..),
+            make_spans(&[(vec!["bold"], 3), (vec![], 7)])
+        );
+    }
+
+    #[test]
+    fn test_patch_expand() {
+        let mut a = Actor::new(0);
+        let mut b = Actor::new(1);
+        let mut c = Actor::new(2);
+        a.insert(0, 5);
+        b.merge(&a);
+        a.delete(2, 2);
+        b.annotate(0..=3, "link");
+        b.insert(3, 2);
+        c.merge(&b);
+        c.insert(5, 1);
+        a.merge(&b);
+        b.merge(&a);
+        assert_eq!(a.get_annotations(..), b.get_annotations(..));
+        c.merge(&a);
+        a.merge(&c);
+        assert_eq!(a.get_annotations(..), c.get_annotations(..));
+    }
+
+    #[test]
+    fn madness() {
+        let mut a = Actor::new(0);
+        let mut b = Actor::new(1);
+        a.insert(0, 5);
+        a.annotate(0..2, "bold");
+        a.annotate(0..=3, "link");
+        a.delete(2, 2);
+        a.insert(2, 1);
+        dbg!(&a.range.range_map);
+        assert_eq!(
+            a.get_annotations(..),
+            make_spans(&[(vec!["bold", "link"], 2), (vec!["bold"], 1), (vec![], 1)])
+        );
+        b.merge(&a);
+        assert_eq!(a.get_annotations(..), b.get_annotations(..));
+    }
+
+    #[cfg(test)]
+    mod failed_tests {
+        use super::*;
+        use Action::*;
+        use AnnotationType::*;
+
+        #[test]
+        fn fuzz() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 190,
+                        pos: 190,
+                        len: 190,
+                    },
+                    Annotate {
+                        actor: 190,
+                        pos: 190,
+                        len: 8,
+                        annotation: Bold,
+                    },
+                    Delete {
+                        actor: 0,
+                        pos: 0,
+                        len: 6,
+                    },
+                    Insert {
+                        actor: 190,
+                        pos: 190,
+                        len: 190,
+                    },
+                ],
+            )
+        }
     }
 }
