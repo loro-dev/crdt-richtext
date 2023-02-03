@@ -221,13 +221,10 @@ impl RangeMap for DumbRangeMap {
         let mut next = None;
         let mut middle = None;
 
-        if offset != 0 {
-            self.arr[index].len += len;
-            done = true;
-        } else if self.arr.is_empty() {
+        if self.arr.is_empty() {
             self.arr.push(Span::new(len));
             done = true;
-        } else if index == 0 {
+        } else if offset != 0 || index == 0 {
             self.arr[index].len += len;
             done = true;
         } else if self.arr[index - 1].len == 0 {
@@ -252,6 +249,7 @@ impl RangeMap for DumbRangeMap {
             next = Some(index);
         }
 
+        debug_log::debug_dbg!(&self, pos, len, last, middle, next);
         if !done {
             let mut shared: Option<BTreeSet<_>> = None;
             for a in last.iter().chain(middle.iter()).chain(next.iter()) {
@@ -268,11 +266,13 @@ impl RangeMap for DumbRangeMap {
             let mut next_empty_span = Span::new(0);
             new_insert_span.annotations = shared.clone();
             next_empty_span.annotations = shared.clone();
+            let mut middle_annotations = BTreeSet::new();
 
             let mut use_next = false;
             // middle
             if let Some(middle) = middle {
-                for ann in self.arr[middle].annotations.clone() {
+                middle_annotations = self.arr[middle].annotations.clone();
+                for ann in std::mem::take(&mut self.arr[middle].annotations) {
                     if shared.contains(&ann) {
                         continue;
                     }
@@ -286,7 +286,7 @@ impl RangeMap for DumbRangeMap {
                             next_empty_span.annotations.insert(ann);
                         }
                         AnnPosRelativeToInsert::IncludeInsert => {
-                            self.arr[middle].annotations.insert(ann.clone());
+                            middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
                             next_empty_span.annotations.insert(ann);
                         }
@@ -306,6 +306,7 @@ impl RangeMap for DumbRangeMap {
                         AnnPosRelativeToInsert::BeforeInsert => {}
                         AnnPosRelativeToInsert::AfterInsert => unreachable!(),
                         AnnPosRelativeToInsert::IncludeInsert => {
+                            middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
                             if use_next {
                                 next_empty_span.annotations.insert(ann.clone());
@@ -326,6 +327,7 @@ impl RangeMap for DumbRangeMap {
                         AnnPosRelativeToInsert::BeforeInsert => unreachable!(),
                         AnnPosRelativeToInsert::AfterInsert => {}
                         AnnPosRelativeToInsert::IncludeInsert => {
+                            middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
                             if use_next {
                                 next_empty_span.annotations.insert(ann.clone());
@@ -333,6 +335,10 @@ impl RangeMap for DumbRangeMap {
                         }
                     }
                 }
+            }
+
+            if let Some(middle) = middle {
+                self.arr[middle].annotations = middle_annotations;
             }
 
             self.arr.insert(index, new_insert_span);
@@ -347,6 +353,7 @@ impl RangeMap for DumbRangeMap {
             }
         }
 
+        debug_log::debug_dbg!(&self);
         debug_log::debug_dbg!("AFTER INSERT", &self);
         self.check();
     }
