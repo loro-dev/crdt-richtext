@@ -172,6 +172,24 @@ impl DumbRangeMap {
                 }
             }
         }
+
+        for i in 1..self.arr.len() - 1 {
+            if self.arr[i].len == 0 {
+                let last = &self.arr[i - 1].annotations;
+                let next = &self.arr[i + 1].annotations;
+                let cur = &self.arr[i].annotations;
+                for ann in last.iter() {
+                    if !cur.contains(ann) {
+                        assert!(!next.contains(ann));
+                    }
+                }
+                for ann in next.iter() {
+                    if !cur.contains(ann) {
+                        assert!(!last.contains(ann));
+                    }
+                }
+            }
+        }
     }
 
     fn _replace(&mut self, ann: Arc<Annotation>, new_ann: Arc<Annotation>) {
@@ -247,16 +265,14 @@ impl RangeMap for DumbRangeMap {
 
             let shared = shared.unwrap();
             let mut new_insert_span = Span::new(len);
-            for ann in shared.iter() {
-                new_insert_span.annotations.insert(ann.clone());
-            }
-
             let mut next_empty_span = Span::new(0);
+            new_insert_span.annotations = shared.clone();
+            next_empty_span.annotations = shared.clone();
+
             let mut use_next = false;
             // middle
             if let Some(middle) = middle {
-                let annotations = std::mem::take(&mut self.arr[middle].annotations);
-                for ann in annotations {
+                for ann in self.arr[middle].annotations.clone() {
                     if shared.contains(&ann) {
                         continue;
                     }
@@ -279,6 +295,7 @@ impl RangeMap for DumbRangeMap {
             }
 
             // left
+            let use_next = use_next; // make it immutable
             if let Some(last) = last {
                 for ann in self.arr[last].annotations.iter() {
                     if shared.contains(ann) {
@@ -310,6 +327,9 @@ impl RangeMap for DumbRangeMap {
                         AnnPosRelativeToInsert::AfterInsert => {}
                         AnnPosRelativeToInsert::IncludeInsert => {
                             new_insert_span.annotations.insert(ann.clone());
+                            if use_next {
+                                next_empty_span.annotations.insert(ann.clone());
+                            }
                         }
                     }
                 }
@@ -532,8 +552,10 @@ impl RangeMap for DumbRangeMap {
                     // move end forward, expand
                     let (mut index, annotation) = self.find_annotation_last_pos(id).unwrap();
                     let mut left_len = end as usize;
+                    debug_log::debug_log!("start {}", index);
                     index += 1;
                     while left_len > 0 {
+                        debug_log::debug_log!("run {} left {}", index, left_len);
                         if self.arr[index].len > left_len {
                             let (mut a, b) =
                                 split_span(std::mem::take(&mut self.arr[index]), left_len);

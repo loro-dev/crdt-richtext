@@ -7,6 +7,7 @@ use crdt_list::crdt::ListCrdt;
 use crdt_list::test::TestFramework;
 use crdt_list::yata::{self};
 use crdt_list::yata_dumb_impl::{Container, Op, OpId as ListOpId, YataImpl};
+use debug_log::debug_dbg;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SimpleSpan {
@@ -213,6 +214,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
+        println!("{:?},", &action);
         debug_log::group!("{:?},", &action);
         debug_log::debug_dbg!(&actors[0].range);
         apply_action(&mut actors, action);
@@ -507,14 +509,18 @@ impl Actor {
         }
 
         // annotation
+        debug_log::group!("apply remote annotation");
         for op in other.range_ops.iter() {
             if !self.visited.contains(&op.id()) {
+                debug_log::debug_dbg!(&self.list.content);
+                debug_log::debug_dbg!(&self.range);
                 self.range
                     .apply_remote_op(op.clone(), &|x| index(&self.list, x).0);
                 self.range_ops.push(op.clone());
                 self.visited.insert(op.id());
             }
         }
+        debug_log::group_end!();
 
         // delete text
         let mut new_deleted: HashSet<ListOpId> = HashSet::new();
