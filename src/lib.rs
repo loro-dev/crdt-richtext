@@ -1,11 +1,12 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    cmp::Ordering,
+    collections::HashMap,
     fmt::Debug,
     ops::{Bound, RangeBounds},
     sync::Arc,
 };
 
-use range_map::{AnnPos, AnnPosRelativeToInsert, RangeMap, RelativeSpanPos, Span};
+use range_map::{AnnPos, AnnPosRelativeToInsert, RangeMap, Span};
 
 mod range_map;
 type Lamport = u32;
@@ -194,42 +195,25 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         CrdtRange { range_map: r }
     }
 
-    /// `get_ops_at_pos(anchors)` returns the list of ops at `pos`.
-    ///
-    /// - The first returned element is the left alive element's op id
-    /// - The second returned element is the right alive element's op id
-    /// - The rest of the elements are tombstones/new element at the position filtered by `anchors`.
-    ///     - It should be tombstone or `first_new_op_id` (other new elements should be omitted)
+    /// `cmp` compare the positions of the given op and insert_op
     ///
     /// It may generate Patch only when is_local=true
     ///
     /// TODO: get next_id and lamport
-    pub fn insert_text<F>(
+    pub fn insert_text<Cmp>(
         &mut self,
         pos: usize,
         len: usize,
         is_local: bool,
-        first_new_op_id: OpID,
-        get_ops_at_pos: F,
+        left_id: Option<OpID>,
+        right_id: Option<OpID>,
+        mut cmp: Cmp,
     ) -> Vec<RangeOp>
     where
-        F: FnOnce(&[OpID]) -> (Option<OpID>, Option<OpID>, Vec<OpID>),
+        Cmp: FnMut(OpID) -> Ordering,
     {
         let mut ans = vec![];
         let spans = self.range_map.get_annotations(pos * 3, 2);
-        let (left_id, right_id, tombstones) = get_ops_at_pos(
-            &self
-                .range_map
-                .get_annotations(pos * 3, 2)
-                .iter()
-                .flat_map(|x| x.annotations.iter().map(|x| x.0.id))
-                .collect::<Vec<_>>(),
-        );
-        let insert_pos = tombstones
-            .iter()
-            .position(|x| x == &first_new_op_id)
-            .unwrap();
-
         if is_local && spans.len() > 1 {
             assert!(spans.iter().filter(|x| x.len == 0).count() <= 2);
             for span in spans {
@@ -315,39 +299,23 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             }
         }
 
-        self.range_map
-            .insert(pos * 3 + 1, len * 3, |ann, pos, relative| {
-                // dbg!(&tombstones, first_new_op_id, ann, relative);
-                let mut start_before_insert = relative == RelativeSpanPos::Before;
-                let mut end_after_insert = relative == RelativeSpanPos::After;
-                if !start_before_insert {
-                    start_before_insert = ann.range.start.id == left_id
-                        || ann.range.start.id.is_none()
-                        || !pos.begin_here
-                        || tombstones
-                            .iter()
-                            .position(|x| x == &ann.range.start.id.unwrap())
-                            .unwrap()
-                            < insert_pos;
-                }
-                // dbg!(start_before_insert, left_id, right_id);
-                if !end_after_insert {
-                    end_after_insert = ann.range.end.id == right_id
-                        || ann.range.end.id.is_none()
-                        || !pos.end_here
-                        || tombstones
-                            .iter()
-                            .position(|x| x == &ann.range.end.id.unwrap())
-                            .unwrap()
-                            >= insert_pos;
-                }
-                match (start_before_insert, end_after_insert) {
-                    (true, true) => AnnPosRelativeToInsert::IncludeInsert,
-                    (true, false) => AnnPosRelativeToInsert::EndBeforeInsert,
-                    (false, true) => AnnPosRelativeToInsert::StartAfterInsert,
-                    (false, false) => unreachable!(),
-                }
-            });
+        self.range_map.insert(pos * 3 + 1, len * 3, |ann| {
+            // dbg!(&tombstones, first_new_op_id, ann, relative);
+            let start_before_insert = match ann.range.start.id {
+                Some(id) => cmp(id) == Ordering::Less,
+                None => true,
+            };
+            let end_after_insert = match ann.range.end.id {
+                Some(id) => cmp(id) == Ordering::Greater,
+                None => true,
+            };
+            match (start_before_insert, end_after_insert) {
+                (true, true) => AnnPosRelativeToInsert::IncludeInsert,
+                (true, false) => AnnPosRelativeToInsert::EndBeforeInsert,
+                (false, true) => AnnPosRelativeToInsert::StartAfterInsert,
+                (false, false) => unreachable!(),
+            }
+        });
 
         ans
     }

@@ -1,11 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
-use super::range_map::dumb_impl::{DumbRangeMap, Position};
+use super::range_map::dumb_impl::DumbRangeMap;
 use super::*;
 use arbitrary::Arbitrary;
 use crdt_list::crdt::ListCrdt;
 use crdt_list::test::TestFramework;
-use crdt_list::yata::{self, integrate, Yata};
+use crdt_list::yata::{self};
 use crdt_list::yata_dumb_impl::{Container, Op, OpId as ListOpId, YataImpl};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -134,7 +134,7 @@ pub fn preprocess_action(actors: &[Actor], action: &mut Action) {
             actor,
             pos,
             len,
-            annotation,
+            annotation: _,
         } => {
             *actor = *actor % actors.len() as u8;
             *pos = (*pos as usize % (actors[*actor as usize].len + 1)) as u8;
@@ -194,7 +194,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
                 }
                 AnnotationType::UnLink => {
                     actors[actor as usize]
-                        .un_annotate(pos as usize..=pos as usize + len as usize, "link");
+                        .un_annotate(pos as usize..=pos as usize + len as usize - 1, "link");
                 }
             }
         }
@@ -213,7 +213,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        // println!("{:?},", &action);
+        println!("{:?},", &action);
         apply_action(&mut actors, action);
     }
 
@@ -254,84 +254,83 @@ impl Actor {
             self.list_ops.push(op);
         }
 
-        self._range_insert(pos, len, &op, arr_pos, true);
+        self._range_insert(len, &op, arr_pos, true);
     }
 
     /// this should happen after the op is integrated to the list crdt
-    fn _range_insert(
-        &mut self,
-        text_pos: usize,
-        len: usize,
-        first_op: &Op,
-        arr_pos: usize,
-        is_local: bool,
-    ) {
-        let mut range_ops =
-            self.range
-                .insert_text(text_pos, len, is_local, first_op.id.into(), |filter| {
-                    let mut ans = vec![];
-                    let mut next_alive_arr_index = arr_pos + len;
-                    while self
-                        .list
-                        .content
-                        .get(next_alive_arr_index)
-                        .map(|x| x.deleted)
-                        .unwrap_or(false)
-                    {
-                        next_alive_arr_index += 1;
-                    }
+    fn _range_insert(&mut self, len: usize, first_op: &Op, arr_pos: usize, is_local: bool) {
+        let right = {
+            let mut next_alive_arr_index = arr_pos + len;
+            while self
+                .list
+                .content
+                .get(next_alive_arr_index)
+                .map(|x| x.deleted)
+                .unwrap_or(false)
+            {
+                next_alive_arr_index += 1;
+            }
 
-                    let left_op = if arr_pos != 0 {
-                        let mut last_alive_arr_index = arr_pos - 1;
-                        while self
-                            .list
-                            .content
-                            .get(last_alive_arr_index)
-                            .map(|x| x.deleted)
-                            .unwrap_or(false)
-                        {
-                            if last_alive_arr_index == 0 {
-                                break;
-                            }
+            self.list
+                .content
+                .get(next_alive_arr_index)
+                .map(|x| x.id.into())
+        };
+        let left = if arr_pos != 0 {
+            let mut last_alive_arr_index = arr_pos - 1;
+            while self
+                .list
+                .content
+                .get(last_alive_arr_index)
+                .map(|x| x.deleted)
+                .unwrap_or(false)
+            {
+                if last_alive_arr_index == 0 {
+                    break;
+                }
 
-                            last_alive_arr_index -= 1;
-                        }
+                last_alive_arr_index -= 1;
+            }
 
-                        for i in last_alive_arr_index..arr_pos {
-                            if self.list.content[i].deleted {
-                                let id: OpID = self.list.content[i].id.into();
-                                if !filter.contains(&id) {
-                                    ans.push(id);
-                                }
-                            }
-                        }
+            self.list.content.get(last_alive_arr_index).and_then(|x| {
+                if x.deleted {
+                    assert_eq!(last_alive_arr_index, 0);
+                    None
+                } else {
+                    Some(x.id.into())
+                }
+            })
+        } else {
+            None
+        };
 
-                        self.list
-                            .content
-                            .get(last_alive_arr_index)
-                            .map(|x| x.id.into())
-                    } else {
-                        None
-                    };
+        let new_op_id = first_op.id;
+        let mut left_set: BTreeSet<OpID> = BTreeSet::new();
+        let mut i = 0;
+        let mut text_pos = 0;
+        while self.list.content[i].id != new_op_id {
+            left_set.insert(self.list.content[i].id.into());
+            if self.list.content.get(i).map(|x| x.deleted).unwrap_or(false) {
+                i += 1;
+                continue;
+            }
 
-                    ans.push(self.list.content[arr_pos].id.into());
-                    for i in arr_pos + len..next_alive_arr_index {
-                        assert!(self.list.content[i].deleted);
-                        let id: OpID = self.list.content[i].id.into();
-                        if !filter.contains(&id) {
-                            ans.push(id);
-                        }
-                    }
+            text_pos += 1;
+            i += 1;
+        }
 
-                    (
-                        left_op,
-                        self.list
-                            .content
-                            .get(next_alive_arr_index)
-                            .map(|x| x.id.into()),
-                        ans,
-                    )
-                });
+        assert_eq!(i, arr_pos);
+        let mut range_ops = self
+            .range
+            .insert_text(text_pos, len, is_local, left, right, |a| {
+                // this can be O(lgN) using a proper data structure
+                if left_set.contains(&a) {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            });
+
         if is_local {
             for op in range_ops.iter_mut() {
                 op.set_id(self._use_next_id());
@@ -498,6 +497,17 @@ impl Actor {
             }
         }
 
+        // annotation
+        for op in other.range_ops.iter() {
+            if !self.visited.contains(&op.id()) {
+                self.range
+                    .apply_remote_op(op.clone(), &|x| index(&self.list, x).0);
+                self.range_ops.push(op.clone());
+                self.visited.insert(op.id());
+            }
+        }
+
+        dbg!(&self.range.range_map);
         // delete text
         let mut new_deleted: HashSet<ListOpId> = HashSet::new();
         for id in other.deleted.iter() {
@@ -517,19 +527,10 @@ impl Actor {
             }
         }
 
+        println!("DELETE");
         for index in deleted_text.iter().rev() {
             // TODO: connect continuous deletes
             self.range.delete_text(*index, 1);
-        }
-
-        // annotation
-        for op in other.range_ops.iter() {
-            if !self.visited.contains(&op.id()) {
-                self.range
-                    .apply_remote_op(op.clone(), &|x| index(&self.list, x).0);
-                self.range_ops.push(op.clone());
-                self.visited.insert(op.id());
-            }
         }
 
         // lamport
@@ -549,8 +550,8 @@ impl Actor {
         self.list.version_vector[id.client_id] = id.clock + 1;
         self.len += 1;
         if !is_local {
-            let (text_index, arr_index) = index(&self.list, id.into());
-            self._range_insert(text_index.unwrap(), 1, &op, arr_index, is_local);
+            let (_, arr_index) = index(&self.list, id.into());
+            self._range_insert(1, &op, arr_index, is_local);
         }
     }
 
@@ -1048,6 +1049,42 @@ mod test {
                     Insert {
                         actor: 0,
                         pos: 0,
+                        len: 1,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_7() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 10,
+                    },
+                    Sync(1, 0),
+                    Annotate {
+                        actor: 0,
+                        pos: 3,
+                        len: 3,
+                        annotation: Link,
+                    },
+                    Delete {
+                        actor: 0,
+                        pos: 0,
+                        len: 9,
+                    },
+                    Insert {
+                        actor: 1,
+                        pos: 3,
+                        len: 1,
+                    },
+                    Insert {
+                        actor: 1,
+                        pos: 5,
                         len: 1,
                     },
                 ],

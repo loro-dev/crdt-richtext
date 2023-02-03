@@ -189,6 +189,7 @@ impl DumbRangeMap {
         }
     }
 
+    // TODO: reduce the usage of this
     fn update_ann_pos(&mut self, range: Range<usize>) {
         for i in range {
             if i >= self.arr.len() {
@@ -229,7 +230,7 @@ impl RangeMap for DumbRangeMap {
 
     fn insert<F>(&mut self, pos: usize, len: usize, mut f: F)
     where
-        F: FnMut(&Annotation, AnnPos, RelativeSpanPos) -> AnnPosRelativeToInsert,
+        F: FnMut(&Annotation) -> AnnPosRelativeToInsert,
     {
         let Position { index, offset } = self.find_pos(pos);
         self.len += len;
@@ -298,7 +299,7 @@ impl RangeMap for DumbRangeMap {
                         continue;
                     }
 
-                    match f(&ann, pos, RelativeSpanPos::Middle) {
+                    match f(&ann) {
                         AnnPosRelativeToInsert::EndBeforeInsert => {
                             self.arr[middle].annotations.insert(ann, pos);
                         }
@@ -346,7 +347,7 @@ impl RangeMap for DumbRangeMap {
                         continue;
                     }
 
-                    match f(ann, *pos, RelativeSpanPos::Before) {
+                    match f(ann) {
                         AnnPosRelativeToInsert::EndBeforeInsert => {}
                         AnnPosRelativeToInsert::StartAfterInsert => unreachable!(),
                         AnnPosRelativeToInsert::IncludeInsert => {
@@ -379,7 +380,7 @@ impl RangeMap for DumbRangeMap {
                         continue;
                     }
 
-                    match f(ann, *pos, RelativeSpanPos::After) {
+                    match f(ann) {
                         AnnPosRelativeToInsert::EndBeforeInsert => unreachable!(),
                         AnnPosRelativeToInsert::StartAfterInsert => {}
                         AnnPosRelativeToInsert::IncludeInsert => {
@@ -396,9 +397,9 @@ impl RangeMap for DumbRangeMap {
                 }
             }
 
-            insert_span(&mut self.arr, index, new_insert_span);
+            self.arr.insert(index, new_insert_span);
             if use_next {
-                insert_span(&mut self.arr, index + 1, next_empty_span);
+                self.arr.insert(index + 1, next_empty_span);
             }
 
             // TODO: Perf

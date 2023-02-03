@@ -2,6 +2,24 @@ use std::{collections::BTreeMap, ops::Range, sync::Arc};
 
 use crate::{Annotation, OpID};
 
+pub trait RangeMap {
+    fn init() -> Self;
+    /// f is used to position the annotations when they ends in the insert range
+    fn insert<F>(&mut self, pos: usize, len: usize, f: F)
+    where
+        F: FnMut(&Annotation) -> AnnPosRelativeToInsert;
+    fn insert_directly(&mut self, pos: usize, len: usize) {
+        self.insert(pos, len, |_| AnnPosRelativeToInsert::IncludeInsert);
+    }
+    fn delete(&mut self, pos: usize, len: usize);
+    fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
+    fn adjust_annotation(&mut self, id: OpID, start_shift: Option<isize>, end_shift: Option<isize>);
+    fn delete_annotation(&mut self, id: OpID);
+    fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span>;
+    fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, Range<usize>)>;
+    fn len(&self) -> usize;
+}
+
 /// the position of annotation relative to its owner span
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AnnPos {
@@ -56,24 +74,6 @@ impl Span {
             }
         }
     }
-}
-
-pub trait RangeMap {
-    fn init() -> Self;
-    /// f is used to position the annotations when they ends in the insert range
-    fn insert<F>(&mut self, pos: usize, len: usize, f: F)
-    where
-        F: FnMut(&Annotation, AnnPos, RelativeSpanPos) -> AnnPosRelativeToInsert;
-    fn insert_directly(&mut self, pos: usize, len: usize) {
-        self.insert(pos, len, |_, _, _| AnnPosRelativeToInsert::IncludeInsert);
-    }
-    fn delete(&mut self, pos: usize, len: usize);
-    fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
-    fn adjust_annotation(&mut self, id: OpID, start_shift: Option<isize>, end_shift: Option<isize>);
-    fn delete_annotation(&mut self, id: OpID);
-    fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span>;
-    fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, Range<usize>)>;
-    fn len(&self) -> usize;
 }
 
 #[cfg(feature = "test")]
