@@ -1381,6 +1381,79 @@ mod test {
         }
 
         #[test]
+        fn fuzz_14() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 0,
+                        pos: 57,
+                        len: 168,
+                    },
+                    Delete {
+                        actor: 168,
+                        pos: 168,
+                        len: 168,
+                    },
+                    Annotate {
+                        actor: 168,
+                        pos: 168,
+                        len: 168,
+                        annotation: UnBold,
+                    },
+                    Delete {
+                        actor: 112,
+                        pos: 112,
+                        len: 112,
+                    },
+                    Annotate {
+                        actor: 168,
+                        pos: 255,
+                        len: 255,
+                        annotation: Link,
+                    },
+                    Annotate {
+                        actor: 98,
+                        pos: 174,
+                        len: 0,
+                        annotation: UnLink,
+                    },
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 255,
+                    },
+                    Annotate {
+                        actor: 168,
+                        pos: 168,
+                        len: 168,
+                        annotation: UnBold,
+                    },
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 0,
+                    },
+                    Delete {
+                        actor: 112,
+                        pos: 112,
+                        len: 112,
+                    },
+                    Delete {
+                        actor: 26,
+                        pos: 26,
+                        len: 0,
+                    },
+                    Insert {
+                        actor: 4,
+                        pos: 247,
+                        len: 255,
+                    },
+                ],
+            )
+        }
+
+        #[test]
         fn fuzz_empty() {
             fuzzing(2, vec![])
         }

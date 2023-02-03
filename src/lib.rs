@@ -216,10 +216,11 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         let spans = self.range_map.get_annotations(pos * 3, 2);
         assert!(spans.len() <= 3);
         assert!(spans.iter().map(|x| x.len).sum::<usize>() == 2);
-        if is_local && spans.len() > 1 {
+        let non_empty_span_count = spans.iter().filter(|x| x.len != 0).count();
+        if is_local && non_empty_span_count > 1 {
+            assert!(non_empty_span_count <= 2);
             debug_log::group!("LOCAL HANDLER");
             debug_log::debug_dbg!("Before", &self.range_map);
-            assert!(spans.iter().filter(|x| x.len != 0).count() == 2);
             let mut visited_left = false;
             let mut pure_left = BTreeSet::new();
             let mut pure_middle = BTreeSet::new();
