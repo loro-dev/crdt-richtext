@@ -11,6 +11,7 @@ rand = { version = "0.8.5", optional = true }
 arbitrary = { version = "1.2.3", optional = true }
 enum-as-inner = "0.5.1"
 arref = "0.1.0"
+debug-log = "0.1.4"
 
 [features]
 test = ["crdt-list", "rand", "arbitrary"]

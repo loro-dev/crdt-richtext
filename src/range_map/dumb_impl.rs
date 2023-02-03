@@ -189,6 +189,17 @@ impl DumbRangeMap {
             }
             last_annotations = span.annotations.clone();
         }
+
+        for i in 0..self.arr.len() {
+            if self.arr[i].len == 0 {
+                if i > 0 {
+                    assert!(self.arr[i - 1].len > 0);
+                }
+                if i < self.arr.len() - 1 {
+                    assert!(self.arr[i + 1].len > 0);
+                }
+            }
+        }
     }
 
     // TODO: reduce the usage of this
@@ -412,6 +423,11 @@ impl RangeMap for DumbRangeMap {
             let last = last.unwrap_or_else(|| middle.unwrap());
             let next = next.unwrap_or_else(|| middle.unwrap()) + len;
             self.update_ann_pos(last..next + 1);
+            if index > 0 {
+                self.try_merge_empty_spans(index - 1);
+            } else {
+                self.try_merge_empty_spans(index);
+            }
         }
 
         self.check();
@@ -430,6 +446,10 @@ impl RangeMap for DumbRangeMap {
         while left_len > 0 {
             if self.arr[index].len >= left_len + offset {
                 self.arr[index].len -= left_len;
+                if self.arr[index].len == 0 {
+                    to_empty = true;
+                }
+
                 break;
             } else {
                 left_len -= self.arr[index].len - offset;
@@ -446,7 +466,6 @@ impl RangeMap for DumbRangeMap {
 
         self.len -= len;
         if to_empty {
-            // FIXME:
             self.try_merge_empty_spans(start_index);
         }
 
