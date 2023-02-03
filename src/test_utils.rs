@@ -22,10 +22,10 @@ impl From<&Span> for SimpleSpan {
                 .annotations
                 .iter()
                 .filter_map(|x| {
-                    if x.0.merge_method == RangeMergeRule::Delete {
+                    if x.merge_method == RangeMergeRule::Delete {
                         None
                     } else {
-                        Some(x.0.type_.clone())
+                        Some(x.type_.clone())
                     }
                 })
                 .collect(),
@@ -213,7 +213,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        // println!("{:?},", &action);
+        println!("{:?},", &action);
         apply_action(&mut actors, action);
     }
 
@@ -759,7 +759,6 @@ mod test {
         a.annotate(0..=3, "link");
         a.delete(2, 2);
         a.insert(2, 1);
-        dbg!(&a.range.range_map);
         assert_eq!(
             a.get_annotations(..),
             make_spans(&[(vec!["bold", "link"], 2), (vec!["bold"], 1), (vec![], 1)])
@@ -1271,6 +1270,66 @@ mod test {
                         actor: 70,
                         pos: 70,
                         len: 70,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_12() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 190,
+                        pos: 43,
+                        len: 190,
+                    },
+                    Annotate {
+                        actor: 190,
+                        pos: 190,
+                        len: 190,
+                        annotation: UnBold,
+                    },
+                    Sync(207, 207),
+                    Delete {
+                        actor: 65,
+                        pos: 255,
+                        len: 7,
+                    },
+                    Annotate {
+                        actor: 48,
+                        pos: 193,
+                        len: 190,
+                        annotation: UnBold,
+                    },
+                    Sync(1, 0),
+                    Annotate {
+                        actor: 48,
+                        pos: 48,
+                        len: 48,
+                        annotation: Link,
+                    },
+                    Delete {
+                        actor: 70,
+                        pos: 70,
+                        len: 70,
+                    },
+                    Delete {
+                        actor: 70,
+                        pos: 70,
+                        len: 70,
+                    },
+                    Annotate {
+                        actor: 190,
+                        pos: 190,
+                        len: 190,
+                        annotation: Link,
+                    },
+                    Insert {
+                        actor: 190,
+                        pos: 48,
+                        len: 190,
                     },
                 ],
             )

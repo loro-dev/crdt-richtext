@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, ops::Range, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Range,
+    sync::Arc,
+};
 
 use crate::{Annotation, OpID};
 
@@ -13,18 +17,17 @@ pub trait RangeMap {
     }
     fn delete(&mut self, pos: usize, len: usize);
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
-    fn adjust_annotation(&mut self, id: OpID, start_shift: Option<isize>, end_shift: Option<isize>);
+    fn adjust_annotation(
+        &mut self,
+        id: OpID,
+        start_shift: Option<(isize, Option<OpID>)>,
+        end_shift: Option<(isize, Option<OpID>)>,
+    );
     fn delete_annotation(&mut self, id: OpID);
+    /// TODO: need to clarify the rules when encounter an empty span on the edges
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span>;
     fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, Range<usize>)>;
     fn len(&self) -> usize;
-}
-
-/// the position of annotation relative to its owner span
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct AnnPos {
-    pub begin_here: bool,
-    pub end_here: bool,
 }
 
 /// the position of span relative to a new insert
@@ -38,40 +41,22 @@ pub enum RelativeSpanPos {
 /// the position of annotation relative to a new insert
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnnPosRelativeToInsert {
-    EndBeforeInsert,
-    StartAfterInsert,
+    BeforeInsert,
+    AfterInsert,
     IncludeInsert,
-}
-
-impl AnnPos {
-    pub fn merge(&mut self, other: &Self) {
-        self.begin_here = self.begin_here || other.begin_here;
-        self.end_here = self.end_here || other.end_here;
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Span {
-    pub annotations: BTreeMap<Arc<Annotation>, AnnPos>,
+    pub annotations: BTreeSet<Arc<Annotation>>,
     pub len: usize,
 }
 
 impl Span {
     pub fn new(len: usize) -> Self {
         Span {
-            annotations: BTreeMap::new(),
+            annotations: BTreeSet::new(),
             len,
-        }
-    }
-
-    pub fn update_pos(&mut self, begin: Option<bool>, end: Option<bool>) {
-        for ann in self.annotations.iter_mut() {
-            if let Some(begin) = begin {
-                ann.1.begin_here = begin;
-            }
-            if let Some(end) = end {
-                ann.1.end_here = end;
-            }
         }
     }
 }

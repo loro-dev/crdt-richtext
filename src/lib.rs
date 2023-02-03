@@ -1,12 +1,12 @@
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fmt::Debug,
     ops::{Bound, RangeBounds},
     sync::Arc,
 };
 
-use range_map::{AnnPos, AnnPosRelativeToInsert, RangeMap, Span};
+use range_map::{AnnPosRelativeToInsert, RangeMap, Span};
 
 mod range_map;
 type Lamport = u32;
@@ -214,16 +214,89 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
     {
         let mut ans = vec![];
         let spans = self.range_map.get_annotations(pos * 3, 2);
+        assert!(spans.len() <= 3);
+        assert!(spans.iter().map(|x| x.len).sum::<usize>() == 2);
         if is_local && spans.len() > 1 {
-            assert!(spans.iter().filter(|x| x.len == 0).count() <= 2);
+            assert!(spans.iter().filter(|x| x.len != 0).count() == 2);
+            let mut visited_left = false;
+            let mut pure_left = BTreeSet::new();
+            let mut pure_middle = BTreeSet::new();
+            let mut left_or_middle_annotations = BTreeSet::new();
+            let mut right_or_middle_annotations = BTreeSet::new();
             for span in spans {
-                for (annotation, pos) in span.annotations {
-                    let ans: &mut Vec<RangeOp> = &mut ans;
-                    if pos.end_here && !pos.begin_here {
-                        let end_id = annotation.range.end.id;
-                        if end_id != left_id && end_id != right_id {
-                            // TODO: simplify
-                            if let AnchorType::Before = annotation.range.end.type_ {
+                if !visited_left {
+                    // left
+                    assert_eq!(span.len, 1);
+                    visited_left = true;
+                    pure_left = span.annotations.clone();
+                    left_or_middle_annotations = span.annotations;
+                } else if span.len == 0 {
+                    // middle
+                    for ann in span.annotations.iter() {
+                        left_or_middle_annotations.insert(ann.clone());
+                        right_or_middle_annotations.insert(ann.clone());
+                    }
+                    pure_middle = span.annotations;
+                } else {
+                    // right
+                    assert_eq!(span.len, 1);
+                    for ann in span.annotations.iter() {
+                        right_or_middle_annotations.insert(ann.clone());
+                        left_or_middle_annotations.remove(ann);
+                        pure_middle.remove(ann);
+                    }
+                }
+            }
+
+            for ann in pure_left {
+                right_or_middle_annotations.remove(&ann);
+                pure_middle.remove(&ann);
+            }
+
+            for annotation in left_or_middle_annotations {
+                let end_id = annotation.range.end.id;
+                if end_id != left_id && end_id != right_id {
+                    // TODO: simplify
+                    if AnchorType::Before == annotation.range.end.type_ {
+                        ans.push(RangeOp::Patch(Patch {
+                            id: OpID {
+                                client: 0,
+                                counter: 0,
+                            },
+                            lamport: 0,
+                            target_range_id: annotation.id,
+                            move_start: false,
+                            move_end: true,
+                            move_start_to: None,
+                            move_end_to: right_id,
+                        }));
+                        self.range_map
+                            .adjust_annotation(annotation.id, None, Some((1, right_id)));
+                    } else if !pure_middle.contains(&annotation) {
+                        ans.push(RangeOp::Patch(Patch {
+                            id: OpID {
+                                client: 0,
+                                counter: 0,
+                            },
+                            lamport: 0,
+                            target_range_id: annotation.id,
+                            move_start: false,
+                            move_end: true,
+                            move_start_to: None,
+                            move_end_to: left_id,
+                        }));
+                        self.range_map
+                            .adjust_annotation(annotation.id, None, Some((-1, left_id)));
+                    }
+                }
+            }
+
+            for annotation in right_or_middle_annotations {
+                let start_id = annotation.range.start.id;
+                if start_id != left_id && start_id != right_id {
+                    match annotation.range.start.type_ {
+                        AnchorType::Before => {
+                            if !pure_middle.contains(&annotation) {
                                 ans.push(RangeOp::Patch(Patch {
                                     id: OpID {
                                         client: 0,
@@ -231,68 +304,36 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                                     },
                                     lamport: 0,
                                     target_range_id: annotation.id,
-                                    move_start: false,
-                                    move_end: true,
-                                    move_start_to: None,
-                                    move_end_to: right_id,
+                                    move_start: true,
+                                    move_end: false,
+                                    move_start_to: right_id,
+                                    move_end_to: None,
                                 }));
-                                self.range_map
-                                    .adjust_annotation(annotation.id, None, Some(1));
-                            } else {
-                                ans.push(RangeOp::Patch(Patch {
-                                    id: OpID {
-                                        client: 0,
-                                        counter: 0,
-                                    },
-                                    lamport: 0,
-                                    target_range_id: annotation.id,
-                                    move_start: false,
-                                    move_end: true,
-                                    move_start_to: None,
-                                    move_end_to: left_id,
-                                }));
-                                self.range_map
-                                    .adjust_annotation(annotation.id, None, Some(-1));
+                                self.range_map.adjust_annotation(
+                                    annotation.id,
+                                    Some((1, right_id)),
+                                    None,
+                                );
                             }
                         }
-                    }
-                    if pos.begin_here && !pos.end_here {
-                        let start_id = annotation.range.start.id;
-                        if start_id != left_id && start_id != right_id {
-                            match annotation.range.start.type_ {
-                                AnchorType::Before => {
-                                    ans.push(RangeOp::Patch(Patch {
-                                        id: OpID {
-                                            client: 0,
-                                            counter: 0,
-                                        },
-                                        lamport: 0,
-                                        target_range_id: annotation.id,
-                                        move_start: true,
-                                        move_end: false,
-                                        move_start_to: right_id,
-                                        move_end_to: None,
-                                    }));
-                                    self.range_map
-                                        .adjust_annotation(annotation.id, Some(1), None);
-                                }
-                                AnchorType::After => {
-                                    ans.push(RangeOp::Patch(Patch {
-                                        id: OpID {
-                                            client: 0,
-                                            counter: 0,
-                                        },
-                                        lamport: 0,
-                                        target_range_id: annotation.id,
-                                        move_start: true,
-                                        move_end: false,
-                                        move_start_to: right_id,
-                                        move_end_to: None,
-                                    }));
-                                    self.range_map
-                                        .adjust_annotation(annotation.id, Some(-1), None);
-                                }
-                            }
+                        AnchorType::After => {
+                            ans.push(RangeOp::Patch(Patch {
+                                id: OpID {
+                                    client: 0,
+                                    counter: 0,
+                                },
+                                lamport: 0,
+                                target_range_id: annotation.id,
+                                move_start: true,
+                                move_end: false,
+                                move_start_to: right_id,
+                                move_end_to: None,
+                            }));
+                            self.range_map.adjust_annotation(
+                                annotation.id,
+                                Some((-1, left_id)),
+                                None,
+                            );
                         }
                     }
                 }
@@ -311,8 +352,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             };
             match (start_before_insert, end_after_insert) {
                 (true, true) => AnnPosRelativeToInsert::IncludeInsert,
-                (true, false) => AnnPosRelativeToInsert::EndBeforeInsert,
-                (false, true) => AnnPosRelativeToInsert::StartAfterInsert,
+                (true, false) => AnnPosRelativeToInsert::BeforeInsert,
+                (false, true) => AnnPosRelativeToInsert::AfterInsert,
                 (false, false) => unreachable!(),
             }
         });
@@ -375,7 +416,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                     );
                     self.range_map.adjust_annotation(
                         patch.target_range_id,
-                        Some(new_start as isize - pos.start as isize),
+                        Some((new_start as isize - pos.start as isize, patch.move_start_to)),
                         None,
                     );
                 }
@@ -395,7 +436,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                     self.range_map.adjust_annotation(
                         patch.target_range_id,
                         None,
-                        Some(new_end as isize - pos.end as isize),
+                        Some((new_end as isize - pos.end as isize, patch.move_end_to)),
                     );
                 }
             }
@@ -430,17 +471,16 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             let len = (next_index + 2) / 3 - (last_index + 2) / 3;
             span.len = len;
 
-            let mut annotations: HashMap<String, (Lamport, Vec<(Arc<Annotation>, AnnPos)>)> =
-                HashMap::new();
+            let mut annotations: HashMap<String, (Lamport, Vec<Arc<Annotation>>)> = HashMap::new();
             for a in std::mem::take(&mut span.annotations) {
-                if let Some(x) = annotations.get_mut(&a.0.type_) {
-                    if a.0.merge_method == RangeMergeRule::Inclusive {
+                if let Some(x) = annotations.get_mut(&a.type_) {
+                    if a.merge_method == RangeMergeRule::Inclusive {
                         x.1.push(a);
-                    } else if a.0.lamport > x.0 {
-                        *x = (a.0.lamport, vec![a]);
+                    } else if a.lamport > x.0 {
+                        *x = (a.lamport, vec![a]);
                     }
                 } else {
-                    annotations.insert(a.0.type_.clone(), (a.0.lamport, vec![a]));
+                    annotations.insert(a.type_.clone(), (a.lamport, vec![a]));
                 }
             }
             span.annotations = annotations.into_values().flat_map(|x| x.1).collect();
