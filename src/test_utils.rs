@@ -120,16 +120,18 @@ fn index(list: &Container, target_id: OpID) -> (Result<usize, usize>, usize) {
 pub fn preprocess_action(actors: &[Actor], action: &mut Action) {
     match action {
         Action::Insert { actor, pos, len } => {
-            *actor = *actor % actors.len() as u8;
+            *actor %= actors.len() as u8;
             *pos = (*pos as usize % (actors[*actor as usize].len + 1)) as u8;
             *len = (*len).min(10);
-            *len = (*len).max(1);
+            *len = (*len).min(255).max(1);
         }
         Action::Delete { actor, pos, len } => {
-            *actor = *actor % actors.len() as u8;
+            *actor %= actors.len() as u8;
             *pos = (*pos as usize % (actors[*actor as usize].len + 1)) as u8;
             *len = (*len).min(10);
-            *len %= (actors[*actor as usize].len.max(*pos as usize + 1) - *pos as usize) as u8;
+            *len %= (actors[*actor as usize].len.max(*pos as usize + 1) - *pos as usize)
+                .min(255)
+                .max(1) as u8;
         }
         Action::Annotate {
             actor,
@@ -137,14 +139,16 @@ pub fn preprocess_action(actors: &[Actor], action: &mut Action) {
             len,
             annotation: _,
         } => {
-            *actor = *actor % actors.len() as u8;
+            *actor %= actors.len() as u8;
             *pos = (*pos as usize % (actors[*actor as usize].len + 1)) as u8;
             *len = (*len).min(10);
-            *len %= (actors[*actor as usize].len.max(*pos as usize + 1) - *pos as usize) as u8;
+            *len %= (actors[*actor as usize].len.max(*pos as usize + 1) - *pos as usize)
+                .min(255)
+                .max(1) as u8;
         }
         Action::Sync(a, b) => {
-            *a = *a % actors.len() as u8;
-            *b = *b % actors.len() as u8;
+            *a %= actors.len() as u8;
+            *b %= actors.len() as u8;
             if b == a {
                 *b = (*a + 1) % actors.len() as u8;
             }
@@ -214,7 +218,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        println!("{:?},", &action);
+        // println!("{:?},", &action);
         debug_log::group!("{:?},", &action);
         debug_log::debug_dbg!(&actors[0].range);
         apply_action(&mut actors, action);
