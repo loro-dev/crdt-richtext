@@ -116,6 +116,8 @@ impl DumbRangeMap {
                 } else {
                     empty_len += 1;
                 }
+            } else if empty_len > 0 {
+                break;
             }
         }
 
@@ -442,12 +444,13 @@ impl RangeMap for DumbRangeMap {
             index += 1;
         }
 
+        self.len -= len;
         if to_empty {
+            // FIXME:
             self.try_merge_empty_spans(start_index);
         }
 
         self.update_ann_pos(start_index.saturating_sub(1)..(start_index + 2).min(self.arr.len()));
-        self.len -= len;
         self.check();
     }
 
