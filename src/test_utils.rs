@@ -1233,6 +1233,50 @@ mod test {
         }
 
         #[test]
+        fn fuzz_11() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 190,
+                        pos: 43,
+                        len: 190,
+                    },
+                    Annotate {
+                        actor: 190,
+                        pos: 200,
+                        len: 190,
+                        annotation: UnLink,
+                    },
+                    Sync(255, 11),
+                    Annotate {
+                        actor: 255,
+                        pos: 255,
+                        len: 66,
+                        annotation: UnBold,
+                    },
+                    Sync(255, 247),
+                    Annotate {
+                        actor: 190,
+                        pos: 190,
+                        len: 190,
+                        annotation: Link,
+                    },
+                    Delete {
+                        actor: 70,
+                        pos: 70,
+                        len: 70,
+                    },
+                    Delete {
+                        actor: 70,
+                        pos: 70,
+                        len: 70,
+                    },
+                ],
+            )
+        }
+
+        #[test]
         fn fuzz_empty() {
             fuzzing(2, vec![])
         }

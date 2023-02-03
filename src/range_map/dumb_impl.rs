@@ -105,10 +105,11 @@ impl DumbRangeMap {
         }
     }
 
-    fn try_merge_empty_spans(&mut self, start_index: usize) {
+    fn try_merge_empty_spans(&mut self, start_index: usize, max_len: Option<usize>) {
+        let end = (max_len.unwrap_or(self.arr.len()) + start_index).min(self.arr.len());
         let mut empty_start = 0;
         let mut empty_len = 0;
-        for i in start_index.saturating_sub(1)..self.arr.len() {
+        for i in start_index.saturating_sub(1)..end {
             if self.arr[i].len == 0 {
                 if empty_len == 0 {
                     empty_len = 1;
@@ -117,7 +118,11 @@ impl DumbRangeMap {
                     empty_len += 1;
                 }
             } else if empty_len > 0 {
-                break;
+                if empty_len > 1 {
+                    break;
+                } else {
+                    empty_len = 0;
+                }
             }
         }
 
@@ -424,9 +429,9 @@ impl RangeMap for DumbRangeMap {
             let next = next.unwrap_or_else(|| middle.unwrap()) + len;
             self.update_ann_pos(last..next + 1);
             if index > 0 {
-                self.try_merge_empty_spans(index - 1);
+                self.try_merge_empty_spans(index - 1, None);
             } else {
-                self.try_merge_empty_spans(index);
+                self.try_merge_empty_spans(index, None);
             }
         }
 
@@ -466,7 +471,7 @@ impl RangeMap for DumbRangeMap {
 
         self.len -= len;
         if to_empty {
-            self.try_merge_empty_spans(start_index);
+            self.try_merge_empty_spans(start_index, Some(len + 3));
         }
 
         self.update_ann_pos(start_index.saturating_sub(1)..(start_index + 2).min(self.arr.len()));
@@ -533,6 +538,7 @@ impl RangeMap for DumbRangeMap {
                 }
 
                 self.arr.splice(start_index..start_index + 1, splitted);
+                self.try_merge_empty_spans(start_index, Some(5));
             }
         } else {
             if !clean_end {

@@ -50,9 +50,16 @@ dependencies = [
  "arbitrary",
  "arref",
  "crdt-list",
+ "debug-log",
  "enum-as-inner",
  "rand",
 ]
+
+[[package]]
+name = "debug-log"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "364ff57c5031fee39b026dcdfdc9c7dc1d1d79451bfdacba90f040524b766254"
 
 [[package]]
 name = "derive_arbitrary"
