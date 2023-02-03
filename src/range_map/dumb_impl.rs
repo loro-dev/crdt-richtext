@@ -252,6 +252,8 @@ impl RangeMap for DumbRangeMap {
             // need to decide how to distribute the annotations on span with len of 0
             // need to decide take which annotation from the neighbor spans
             if index == 1 {
+                assert!(self.arr[index - 1].len == 0);
+                assert!(self.arr[index].len > 0);
                 middle = Some(index - 1);
                 next = Some(index);
             } else {
@@ -262,13 +264,15 @@ impl RangeMap for DumbRangeMap {
                 next = Some(index);
             }
         } else {
+            assert!(self.arr[index - 1].len > 0);
+            assert!(self.arr[index].len > 0);
             last = Some(index - 1);
             next = Some(index);
         }
 
         if !done {
             let mut shared: Option<BTreeMap<_, _>> = None;
-            for a in last.iter().chain(middle.iter()).chain(last.iter()) {
+            for a in last.iter().chain(middle.iter()).chain(next.iter()) {
                 match &mut shared {
                     Some(shared) => shared.retain(|x, _| self.arr[*a].annotations.contains_key(x)),
                     None => {

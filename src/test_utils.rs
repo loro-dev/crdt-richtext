@@ -213,7 +213,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        println!("{:?},", &action);
+        // println!("{:?},", &action);
         apply_action(&mut actors, action);
     }
 
@@ -507,7 +507,6 @@ impl Actor {
             }
         }
 
-        dbg!(&self.range.range_map);
         // delete text
         let mut new_deleted: HashSet<ListOpId> = HashSet::new();
         for id in other.deleted.iter() {
@@ -527,7 +526,6 @@ impl Actor {
             }
         }
 
-        println!("DELETE");
         for index in deleted_text.iter().rev() {
             // TODO: connect continuous deletes
             self.range.delete_text(*index, 1);
@@ -1085,6 +1083,41 @@ mod test {
                     Insert {
                         actor: 1,
                         pos: 5,
+                        len: 1,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_8() {
+            fuzzing(
+                2,
+                vec![
+                    // 0123456789
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 10,
+                    },
+                    Sync(1, 0),
+                    // 012<345>6789
+                    Annotate {
+                        actor: 0,
+                        pos: 3,
+                        len: 3,
+                        annotation: Link,
+                    },
+                    // 012<3>89
+                    Delete {
+                        actor: 0,
+                        pos: 4,
+                        len: 4,
+                    },
+                    // 01234567x89
+                    Insert {
+                        actor: 1,
+                        pos: 8,
                         len: 1,
                     },
                 ],
