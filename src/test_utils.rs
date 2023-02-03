@@ -213,15 +213,21 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        println!("{:?},", &action);
+        debug_log::group!("{:?},", &action);
+        debug_log::debug_dbg!(&actors[0].range);
         apply_action(&mut actors, action);
+        debug_log::group_end!();
     }
 
     for i in 0..actors.len() {
         for j in (i + 1)..actors.len() {
             let (a, b) = arref::array_mut_ref!(&mut actors, [i, j]);
+            debug_log::group!("merge {i}<-{j}");
             a.merge(b);
+            debug_log::group_end!();
+            debug_log::group!("merge {i}->{j}");
             b.merge(a);
+            debug_log::group_end!();
             assert_eq!(a.get_annotations(..), b.get_annotations(..));
         }
     }
@@ -254,6 +260,7 @@ impl Actor {
             self.list_ops.push(op);
         }
 
+        debug_log::debug_dbg!(&self.range);
         self._range_insert(len, &op, arr_pos, true);
     }
 
@@ -486,6 +493,8 @@ impl Actor {
     }
 
     fn merge(&mut self, other: &Self) {
+        debug_log::debug_dbg!(&self.list.id);
+        debug_log::debug_dbg!(&self.range);
         assert_ne!(self.list.id, other.list.id);
         // insert text
         for op in other.list_ops.iter() {
@@ -1330,6 +1339,42 @@ mod test {
                         actor: 190,
                         pos: 48,
                         len: 190,
+                    },
+                ],
+            )
+        }
+
+        #[test]
+        fn fuzz_13() {
+            fuzzing(
+                2,
+                vec![
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 10,
+                    },
+                    Annotate {
+                        actor: 0,
+                        pos: 4,
+                        len: 4,
+                        annotation: Bold,
+                    },
+                    Delete {
+                        actor: 0,
+                        pos: 0,
+                        len: 8,
+                    },
+                    Sync(1, 0),
+                    Insert {
+                        actor: 0,
+                        pos: 0,
+                        len: 10,
+                    },
+                    Insert {
+                        actor: 1,
+                        pos: 0,
+                        len: 10,
                     },
                 ],
             )

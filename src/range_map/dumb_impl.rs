@@ -117,7 +117,6 @@ impl DumbRangeMap {
         }
 
         if empty_len > 1 {
-            // FIXME:
             let mut annotations = std::mem::take(&mut self.arr[empty_start].annotations);
             for mut item in self.arr.drain(empty_start + 1..empty_start + empty_len) {
                 annotations.append(&mut item.annotations);
@@ -175,9 +174,6 @@ impl DumbRangeMap {
         }
     }
 
-    // TODO: reduce the usage of this
-    fn update_ann_pos(&mut self, range: Range<usize>) {}
-
     fn _replace(&mut self, ann: Arc<Annotation>, new_ann: Arc<Annotation>) {
         for span in self.arr.iter_mut() {
             if span.annotations.remove(&ann) {
@@ -199,6 +195,7 @@ impl RangeMap for DumbRangeMap {
     where
         F: FnMut(&Annotation) -> AnnPosRelativeToInsert,
     {
+        debug_log::debug_dbg!("BEFORE INSERT", &self);
         let Position { index, offset } = self.find_pos(pos);
         self.len += len;
         let mut done = false;
@@ -323,10 +320,6 @@ impl RangeMap for DumbRangeMap {
                 self.arr.insert(index + 1, next_empty_span);
             }
 
-            // TODO: Perf
-            let last = last.unwrap_or_else(|| middle.unwrap());
-            let next = next.unwrap_or_else(|| middle.unwrap()) + len;
-            self.update_ann_pos(last..next + 1);
             if index > 0 {
                 self.try_merge_empty_spans(index - 1, None);
             } else {
@@ -334,11 +327,13 @@ impl RangeMap for DumbRangeMap {
             }
         }
 
+        debug_log::debug_dbg!("AFTER INSERT", &self);
         self.check();
     }
 
     fn delete(&mut self, pos: usize, len: usize) {
         self.check();
+        debug_log::debug_dbg!("BEFORE DELETE", &self.arr);
         let Position {
             mut index,
             mut offset,
@@ -373,7 +368,7 @@ impl RangeMap for DumbRangeMap {
             self.try_merge_empty_spans(start_index, Some(len + 3));
         }
 
-        self.update_ann_pos(start_index.saturating_sub(1)..(start_index + 2).min(self.arr.len()));
+        debug_log::debug_dbg!("AFTER DELETE", &self.arr);
         self.check();
     }
 
@@ -411,11 +406,11 @@ impl RangeMap for DumbRangeMap {
                 let mut span = self.arr[start_index].clone();
                 span.len = left_len;
                 span.annotations.insert(annotation);
-                splitted.push(span);
+                push_span(&mut splitted, span);
                 if !clean_end {
                     let mut span = self.arr[start_index].clone();
                     span.len = end_len;
-                    splitted.push(span);
+                    push_span(&mut splitted, span);
                 }
 
                 self.arr.splice(start_index..start_index + 1, splitted);
@@ -547,7 +542,6 @@ impl RangeMap for DumbRangeMap {
                             insert_span(&mut self.arr, index, a);
                             break;
                         } else {
-                            let end_here = left_len == self.arr[index].len;
                             self.arr[index].annotations.insert(annotation.clone());
                         }
 
@@ -562,16 +556,18 @@ impl RangeMap for DumbRangeMap {
                         return;
                     }
 
-                    let (mut index, _) = self.find_annotation_last_pos(id).unwrap();
+                    let (mut index, ann) = self.find_annotation_last_pos(id).unwrap();
                     let mut left_len = len;
+                    let mut should_insert_empty = true;
                     while left_len > 0 {
                         if self.arr[index].len > left_len {
                             let len = self.arr[index].len;
-                            let (mut a, mut b) =
+                            let (a, mut b) =
                                 split_span(std::mem::take(&mut self.arr[index]), len - left_len);
                             b.annotations.retain(|f| f.id != id);
                             self.arr[index] = b;
                             insert_span(&mut self.arr, index, a);
+                            should_insert_empty = false;
                             break;
                         } else {
                             self.arr[index].annotations.retain(|f| f.id != id);
@@ -579,6 +575,18 @@ impl RangeMap for DumbRangeMap {
 
                         left_len -= self.arr[index].len;
                         index -= 1;
+                    }
+
+                    // should keep deleted annotation on edges
+                    if should_insert_empty && !self.arr[index].annotations.contains(&ann) {
+                        if self.arr[index].len == 0 {
+                            self.arr[index].annotations.insert(ann);
+                        } else {
+                            let mut a = self.arr[index].clone();
+                            a.len = 0;
+                            a.annotations.insert(ann);
+                            insert_span(&mut self.arr, index + 1, a);
+                        }
                     }
                 }
             }
@@ -589,15 +597,17 @@ impl RangeMap for DumbRangeMap {
                 std::cmp::Ordering::Equal => {}
                 std::cmp::Ordering::Greater => {
                     // move start forward, shrink
-                    let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
+                    let (mut index, ann) = self.find_annotation_first_pos(id).unwrap();
                     let mut left_len = start as usize;
+                    let mut should_insert_empty = true;
                     while left_len > 0 {
                         if self.arr[index].len > left_len {
-                            let (mut a, mut b) =
+                            let (mut a, b) =
                                 split_span(std::mem::take(&mut self.arr[index]), left_len);
                             a.annotations.retain(|f| f.id != id);
                             self.arr[index] = b;
                             insert_span(&mut self.arr, index, a);
+                            should_insert_empty = false;
                             break;
                         } else {
                             self.arr[index].annotations.retain(|f| f.id != id);
@@ -605,6 +615,24 @@ impl RangeMap for DumbRangeMap {
 
                         left_len -= self.arr[index].len;
                         index += 1;
+                    }
+
+                    // should keep deleted annotation on edges
+                    if should_insert_empty
+                        && self
+                            .arr
+                            .get(index)
+                            .map(|x| !x.annotations.contains(&ann))
+                            .unwrap_or(true)
+                    {
+                        if self.arr.get(index).map(|x| x.len == 0).unwrap_or(false) {
+                            self.arr[index].annotations.insert(ann);
+                        } else {
+                            let mut empty_span = self.arr[index].clone();
+                            empty_span.len = 0;
+                            empty_span.annotations.insert(ann);
+                            insert_span(&mut self.arr, index, empty_span);
+                        }
                     }
                 }
                 std::cmp::Ordering::Less => {
@@ -621,8 +649,6 @@ impl RangeMap for DumbRangeMap {
                             self.arr[index] = a;
                             insert_span(&mut self.arr, index, b);
                             break;
-                        } else {
-                            let begin_here = left_len == self.arr[index].len;
                         }
 
                         left_len -= self.arr[index].len;

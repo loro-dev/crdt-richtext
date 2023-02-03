@@ -17,6 +17,7 @@ pub trait RangeMap {
     }
     fn delete(&mut self, pos: usize, len: usize);
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation);
+    /// should keep the shrink annotations around even if they are deleted completely
     fn adjust_annotation(
         &mut self,
         id: OpID,

@@ -217,6 +217,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         assert!(spans.len() <= 3);
         assert!(spans.iter().map(|x| x.len).sum::<usize>() == 2);
         if is_local && spans.len() > 1 {
+            debug_log::group!("LOCAL HANDLER");
+            debug_log::debug_dbg!("Before", &self.range_map);
             assert!(spans.iter().filter(|x| x.len != 0).count() == 2);
             let mut visited_left = false;
             let mut pure_left = BTreeSet::new();
@@ -338,6 +340,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                     }
                 }
             }
+            debug_log::debug_dbg!("After", &self.range_map);
+            debug_log::group_end!();
         }
 
         self.range_map.insert(pos * 3 + 1, len * 3, |ann| {
@@ -403,6 +407,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         match op {
             RangeOp::Patch(patch) => {
                 if patch.move_start {
+                    debug_log::debug_dbg!(&self.range_map, &patch,);
                     let (ann, pos) = self
                         .range_map
                         .get_annotation_pos(patch.target_range_id)
