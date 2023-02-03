@@ -224,39 +224,35 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             let mut visited_left = false;
             let mut pure_left = BTreeSet::new();
             let mut pure_middle = BTreeSet::new();
-            let mut left_or_middle_annotations = BTreeSet::new();
-            let mut right_or_middle_annotations = BTreeSet::new();
+            let mut left_annotations = BTreeSet::new();
+            let mut right_annotations = BTreeSet::new();
             for span in spans {
                 if !visited_left {
                     // left
                     assert_eq!(span.len, 1);
                     visited_left = true;
                     pure_left = span.annotations.clone();
-                    left_or_middle_annotations = span.annotations;
+                    left_annotations = span.annotations;
                 } else if span.len == 0 {
                     // middle
-                    for ann in span.annotations.iter() {
-                        left_or_middle_annotations.insert(ann.clone());
-                        right_or_middle_annotations.insert(ann.clone());
-                    }
                     pure_middle = span.annotations;
                 } else {
                     // right
                     assert_eq!(span.len, 1);
                     for ann in span.annotations.iter() {
-                        right_or_middle_annotations.insert(ann.clone());
-                        left_or_middle_annotations.remove(ann);
+                        right_annotations.insert(ann.clone());
+                        left_annotations.remove(ann);
                         pure_middle.remove(ann);
                     }
                 }
             }
 
             for ann in pure_left {
-                right_or_middle_annotations.remove(&ann);
+                right_annotations.remove(&ann);
                 pure_middle.remove(&ann);
             }
 
-            for annotation in left_or_middle_annotations {
+            for annotation in left_annotations {
                 let end_id = annotation.range.end.id;
                 if end_id != left_id && end_id != right_id {
                     // TODO: simplify
@@ -294,7 +290,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 }
             }
 
-            for annotation in right_or_middle_annotations {
+            for annotation in right_annotations {
                 let start_id = annotation.range.start.id;
                 if start_id != left_id && start_id != right_id {
                     match annotation.range.start.type_ {
