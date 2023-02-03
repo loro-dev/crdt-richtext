@@ -213,8 +213,22 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         Cmp: FnMut(OpID) -> Ordering,
     {
         let mut ans = vec![];
-        let spans = self.range_map.get_annotations(pos * 3, 2);
-        assert!(spans.len() <= 3);
+        // Maybe add the zero-len filter rule as a requirement for the range_map?
+        let mut spans: Vec<Span> = self
+            .range_map
+            .get_annotations(pos * 3, 2)
+            .into_iter()
+            .skip_while(|x| x.len == 0)
+            .collect();
+        for i in (0..spans.len()).rev() {
+            if spans[i].len != 0 {
+                spans.drain(i + 1..);
+                break;
+            }
+        }
+
+        let spans = spans; // make it immutable
+        assert!(spans.len() <= 3, "{}", spans.len());
         assert!(spans.iter().map(|x| x.len).sum::<usize>() == 2);
         let non_empty_span_count = spans.iter().filter(|x| x.len != 0).count();
         if is_local && non_empty_span_count > 1 {
