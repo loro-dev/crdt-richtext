@@ -174,19 +174,17 @@ impl DumbRangeMap {
         }
 
         for i in 1..self.arr.len() - 1 {
-            if self.arr[i].len == 0 {
-                let last = &self.arr[i - 1].annotations;
-                let next = &self.arr[i + 1].annotations;
-                let cur = &self.arr[i].annotations;
-                for ann in last.iter() {
-                    if !cur.contains(ann) {
-                        assert!(!next.contains(ann));
-                    }
+            let last = &self.arr[i - 1].annotations;
+            let next = &self.arr[i + 1].annotations;
+            let cur = &self.arr[i].annotations;
+            for ann in last.iter() {
+                if !cur.contains(ann) {
+                    assert!(!next.contains(ann));
                 }
-                for ann in next.iter() {
-                    if !cur.contains(ann) {
-                        assert!(!last.contains(ann));
-                    }
+            }
+            for ann in next.iter() {
+                if !cur.contains(ann) {
+                    assert!(!last.contains(ann));
                 }
             }
         }
@@ -271,15 +269,15 @@ impl RangeMap for DumbRangeMap {
             let mut use_next = false;
             // middle
             if let Some(middle) = middle {
-                middle_annotations = self.arr[middle].annotations.clone();
                 for ann in std::mem::take(&mut self.arr[middle].annotations) {
                     if shared.contains(&ann) {
+                        middle_annotations.insert(ann);
                         continue;
                     }
 
                     match f(&ann) {
                         AnnPosRelativeToInsert::BeforeInsert => {
-                            self.arr[middle].annotations.insert(ann);
+                            middle_annotations.insert(ann);
                         }
                         AnnPosRelativeToInsert::AfterInsert => {
                             use_next = true;
@@ -309,6 +307,7 @@ impl RangeMap for DumbRangeMap {
                             middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
                             if use_next {
+                                debug_log::debug_log!("next from left {:?}", &ann);
                                 next_empty_span.annotations.insert(ann.clone());
                             }
                         }
@@ -330,6 +329,7 @@ impl RangeMap for DumbRangeMap {
                             middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
                             if use_next {
+                                debug_log::debug_log!("next from right {:?}", &ann);
                                 next_empty_span.annotations.insert(ann.clone());
                             }
                         }
@@ -341,8 +341,10 @@ impl RangeMap for DumbRangeMap {
                 self.arr[middle].annotations = middle_annotations;
             }
 
+            debug_log::debug_log!("new_insert_span {index} {:?}", &new_insert_span);
             self.arr.insert(index, new_insert_span);
             if use_next {
+                debug_log::debug_log!("use_next {} {:?}", index + 1, &next_empty_span);
                 self.arr.insert(index + 1, next_empty_span);
             }
 
@@ -581,10 +583,6 @@ impl RangeMap for DumbRangeMap {
                 std::cmp::Ordering::Less => {
                     // move end backward, shrink
                     let len = (-end) as usize;
-                    if len == 0 {
-                        return;
-                    }
-
                     let (mut index, ann) = self.find_annotation_last_pos(id).unwrap();
                     let mut left_len = len;
                     let mut should_insert_empty = true;

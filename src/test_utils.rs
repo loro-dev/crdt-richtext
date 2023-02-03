@@ -514,10 +514,12 @@ impl Actor {
             if !self.visited.contains(&op.id()) {
                 debug_log::debug_dbg!(&self.list.content);
                 debug_log::debug_dbg!(&self.range);
+                debug_log::group!("apply {:?}", &op);
                 self.range
                     .apply_remote_op(op.clone(), &|x| index(&self.list, x).0);
                 self.range_ops.push(op.clone());
                 self.visited.insert(op.id());
+                debug_log::group_end!();
             }
         }
         debug_log::group_end!();
