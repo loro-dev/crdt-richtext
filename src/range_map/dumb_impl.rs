@@ -37,6 +37,10 @@ fn insert_span(arr: &mut Vec<Span>, index: usize, span: Span) {
         for ann in span.annotations {
             arr[index].annotations.insert(ann);
         }
+    } else if index > 0 && arr[index - 1].len == 0 && span.len == 0 {
+        for ann in span.annotations {
+            arr[index - 1].annotations.insert(ann);
+        }
     } else if arr[index].annotations.iter().eq(span.annotations.iter()) {
         merge_span(&mut arr[index], &span);
     } else {
@@ -640,8 +644,8 @@ impl RangeMap for DumbRangeMap {
 
                         // should keep deleted annotation on edges
                         if should_insert_empty && !self.arr[index].annotations.contains(&ann) {
-                            if self.arr[index].len == 0 {
-                                self.arr[index].annotations.insert(ann);
+                            if self.arr[index + 1].len == 0 {
+                                self.arr[index + 1].annotations.insert(ann);
                             } else {
                                 let mut a = self.arr[index].clone();
                                 a.len = 0;

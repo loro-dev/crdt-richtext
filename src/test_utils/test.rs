@@ -1843,6 +1843,207 @@ mod failed_tests {
         )
     }
 
+    #[test]
+    fn fuzz_23() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 190,
+                    pos: 190,
+                    len: 190,
+                },
+                Insert {
+                    actor: 190,
+                    pos: 43,
+                    len: 190,
+                },
+                Annotate {
+                    actor: 190,
+                    pos: 190,
+                    len: 190,
+                    annotation: UnLink,
+                },
+                Sync(255, 255),
+                Annotate {
+                    actor: 83,
+                    pos: 49,
+                    len: 255,
+                    annotation: UnLink,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnLink,
+                },
+                Annotate {
+                    actor: 190,
+                    pos: 66,
+                    len: 66,
+                    annotation: Bold,
+                },
+                Annotate {
+                    actor: 172,
+                    pos: 172,
+                    len: 172,
+                    annotation: Bold,
+                },
+                Annotate {
+                    actor: 190,
+                    pos: 151,
+                    len: 190,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 190,
+                    pos: 190,
+                    len: 190,
+                    annotation: Comment,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 114,
+                },
+                Annotate {
+                    actor: 78,
+                    pos: 78,
+                    len: 78,
+                    annotation: Bold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 190,
+                    pos: 190,
+                    len: 190,
+                    annotation: UnLink,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 114,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 255,
+                },
+                Delete {
+                    actor: 78,
+                    pos: 78,
+                    len: 78,
+                },
+                Annotate {
+                    actor: 161,
+                    pos: 161,
+                    len: 161,
+                    annotation: UnBold,
+                },
+                Sync(26, 26),
+                Insert {
+                    actor: 48,
+                    pos: 48,
+                    len: 70,
+                },
+                Delete {
+                    actor: 70,
+                    pos: 70,
+                    len: 65,
+                },
+                Delete {
+                    actor: 255,
+                    pos: 255,
+                    len: 255,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 114,
+                },
+                Delete {
+                    actor: 255,
+                    pos: 247,
+                    len: 251,
+                },
+                Delete {
+                    actor: 78,
+                    pos: 78,
+                    len: 63,
+                },
+                Insert {
+                    actor: 205,
+                    pos: 190,
+                    len: 190,
+                },
+                Delete {
+                    actor: 70,
+                    pos: 70,
+                    len: 70,
+                },
+                Delete {
+                    actor: 70,
+                    pos: 70,
+                    len: 70,
+                },
+                Sync(255, 255),
+            ],
+        )
+    }
+
     fn fuzz_empty() {
         fuzzing(2, vec![])
     }
