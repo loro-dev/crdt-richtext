@@ -424,7 +424,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 },
                 index,
             );
-            debug_log::debug_dbg!(&self.range_map, &patch, ann, &pos, new_start);
+            debug_log::debug_dbg!(&patch, ann, &pos, new_start);
             self.range_map.adjust_annotation(
                 patch.target_range_id,
                 Some((

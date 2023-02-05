@@ -7,6 +7,7 @@ use super::*;
 #[derive(Debug, PartialEq, Eq)]
 pub struct DumbRangeMap {
     arr: Vec<Span>,
+    ann: BTreeSet<Arc<Annotation>>,
     len: usize,
 }
 
@@ -207,6 +208,10 @@ impl DumbRangeMap {
                 }
             }
         }
+
+        for ann in self.ann.iter() {
+            assert!(all_annotations.contains(&ann.id));
+        }
     }
 
     fn _replace(&mut self, ann: Arc<Annotation>, new_ann: Arc<Annotation>) {
@@ -222,6 +227,7 @@ impl RangeMap for DumbRangeMap {
     fn init() -> Self {
         DumbRangeMap {
             arr: Default::default(),
+            ann: BTreeSet::new(),
             len: 0,
         }
     }
@@ -437,6 +443,7 @@ impl RangeMap for DumbRangeMap {
         }
 
         let annotation = Arc::new(annotation);
+        self.ann.insert(annotation.clone());
         let clean_end = end_offset == self.arr[end_index].len;
         if start_index == end_index {
             if clean_start && clean_end {
@@ -608,6 +615,10 @@ impl RangeMap for DumbRangeMap {
                         let mut left_len = len;
                         let mut should_insert_empty = true;
                         while left_len > 0 {
+                            if !self.arr[index].annotations.contains(&ann) {
+                                break;
+                            }
+
                             if self.arr[index].len > left_len {
                                 let len = self.arr[index].len;
                                 let (a, mut b) = split_span(
@@ -655,6 +666,10 @@ impl RangeMap for DumbRangeMap {
                         let mut left_len = start as usize;
                         let mut should_insert_empty = true;
                         while left_len > 0 {
+                            if !self.arr[index].annotations.contains(&ann) {
+                                break;
+                            }
+
                             if self.arr[index].len > left_len {
                                 let (mut a, b) =
                                     split_span(std::mem::take(&mut self.arr[index]), left_len);
