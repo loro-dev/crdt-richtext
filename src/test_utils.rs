@@ -241,6 +241,18 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
                     RangeOp::Annotate(_) => false,
                 })
                 .collect::<Vec<_>>();
+            assert_eq!(&*a.list.content, &*b.list.content);
+            // dbg!(a
+            //     .list
+            //     .content
+            //     .iter()
+            //     .enumerate()
+            //     .map(|(i, x)| format!("{}:{}-{}", i, x.id.client_id, x.id.clock))
+            //     .collect::<Vec<_>>()
+            //     .join(", "));
+            // dbg!(&patches);
+            // dbg!(&a.range);
+            // dbg!(&b.range);
             assert_eq!(a.get_annotations(..), b.get_annotations(..));
         }
     }
@@ -274,6 +286,7 @@ impl Actor {
         }
 
         debug_log::debug_dbg!(&self.range);
+        self.next_lamport += len as Lamport;
         self._range_insert(len, &op, arr_pos, true);
     }
 
@@ -368,6 +381,7 @@ impl Actor {
         let op = YataImpl::new_del_op(&self.list, pos, len);
         YataImpl::integrate_delete_op(&mut self.list, op.clone());
         self.deleted.extend(op.into_iter());
+        self.next_lamport += len as Lamport;
         self.range.delete_text(pos, len);
     }
 
@@ -453,6 +467,7 @@ impl Actor {
         let op_id = self._use_next_id();
         self.range_ops
             .push(self.range.delete_annotation(lamport, op_id, id));
+        // TODO: impl
     }
 
     fn next_id(&self) -> OpID {

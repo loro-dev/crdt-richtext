@@ -413,7 +413,6 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         Index: Fn(OpID) -> Result<usize, usize>,
     {
         if patch.move_start {
-            debug_log::debug_dbg!(&self.range_map, &patch,);
             let (ann, pos) = self
                 .range_map
                 .get_annotation_pos(patch.target_range_id)
@@ -425,6 +424,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 },
                 index,
             );
+            debug_log::debug_dbg!(&self.range_map, &patch, ann, &pos, new_start);
             self.range_map.adjust_annotation(
                 patch.target_range_id,
                 Some((

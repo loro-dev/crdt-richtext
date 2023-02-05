@@ -188,6 +188,25 @@ impl DumbRangeMap {
                 }
             }
         }
+
+        let mut all_annotations = BTreeSet::new();
+        for span in self.arr.iter() {
+            for ann in span.annotations.iter() {
+                all_annotations.insert(ann.id);
+            }
+        }
+
+        let mut end_ann = BTreeSet::new();
+        for i in 1..self.arr.len() {
+            let last = &self.arr[i - 1].annotations;
+            let cur = &self.arr[i].annotations;
+            for ann in last.iter() {
+                assert!(!end_ann.contains(&ann.id));
+                if !cur.contains(ann) {
+                    end_ann.insert(ann.id);
+                }
+            }
+        }
     }
 
     fn _replace(&mut self, ann: Arc<Annotation>, new_ann: Arc<Annotation>) {
@@ -684,6 +703,8 @@ impl RangeMap for DumbRangeMap {
                                 self.arr[index] = a;
                                 insert_span(&mut self.arr, index, b);
                                 break;
+                            } else {
+                                self.arr[index].annotations.insert(annotation.clone());
                             }
 
                             left_len -= self.arr[index].len;

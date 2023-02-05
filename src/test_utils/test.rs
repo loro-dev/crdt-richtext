@@ -1504,7 +1504,68 @@ mod failed_tests {
     }
 
     #[test]
+    fn fuzz_21() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 10,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 10,
+                    len: 10,
+                },
+                Sync(1, 0),
+                Annotate {
+                    actor: 1,
+                    pos: 0,
+                    len: 10,
+                    annotation: Bold,
+                },
+                Delete {
+                    actor: 1,
+                    pos: 14,
+                    len: 4,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 6,
+                    len: 10,
+                },
+                Delete {
+                    actor: 1,
+                    pos: 0,
+                    len: 10,
+                },
+                Sync(0, 1),
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    len: 1,
+                },
+            ],
+        )
+    }
+
     fn fuzz_empty() {
         fuzzing(2, vec![])
+    }
+
+    #[test]
+    fn fuzz_minimize() {
+        minify_error(
+            2,
+            vec![],
+            |n, actions| fuzzing(n as usize, actions.to_vec()),
+            |n, actions| actions.to_vec(),
+        )
     }
 }
