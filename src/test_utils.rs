@@ -7,7 +7,6 @@ use crdt_list::crdt::ListCrdt;
 use crdt_list::test::TestFramework;
 use crdt_list::yata::{self};
 use crdt_list::yata_dumb_impl::{Container, Op, OpId as ListOpId, YataImpl};
-use debug_log::debug_dbg;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SimpleSpan {
@@ -234,6 +233,14 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             debug_log::group!("merge {i}->{j}");
             b.merge(a);
             debug_log::group_end!();
+            let patches = a
+                .range_ops
+                .iter()
+                .filter(|x| match x {
+                    RangeOp::Patch(_) => true,
+                    RangeOp::Annotate(_) => false,
+                })
+                .collect::<Vec<_>>();
             assert_eq!(a.get_annotations(..), b.get_annotations(..));
         }
     }
@@ -333,24 +340,26 @@ impl Actor {
         }
 
         assert_eq!(i, arr_pos);
-        let mut range_ops = self
-            .range
-            .insert_text(text_pos, len, is_local, left, right, |a| {
+        let range_ops = self.range.insert_text(
+            text_pos,
+            len,
+            is_local,
+            left,
+            right,
+            self.next_lamport,
+            self.next_id(),
+            |a| {
                 // this can be O(lgN) using a proper data structure
                 if left_set.contains(&a) {
                     Ordering::Less
                 } else {
                     Ordering::Greater
                 }
-            });
+            },
+        );
 
-        if is_local {
-            for op in range_ops.iter_mut() {
-                op.set_id(self._use_next_id());
-                op.set_lamport(self._use_next_lamport());
-                self.visited.insert(op.id());
-            }
-        }
+        self.list.max_clock += range_ops.len();
+        self.next_lamport += range_ops.len() as Lamport;
         self.range_ops.extend(range_ops);
     }
 
@@ -403,6 +412,8 @@ impl Actor {
             Annotation {
                 id,
                 lamport,
+                lamport_start: lamport,
+                lamport_end: lamport,
                 range: AnchorRange { start, end },
                 merge_method,
                 type_: type_.to_string(),
@@ -442,6 +453,14 @@ impl Actor {
         let op_id = self._use_next_id();
         self.range_ops
             .push(self.range.delete_annotation(lamport, op_id, id));
+    }
+
+    fn next_id(&self) -> OpID {
+        let id = OpID {
+            client: self.list.id as ClientID,
+            counter: self.list.max_clock as Counter,
+        };
+        id
     }
 
     fn _use_next_id(&mut self) -> OpID {

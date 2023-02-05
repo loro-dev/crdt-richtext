@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Annotation, OpID};
+use crate::{Annotation, Lamport, OpID};
 
 pub trait RangeMap {
     fn init() -> Self;
@@ -21,8 +21,8 @@ pub trait RangeMap {
     fn adjust_annotation(
         &mut self,
         id: OpID,
-        start_shift: Option<(isize, Option<OpID>)>,
-        end_shift: Option<(isize, Option<OpID>)>,
+        start_shift: Option<(isize, Option<OpID>, Lamport)>,
+        end_shift: Option<(isize, Option<OpID>, Lamport)>,
     );
     fn delete_annotation(&mut self, id: OpID);
     /// TODO: need to clarify the rules when encounter an empty span on the edges

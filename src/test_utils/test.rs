@@ -1,5 +1,93 @@
+use std::time::Instant;
+
 use super::*;
 use ctor::ctor;
+
+pub fn minify_error<T, F, N>(site_num: u8, actions: Vec<T>, f: F, normalize: N)
+where
+    F: Fn(u8, &mut [T]),
+    N: Fn(u8, &mut [T]) -> Vec<T>,
+    T: Clone + Debug,
+{
+    std::panic::set_hook(Box::new(|_info| {
+        // ignore panic output
+    }));
+
+    let f_ref: *const _ = &f;
+    let f_ref: usize = f_ref as usize;
+    let actions_clone = actions.clone();
+    let action_ref: usize = (&actions_clone) as *const _ as usize;
+    #[allow(clippy::blocks_in_if_conditions)]
+    if std::panic::catch_unwind(|| {
+        // SAFETY: test
+        let f = unsafe { &*(f_ref as *const F) };
+        // SAFETY: test
+        let actions_ref = unsafe { &mut *(action_ref as *mut Vec<T>) };
+        f(site_num, actions_ref);
+    })
+    .is_ok()
+    {
+        println!("No Error Found");
+        return;
+    }
+
+    let mut minified = actions.clone();
+    let mut candidates = Vec::new();
+    for i in 0..actions.len() {
+        let mut new = actions.clone();
+        new.remove(i);
+        candidates.push(new);
+    }
+
+    println!("Minifying...");
+    let start = Instant::now();
+    while let Some(candidate) = candidates.pop() {
+        let f_ref: *const _ = &f;
+        let f_ref: usize = f_ref as usize;
+        let actions_clone = candidate.clone();
+        let action_ref: usize = (&actions_clone) as *const _ as usize;
+        #[allow(clippy::blocks_in_if_conditions)]
+        if std::panic::catch_unwind(|| {
+            // SAFETY: test
+            let f = unsafe { &*(f_ref as *const F) };
+            // SAFETY: test
+            let actions_ref = unsafe { &mut *(action_ref as *mut Vec<T>) };
+            f(site_num, actions_ref);
+        })
+        .is_err()
+        {
+            for i in 0..candidate.len() {
+                let mut new = candidate.clone();
+                new.remove(i);
+                candidates.push(new);
+            }
+            if candidate.len() < minified.len() {
+                minified = candidate;
+                println!("New min len={}", minified.len());
+            }
+            if candidates.len() > 40 {
+                candidates.drain(0..30);
+            }
+        }
+        if start.elapsed().as_secs() > 10 && minified.len() <= 4 {
+            break;
+        }
+        if start.elapsed().as_secs() > 60 {
+            break;
+        }
+    }
+
+    let minified = normalize(site_num, &mut minified);
+    println!(
+        "Old Length {}, New Length {}",
+        actions.len(),
+        minified.len()
+    );
+    dbg!(&minified);
+    if actions.len() > minified.len() {
+        minify_error(site_num, minified, f, normalize);
+    }
+}
 
 #[ctor]
 fn init_color_backtrace() {
@@ -1346,6 +1434,70 @@ mod failed_tests {
                     actor: 70,
                     pos: 70,
                     len: 70,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn fuzz_20() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 10,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 10,
+                    len: 10,
+                },
+                Sync(1, 0),
+                Annotate {
+                    actor: 1,
+                    pos: 0,
+                    len: 10,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 1,
+                    pos: 0,
+                    len: 10,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 0,
+                    pos: 3,
+                    len: 10,
+                    annotation: Bold,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 9,
+                    len: 10,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 1,
+                    len: 1,
+                },
+                Sync(0, 1),
+                Insert {
+                    actor: 0,
+                    pos: 8,
+                    len: 10,
+                },
+                Delete {
+                    actor: 1,
+                    pos: 3,
+                    len: 10,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 3,
+                    len: 1,
                 },
             ],
         )

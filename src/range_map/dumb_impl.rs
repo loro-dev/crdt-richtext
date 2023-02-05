@@ -547,139 +547,148 @@ impl RangeMap for DumbRangeMap {
     fn adjust_annotation(
         &mut self,
         id: OpID,
-        start: Option<(isize, Option<OpID>)>,
-        end: Option<(isize, Option<OpID>)>,
+        start: Option<(isize, Option<OpID>, Lamport)>,
+        end: Option<(isize, Option<OpID>, Lamport)>,
     ) {
         self.check();
         let (_, ann) = self.find_annotation_first_pos(id).unwrap();
         let mut new_ann = (*ann).clone();
-        if let Some((end, new_end_id)) = end {
-            new_ann.range.end.id = new_end_id;
-            match end.cmp(&0) {
-                std::cmp::Ordering::Equal => {}
-                std::cmp::Ordering::Greater => {
-                    // move end forward, expand
-                    let (mut index, annotation) = self.find_annotation_last_pos(id).unwrap();
-                    let mut left_len = end as usize;
-                    debug_log::debug_log!("start {}", index);
-                    index += 1;
-                    while left_len > 0 {
-                        debug_log::debug_log!("run {} left {}", index, left_len);
-                        if self.arr[index].len > left_len {
-                            let (mut a, b) =
-                                split_span(std::mem::take(&mut self.arr[index]), left_len);
-                            a.annotations.insert(annotation);
-                            self.arr[index] = b;
-                            insert_span(&mut self.arr, index, a);
-                            break;
-                        } else {
-                            self.arr[index].annotations.insert(annotation.clone());
-                        }
-
-                        left_len -= self.arr[index].len;
+        if let Some((end, new_end_id, lamport)) = end {
+            if (ann.lamport_end, ann.range.end.id) < (lamport, new_end_id) {
+                new_ann.range.end.id = new_end_id;
+                new_ann.lamport_end = lamport;
+                match end.cmp(&0) {
+                    std::cmp::Ordering::Equal => {}
+                    std::cmp::Ordering::Greater => {
+                        // move end forward, expand
+                        let (mut index, annotation) = self.find_annotation_last_pos(id).unwrap();
+                        let mut left_len = end as usize;
+                        debug_log::debug_log!("start {}", index);
                         index += 1;
+                        while left_len > 0 {
+                            debug_log::debug_log!("run {} left {}", index, left_len);
+                            if self.arr[index].len > left_len {
+                                let (mut a, b) =
+                                    split_span(std::mem::take(&mut self.arr[index]), left_len);
+                                a.annotations.insert(annotation);
+                                self.arr[index] = b;
+                                insert_span(&mut self.arr, index, a);
+                                break;
+                            } else {
+                                self.arr[index].annotations.insert(annotation.clone());
+                            }
+
+                            left_len -= self.arr[index].len;
+                            index += 1;
+                        }
                     }
-                }
-                std::cmp::Ordering::Less => {
-                    // move end backward, shrink
-                    let len = (-end) as usize;
-                    let (mut index, ann) = self.find_annotation_last_pos(id).unwrap();
-                    let mut left_len = len;
-                    let mut should_insert_empty = true;
-                    while left_len > 0 {
-                        if self.arr[index].len > left_len {
-                            let len = self.arr[index].len;
-                            let (a, mut b) =
-                                split_span(std::mem::take(&mut self.arr[index]), len - left_len);
-                            b.annotations.retain(|f| f.id != id);
-                            self.arr[index] = b;
-                            insert_span(&mut self.arr, index, a);
-                            should_insert_empty = false;
-                            break;
-                        } else {
-                            self.arr[index].annotations.retain(|f| f.id != id);
+                    std::cmp::Ordering::Less => {
+                        // move end backward, shrink
+                        let len = (-end) as usize;
+                        let (mut index, ann) = self.find_annotation_last_pos(id).unwrap();
+                        let mut left_len = len;
+                        let mut should_insert_empty = true;
+                        while left_len > 0 {
+                            if self.arr[index].len > left_len {
+                                let len = self.arr[index].len;
+                                let (a, mut b) = split_span(
+                                    std::mem::take(&mut self.arr[index]),
+                                    len - left_len,
+                                );
+                                b.annotations.retain(|f| f.id != id);
+                                self.arr[index] = b;
+                                insert_span(&mut self.arr, index, a);
+                                should_insert_empty = false;
+                                break;
+                            } else {
+                                self.arr[index].annotations.retain(|f| f.id != id);
+                            }
+
+                            left_len -= self.arr[index].len;
+                            index -= 1;
                         }
 
-                        left_len -= self.arr[index].len;
-                        index -= 1;
-                    }
-
-                    // should keep deleted annotation on edges
-                    if should_insert_empty && !self.arr[index].annotations.contains(&ann) {
-                        if self.arr[index].len == 0 {
-                            self.arr[index].annotations.insert(ann);
-                        } else {
-                            let mut a = self.arr[index].clone();
-                            a.len = 0;
-                            a.annotations.insert(ann);
-                            insert_span(&mut self.arr, index + 1, a);
+                        // should keep deleted annotation on edges
+                        if should_insert_empty && !self.arr[index].annotations.contains(&ann) {
+                            if self.arr[index].len == 0 {
+                                self.arr[index].annotations.insert(ann);
+                            } else {
+                                let mut a = self.arr[index].clone();
+                                a.len = 0;
+                                a.annotations.insert(ann);
+                                insert_span(&mut self.arr, index + 1, a);
+                            }
                         }
                     }
                 }
             }
         }
-        if let Some((start, new_start_id)) = start {
-            new_ann.range.start.id = new_start_id;
-            match start.cmp(&0) {
-                std::cmp::Ordering::Equal => {}
-                std::cmp::Ordering::Greater => {
-                    // move start forward, shrink
-                    let (mut index, ann) = self.find_annotation_first_pos(id).unwrap();
-                    let mut left_len = start as usize;
-                    let mut should_insert_empty = true;
-                    while left_len > 0 {
-                        if self.arr[index].len > left_len {
-                            let (mut a, b) =
-                                split_span(std::mem::take(&mut self.arr[index]), left_len);
-                            a.annotations.retain(|f| f.id != id);
-                            self.arr[index] = b;
-                            insert_span(&mut self.arr, index, a);
-                            should_insert_empty = false;
-                            break;
-                        } else {
-                            self.arr[index].annotations.retain(|f| f.id != id);
+
+        if let Some((start, new_start_id, lamport)) = start {
+            if (ann.lamport_start, ann.range.start.id) < (lamport, new_start_id) {
+                new_ann.range.start.id = new_start_id;
+                new_ann.lamport_start = lamport;
+                match start.cmp(&0) {
+                    std::cmp::Ordering::Equal => {}
+                    std::cmp::Ordering::Greater => {
+                        // move start forward, shrink
+                        let (mut index, ann) = self.find_annotation_first_pos(id).unwrap();
+                        let mut left_len = start as usize;
+                        let mut should_insert_empty = true;
+                        while left_len > 0 {
+                            if self.arr[index].len > left_len {
+                                let (mut a, b) =
+                                    split_span(std::mem::take(&mut self.arr[index]), left_len);
+                                a.annotations.retain(|f| f.id != id);
+                                self.arr[index] = b;
+                                insert_span(&mut self.arr, index, a);
+                                should_insert_empty = false;
+                                break;
+                            } else {
+                                self.arr[index].annotations.retain(|f| f.id != id);
+                            }
+
+                            left_len -= self.arr[index].len;
+                            index += 1;
                         }
 
-                        left_len -= self.arr[index].len;
-                        index += 1;
+                        // should keep deleted annotation on edges
+                        if should_insert_empty
+                            && self
+                                .arr
+                                .get(index)
+                                .map(|x| !x.annotations.contains(&ann))
+                                .unwrap_or(true)
+                        {
+                            if self.arr.get(index).map(|x| x.len == 0).unwrap_or(false) {
+                                self.arr[index].annotations.insert(ann);
+                            } else {
+                                let mut empty_span = self.arr[index].clone();
+                                empty_span.len = 0;
+                                empty_span.annotations.insert(ann);
+                                insert_span(&mut self.arr, index, empty_span);
+                            }
+                        }
                     }
+                    std::cmp::Ordering::Less => {
+                        // move start backward, expand
+                        let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
+                        let mut left_len = (-start) as usize;
 
-                    // should keep deleted annotation on edges
-                    if should_insert_empty
-                        && self
-                            .arr
-                            .get(index)
-                            .map(|x| !x.annotations.contains(&ann))
-                            .unwrap_or(true)
-                    {
-                        if self.arr.get(index).map(|x| x.len == 0).unwrap_or(false) {
-                            self.arr[index].annotations.insert(ann);
-                        } else {
-                            let mut empty_span = self.arr[index].clone();
-                            empty_span.len = 0;
-                            empty_span.annotations.insert(ann);
-                            insert_span(&mut self.arr, index, empty_span);
-                        }
-                    }
-                }
-                std::cmp::Ordering::Less => {
-                    // move start backward, expand
-                    let (mut index, annotation) = self.find_annotation_first_pos(id).unwrap();
-                    let mut left_len = (-start) as usize;
-
-                    index -= 1;
-                    while left_len > 0 {
-                        if self.arr[index].len > left_len {
-                            let (mut a, b) =
-                                split_span(std::mem::take(&mut self.arr[index]), left_len);
-                            a.annotations.insert(annotation);
-                            self.arr[index] = a;
-                            insert_span(&mut self.arr, index, b);
-                            break;
-                        }
-
-                        left_len -= self.arr[index].len;
                         index -= 1;
+                        while left_len > 0 {
+                            if self.arr[index].len > left_len {
+                                let (mut a, b) =
+                                    split_span(std::mem::take(&mut self.arr[index]), left_len);
+                                a.annotations.insert(annotation);
+                                self.arr[index] = a;
+                                insert_span(&mut self.arr, index, b);
+                                break;
+                            }
+
+                            left_len -= self.arr[index].len;
+                            index -= 1;
+                        }
                     }
                 }
             }
@@ -701,6 +710,8 @@ fn a(n: u64) -> Annotation {
     Annotation {
         id: id(n),
         lamport: 0,
+        lamport_start: 0,
+        lamport_end: 0,
         range: crate::AnchorRange {
             start: Anchor {
                 id: Some(id(n)),
@@ -826,7 +837,7 @@ mod test {
         let mut range_map = DumbRangeMap::init();
         range_map.insert_directly(0, 10);
         range_map.annotate(2, 2, a(0));
-        range_map.adjust_annotation(id(0), None, Some((2, None)));
+        range_map.adjust_annotation(id(0), None, Some((2, None, 2)));
         let spans = range_map.get_annotations(0, 10);
         assert_eq!(
             from_spans(&spans),
@@ -841,7 +852,7 @@ mod test {
             (vec![(vec![], 2), (vec![0, 1], 4), (vec![1], 1), (vec![], 3)])
         );
 
-        range_map.adjust_annotation(id(0), None, Some((2, None)));
+        range_map.adjust_annotation(id(0), None, Some((2, None, 3)));
         let spans = range_map.get_annotations(0, 10);
         assert_eq!(
             from_spans(&spans),
