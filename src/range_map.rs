@@ -29,14 +29,6 @@ pub trait RangeMap {
     fn len(&self) -> usize;
 }
 
-/// the position of span relative to a new insert
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RelativeSpanPos {
-    Before,
-    Middle,
-    After,
-}
-
 /// the position of annotation relative to a new insert
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnnPosRelativeToInsert {

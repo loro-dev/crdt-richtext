@@ -31,35 +31,9 @@ fn push_span(arr: &mut Vec<Span>, span: Span) {
     }
 }
 
-fn insert_span(arr: &mut Vec<Span>, index: usize, span: Span) {
-    if index == arr.len() {
-        push_span(arr, span);
-    } else if arr[index].len == 0 && span.len == 0 {
-        for ann in span.annotations {
-            arr[index].annotations.insert(ann);
-        }
-    } else if index > 0 && arr[index - 1].len == 0 && span.len == 0 {
-        for ann in span.annotations {
-            arr[index - 1].annotations.insert(ann);
-        }
-    } else if arr[index].annotations.iter().eq(span.annotations.iter()) {
-        merge_span(&mut arr[index], &span);
-    } else {
-        arr.insert(index, span);
-    }
-}
-
 /// a and b have the same annotations
 fn merge_span(a: &mut Span, b: &Span) {
     a.len += b.len;
-}
-
-fn split_span(span: Span, offset: usize) -> (Span, Span) {
-    let mut left = span.clone();
-    left.len = offset;
-    let mut right = span;
-    right.len -= offset;
-    (left, right)
 }
 
 impl DumbRangeMap {
@@ -130,39 +104,6 @@ impl DumbRangeMap {
 
             self.arr[empty_start].annotations = annotations;
         }
-    }
-
-    fn find_annotation_last_pos(&self, id: OpID) -> Option<(usize, Arc<Annotation>)> {
-        let mut annotation = None;
-        let last =
-            self.arr
-                .iter()
-                .rev()
-                .position(|x| match x.annotations.iter().find(|x| x.id == id) {
-                    Some(a) => {
-                        annotation = Some(a);
-                        true
-                    }
-                    None => false,
-                });
-
-        last.map(|last| (self.arr.len() - last - 1, annotation.unwrap().clone()))
-    }
-
-    fn find_annotation_first_pos(&self, id: OpID) -> Option<(usize, Arc<Annotation>)> {
-        let mut annotation = None;
-        let first = self
-            .arr
-            .iter()
-            .position(|x| match x.annotations.iter().find(|x| x.id == id) {
-                Some(a) => {
-                    annotation = Some(a);
-                    true
-                }
-                None => false,
-            });
-
-        first.map(|first| (first, annotation.unwrap().clone()))
     }
 
     fn check(&self) {
