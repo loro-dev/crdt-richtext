@@ -60,7 +60,7 @@ pub struct Patch {
 pub struct Annotation {
     pub id: OpID,
     /// lamport value of the current range (it may be updated by patch)
-    pub range_lamport: Lamport,
+    pub range_lamport: (Lamport, OpID),
     pub range: AnchorRange,
     pub merge_method: RangeMergeRule,
     // TODO: use internal string
@@ -100,14 +100,7 @@ impl RangeOp {
     fn lamport(&self) -> Lamport {
         match self {
             RangeOp::Patch(x) => x.lamport,
-            RangeOp::Annotate(x) => x.range_lamport,
-        }
-    }
-
-    fn set_lamport(&mut self, lamport: Lamport) {
-        match self {
-            RangeOp::Patch(x) => x.lamport = lamport,
-            RangeOp::Annotate(x) => x.range_lamport = lamport,
+            RangeOp::Annotate(x) => x.range_lamport.0,
         }
     }
 }
@@ -329,6 +322,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                     self.range_map.adjust_annotation(
                         annotation.id,
                         next_lamport,
+                        next_op_id,
                         None,
                         Some((1, right_id)),
                     );
@@ -345,6 +339,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                     self.range_map.adjust_annotation(
                         annotation.id,
                         next_lamport,
+                        next_op_id,
                         None,
                         Some((-1, left_id)),
                     );
@@ -370,6 +365,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                             self.range_map.adjust_annotation(
                                 annotation.id,
                                 next_lamport,
+                                next_op_id,
                                 Some((1, right_id)),
                                 None,
                             );
@@ -388,6 +384,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                         self.range_map.adjust_annotation(
                             annotation.id,
                             next_lamport,
+                            next_op_id,
                             Some((-1, left_id)),
                             None,
                         );
@@ -426,6 +423,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         self.range_map.adjust_annotation(
             patch.target_range_id,
             patch.lamport,
+            patch.id,
             Some((new_start as isize - pos.start as isize, patch.move_start_to)),
             Some((new_end as isize - pos.end as isize, patch.move_end_to)),
         );
@@ -503,7 +501,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             let len = (next_index + 2) / 3 - (last_index + 2) / 3;
             span.len = len;
 
-            let mut annotations: HashMap<String, (Lamport, Vec<Arc<Annotation>>)> = HashMap::new();
+            let mut annotations: HashMap<String, ((Lamport, OpID), Vec<Arc<Annotation>>)> =
+                HashMap::new();
             for a in std::mem::take(&mut span.annotations) {
                 if let Some(x) = annotations.get_mut(&a.type_) {
                     if a.merge_method == RangeMergeRule::Inclusive {
