@@ -51,8 +51,6 @@ pub enum RangeMergeRule {
 pub struct Patch {
     pub id: OpID,
     pub target_range_id: OpID,
-    pub move_start: bool,
-    pub move_end: bool,
     pub move_start_to: Option<OpID>,
     pub move_end_to: Option<OpID>,
     pub lamport: Lamport,
@@ -61,9 +59,8 @@ pub struct Patch {
 #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Annotation {
     pub id: OpID,
-    pub lamport: Lamport,
-    pub lamport_start: Lamport,
-    pub lamport_end: Lamport,
+    /// lamport value of the current range (it may be updated by patch)
+    pub range_lamport: Lamport,
     pub range: AnchorRange,
     pub merge_method: RangeMergeRule,
     // TODO: use internal string
@@ -103,14 +100,14 @@ impl RangeOp {
     fn lamport(&self) -> Lamport {
         match self {
             RangeOp::Patch(x) => x.lamport,
-            RangeOp::Annotate(x) => x.lamport,
+            RangeOp::Annotate(x) => x.range_lamport,
         }
     }
 
     fn set_lamport(&mut self, lamport: Lamport) {
         match self {
             RangeOp::Patch(x) => x.lamport = lamport,
-            RangeOp::Annotate(x) => x.lamport = lamport,
+            RangeOp::Annotate(x) => x.range_lamport = lamport,
         }
     }
 }
@@ -326,15 +323,14 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                         id: next_op_id,
                         lamport: next_lamport,
                         target_range_id: annotation.id,
-                        move_start: false,
-                        move_end: true,
-                        move_start_to: None,
+                        move_start_to: annotation.range.start.id,
                         move_end_to: right_id,
                     }));
                     self.range_map.adjust_annotation(
                         annotation.id,
+                        next_lamport,
                         None,
-                        Some((1, right_id, next_lamport)),
+                        Some((1, right_id)),
                     );
                     next_op_id.counter += 1;
                     next_lamport += 1;
@@ -343,15 +339,14 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                         id: next_op_id,
                         lamport: next_lamport,
                         target_range_id: annotation.id,
-                        move_start: false,
-                        move_end: true,
-                        move_start_to: None,
+                        move_start_to: annotation.range.start.id,
                         move_end_to: left_id,
                     }));
                     self.range_map.adjust_annotation(
                         annotation.id,
+                        next_lamport,
                         None,
-                        Some((-1, left_id, next_lamport)),
+                        Some((-1, left_id)),
                     );
                     next_op_id.counter += 1;
                     next_lamport += 1;
@@ -369,14 +364,13 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                                 id: next_op_id,
                                 lamport: next_lamport,
                                 target_range_id: annotation.id,
-                                move_start: true,
-                                move_end: false,
                                 move_start_to: right_id,
-                                move_end_to: None,
+                                move_end_to: annotation.range.end.id,
                             }));
                             self.range_map.adjust_annotation(
                                 annotation.id,
-                                Some((1, right_id, next_lamport)),
+                                next_lamport,
+                                Some((1, right_id)),
                                 None,
                             );
                             next_op_id.counter += 1;
@@ -388,14 +382,13 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                             id: next_op_id,
                             lamport: next_lamport,
                             target_range_id: annotation.id,
-                            move_start: true,
-                            move_end: false,
                             move_start_to: right_id,
-                            move_end_to: None,
+                            move_end_to: annotation.range.end.id,
                         }));
                         self.range_map.adjust_annotation(
                             annotation.id,
-                            Some((-1, left_id, next_lamport)),
+                            next_lamport,
+                            Some((-1, left_id)),
                             None,
                         );
                         next_op_id.counter += 1;
@@ -413,47 +406,29 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
     where
         Index: Fn(OpID) -> Result<usize, usize>,
     {
-        if patch.move_start {
-            let Some((ann, pos)) = self.range_map.get_annotation_pos(patch.target_range_id) else { return };
-            let new_start = index_start(
-                Anchor {
-                    id: patch.move_start_to,
-                    type_: ann.range.start.type_,
-                },
-                index,
-            );
-            debug_log::debug_dbg!(&patch, ann, &pos, new_start);
-            self.range_map.adjust_annotation(
-                patch.target_range_id,
-                Some((
-                    new_start as isize - pos.start as isize,
-                    patch.move_start_to,
-                    patch.lamport,
-                )),
-                None,
-            );
-        }
-        if patch.move_end {
-            let Some((ann, pos)) = self.range_map.get_annotation_pos(patch.target_range_id) else { return };
-            let new_end = index_end(
-                Anchor {
-                    id: patch.move_end_to,
-                    type_: ann.range.end.type_,
-                },
-                index,
-            )
-            .unwrap_or(self.range_map.len());
-            debug_log::debug_dbg!(&patch, &pos, &ann, self.range_map.len(), new_end);
-            self.range_map.adjust_annotation(
-                patch.target_range_id,
-                None,
-                Some((
-                    new_end as isize - pos.end as isize,
-                    patch.move_end_to,
-                    patch.lamport,
-                )),
-            );
-        }
+        let Some((ann, pos)) = self.range_map.get_annotation_pos(patch.target_range_id) else { return };
+        let new_start = index_start(
+            Anchor {
+                id: patch.move_start_to,
+                type_: ann.range.start.type_,
+            },
+            index,
+        );
+        let new_end = index_end(
+            Anchor {
+                id: patch.move_end_to,
+                type_: ann.range.end.type_,
+            },
+            index,
+        )
+        .unwrap_or(self.range_map.len());
+
+        self.range_map.adjust_annotation(
+            patch.target_range_id,
+            patch.lamport,
+            Some((new_start as isize - pos.start as isize, patch.move_start_to)),
+            Some((new_end as isize - pos.end as isize, patch.move_end_to)),
+        );
     }
 
     pub fn delete_text(&mut self, pos: usize, len: usize) {
@@ -483,8 +458,6 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         RangeOp::Patch(Patch {
             id: op_id,
             target_range_id: target_id,
-            move_end: true,
-            move_start: true,
             move_start_to: None,
             move_end_to: None,
             lamport,
@@ -535,11 +508,11 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 if let Some(x) = annotations.get_mut(&a.type_) {
                     if a.merge_method == RangeMergeRule::Inclusive {
                         x.1.push(a);
-                    } else if a.lamport > x.0 {
-                        *x = (a.lamport, vec![a]);
+                    } else if a.range_lamport > x.0 {
+                        *x = (a.range_lamport, vec![a]);
                     }
                 } else {
-                    annotations.insert(a.type_.clone(), (a.lamport, vec![a]));
+                    annotations.insert(a.type_.clone(), (a.range_lamport, vec![a]));
                 }
             }
             span.annotations = annotations.into_values().flat_map(|x| x.1).collect();

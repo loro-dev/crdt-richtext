@@ -589,16 +589,17 @@ impl RangeMap for DumbRangeMap {
     fn adjust_annotation(
         &mut self,
         id: OpID,
-        start: Option<(isize, Option<OpID>, Lamport)>,
-        end: Option<(isize, Option<OpID>, Lamport)>,
+        lamport: Lamport,
+        start: Option<(isize, Option<OpID>)>,
+        end: Option<(isize, Option<OpID>)>,
     ) {
         self.check();
         let (_, ann) = self.find_annotation_first_pos(id).unwrap();
         let mut new_ann = (*ann).clone();
-        if let Some((end, new_end_id, lamport)) = end {
-            if (ann.lamport_end, ann.range.end.id) < (lamport, new_end_id) {
+        if let Some((end, new_end_id)) = end {
+            if (ann.range_lamport, ann.range.end.id) < (lamport, new_end_id) {
                 new_ann.range.end.id = new_end_id;
-                new_ann.lamport_end = lamport;
+                new_ann.range_lamport = lamport;
                 match end.cmp(&0) {
                     std::cmp::Ordering::Equal => {}
                     std::cmp::Ordering::Greater => {
@@ -670,10 +671,10 @@ impl RangeMap for DumbRangeMap {
             }
         }
 
-        if let Some((start, new_start_id, lamport)) = start {
-            if (ann.lamport_start, ann.range.start.id) < (lamport, new_start_id) {
+        if let Some((start, new_start_id)) = start {
+            if start != 0 && (ann.range_lamport, ann.range.start.id) < (lamport, new_start_id) {
                 new_ann.range.start.id = new_start_id;
-                new_ann.lamport_start = lamport;
+                new_ann.range_lamport = lamport;
                 match start.cmp(&0) {
                     std::cmp::Ordering::Equal => {}
                     std::cmp::Ordering::Greater => {
@@ -761,9 +762,7 @@ fn id(k: u64) -> OpID {
 fn a(n: u64) -> Annotation {
     Annotation {
         id: id(n),
-        lamport: 0,
-        lamport_start: 0,
-        lamport_end: 0,
+        range_lamport: 0,
         range: crate::AnchorRange {
             start: Anchor {
                 id: Some(id(n)),
@@ -889,7 +888,7 @@ mod test {
         let mut range_map = DumbRangeMap::init();
         range_map.insert_directly(0, 10);
         range_map.annotate(2, 2, a(0));
-        range_map.adjust_annotation(id(0), None, Some((2, None, 2)));
+        range_map.adjust_annotation(id(0), 2, None, Some((2, None)));
         let spans = range_map.get_annotations(0, 10);
         assert_eq!(
             from_spans(&spans),
@@ -904,7 +903,7 @@ mod test {
             (vec![(vec![], 2), (vec![0, 1], 4), (vec![1], 1), (vec![], 3)])
         );
 
-        range_map.adjust_annotation(id(0), None, Some((2, None, 3)));
+        range_map.adjust_annotation(id(0), 3, None, Some((2, None)));
         let spans = range_map.get_annotations(0, 10);
         assert_eq!(
             from_spans(&spans),

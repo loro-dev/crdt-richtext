@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::Range,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, ops::Range, sync::Arc};
 
 use crate::{Annotation, Lamport, OpID};
 
@@ -21,8 +17,9 @@ pub trait RangeMap {
     fn adjust_annotation(
         &mut self,
         id: OpID,
-        start_shift: Option<(isize, Option<OpID>, Lamport)>,
-        end_shift: Option<(isize, Option<OpID>, Lamport)>,
+        lamport: Lamport,
+        start_shift: Option<(isize, Option<OpID>)>,
+        end_shift: Option<(isize, Option<OpID>)>,
     );
     fn delete_annotation(&mut self, id: OpID);
     /// TODO: need to clarify the rules when encounter an empty span on the edges

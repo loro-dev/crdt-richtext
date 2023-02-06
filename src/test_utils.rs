@@ -428,9 +428,7 @@ impl Actor {
         self.visited.insert(id);
         let ann = Annotation {
             id,
-            lamport,
-            lamport_start: lamport,
-            lamport_end: lamport,
+            range_lamport: lamport,
             range: AnchorRange { start, end },
             merge_method,
             type_: type_.to_string(),
