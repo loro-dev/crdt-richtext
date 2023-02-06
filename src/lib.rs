@@ -244,11 +244,12 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 Some(id) => cmp(id) == Ordering::Greater,
                 None => true,
             };
+            debug_log::debug_dbg!(ann);
             match (start_before_insert, end_after_insert) {
                 (true, true) => AnnPosRelativeToInsert::IncludeInsert,
                 (true, false) => AnnPosRelativeToInsert::BeforeInsert,
                 (false, true) => AnnPosRelativeToInsert::AfterInsert,
-                (false, false) => unreachable!(),
+                (false, false) => AnnPosRelativeToInsert::Deleted,
             }
         });
 
@@ -413,10 +414,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         Index: Fn(OpID) -> Result<usize, usize>,
     {
         if patch.move_start {
-            let (ann, pos) = self
-                .range_map
-                .get_annotation_pos(patch.target_range_id)
-                .unwrap();
+            let Some((ann, pos)) = self.range_map.get_annotation_pos(patch.target_range_id) else { return };
             let new_start = index_start(
                 Anchor {
                     id: patch.move_start_to,
@@ -436,10 +434,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             );
         }
         if patch.move_end {
-            let (ann, pos) = self
-                .range_map
-                .get_annotation_pos(patch.target_range_id)
-                .unwrap();
+            let Some((ann, pos)) = self.range_map.get_annotation_pos(patch.target_range_id) else { return };
             let new_end = index_end(
                 Anchor {
                     id: patch.move_end_to,

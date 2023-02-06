@@ -2044,6 +2044,68 @@ mod failed_tests {
         )
     }
 
+    #[test]
+    fn fuzz_24() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 190,
+                    pos: 190,
+                    len: 190,
+                },
+                Insert {
+                    actor: 190,
+                    pos: 43,
+                    len: 190,
+                },
+                Annotate {
+                    actor: 190,
+                    pos: 190,
+                    len: 190,
+                    annotation: UnLink,
+                },
+                Sync(255, 255),
+                Insert {
+                    actor: 0,
+                    pos: 41,
+                    len: 0,
+                },
+                Insert {
+                    actor: 5,
+                    pos: 5,
+                    len: 5,
+                },
+                Delete {
+                    actor: 105,
+                    pos: 11,
+                    len: 10,
+                },
+                Insert {
+                    actor: 5,
+                    pos: 155,
+                    len: 190,
+                },
+                Delete {
+                    actor: 66,
+                    pos: 66,
+                    len: 66,
+                },
+                Insert {
+                    actor: 36,
+                    pos: 36,
+                    len: 36,
+                },
+                Sync(255, 255),
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 16,
+                },
+            ],
+        )
+    }
+
     fn fuzz_empty() {
         fuzzing(2, vec![])
     }

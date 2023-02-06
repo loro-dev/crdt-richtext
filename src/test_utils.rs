@@ -219,7 +219,6 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
         preprocess_action(&actors, &mut action);
         // println!("{:?},", &action);
         debug_log::group!("{:?},", &action);
-        debug_log::debug_dbg!(&actors[0].range);
         apply_action(&mut actors, action);
         debug_log::group_end!();
     }
@@ -273,6 +272,7 @@ impl Actor {
     }
 
     pub fn insert(&mut self, pos: usize, len: usize) {
+        debug_log::group!("insert");
         let (arr_pos, op) = self._get_list_insert_op(pos);
 
         self.integrate_insert_op(&op, true);
@@ -288,6 +288,7 @@ impl Actor {
         debug_log::debug_dbg!(&self.range);
         self.next_lamport += len as Lamport;
         self._range_insert(len, &op, arr_pos, true);
+        debug_log::group_end!();
     }
 
     /// this should happen after the op is integrated to the list crdt
@@ -371,6 +372,9 @@ impl Actor {
             },
         );
 
+        if !range_ops.is_empty() {
+            debug_log::debug_log!("range_ops: {:#?}", range_ops);
+        }
         self.list.max_clock += range_ops.len();
         self.next_lamport += range_ops.len() as Lamport;
         self.range_ops.extend(range_ops);
@@ -422,19 +426,18 @@ impl Actor {
             std::ops::Bound::Unbounded => Anchor::before_none(),
         };
         self.visited.insert(id);
-        self.range_ops.push(self.range.annotate(
-            Annotation {
-                id,
-                lamport,
-                lamport_start: lamport,
-                lamport_end: lamport,
-                range: AnchorRange { start, end },
-                merge_method,
-                type_: type_.to_string(),
-                meta: None,
-            },
-            range,
-        ));
+        let ann = Annotation {
+            id,
+            lamport,
+            lamport_start: lamport,
+            lamport_end: lamport,
+            range: AnchorRange { start, end },
+            merge_method,
+            type_: type_.to_string(),
+            meta: None,
+        };
+        debug_log::debug_dbg!(&ann);
+        self.range_ops.push(self.range.annotate(ann, range));
     }
 
     pub fn get_annotations(&self, range: impl RangeBounds<usize>) -> Vec<SimpleSpan> {
@@ -546,12 +549,18 @@ impl Actor {
             }
         }
 
+        debug_log::debug_dbg!(self
+            .list
+            .content
+            .iter()
+            .enumerate()
+            .map(|(i, x)| format!("{}:{}-{}", i, x.id.client_id, x.id.clock))
+            .collect::<Vec<_>>()
+            .join(", "));
         // annotation
         debug_log::group!("apply remote annotation");
         for op in other.range_ops.iter() {
             if !self.visited.contains(&op.id()) {
-                debug_log::debug_dbg!(&self.list.content);
-                debug_log::debug_dbg!(&self.range);
                 debug_log::group!("apply {:?}", &op);
                 self.range
                     .apply_remote_op(op.clone(), &|x| index(&self.list, x).0);
