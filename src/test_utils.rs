@@ -468,7 +468,6 @@ impl Actor {
         let op_id = self._use_next_id();
         self.range_ops
             .push(self.range.delete_annotation(lamport, op_id, id));
-        // TODO: impl
     }
 
     fn next_id(&self) -> OpID {

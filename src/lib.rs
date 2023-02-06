@@ -190,8 +190,6 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
     /// `cmp` compare the positions of the given op and insert_op
     ///
     /// It may generate Patch only when is_local=true
-    ///
-    /// TODO: get next_id and lamport
     pub fn insert_text<Cmp>(
         &mut self,
         pos: usize,
