@@ -24,3 +24,9 @@ name = "basic"
 path = "fuzz_targets/basic.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "five-actors"
+path = "fuzz_targets/five-actors.rs"
+test = false
+doc = false
