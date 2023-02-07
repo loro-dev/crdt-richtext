@@ -237,7 +237,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 (true, true) => AnnPosRelativeToInsert::IncludeInsert,
                 (true, false) => AnnPosRelativeToInsert::BeforeInsert,
                 (false, true) => AnnPosRelativeToInsert::AfterInsert,
-                (false, false) => AnnPosRelativeToInsert::Deleted,
+                (false, false) => unreachable!(),
             }
         });
 

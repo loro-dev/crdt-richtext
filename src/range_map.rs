@@ -35,7 +35,6 @@ pub enum AnnPosRelativeToInsert {
     BeforeInsert,
     AfterInsert,
     IncludeInsert,
-    Deleted,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

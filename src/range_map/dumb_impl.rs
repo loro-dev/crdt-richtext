@@ -179,7 +179,6 @@ impl DumbRangeMap {
 impl RangeMap for DumbRangeMap {
     fn init() -> Self {
         DumbRangeMap {
-            deleted: Default::default(),
             arr: Default::default(),
             ann: BTreeSet::new(),
             len: 0,
@@ -255,9 +254,6 @@ impl RangeMap for DumbRangeMap {
                     }
 
                     match f(&ann) {
-                        AnnPosRelativeToInsert::Deleted => {
-                            self.deleted.insert(ann.id);
-                        }
                         AnnPosRelativeToInsert::BeforeInsert => {
                             middle_annotations.insert(ann);
                         }
@@ -285,9 +281,6 @@ impl RangeMap for DumbRangeMap {
                     match f(ann) {
                         AnnPosRelativeToInsert::BeforeInsert => {}
                         AnnPosRelativeToInsert::AfterInsert => unreachable!(),
-                        AnnPosRelativeToInsert::Deleted => {
-                            self.deleted.insert(ann.id);
-                        }
                         AnnPosRelativeToInsert::IncludeInsert => {
                             middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
@@ -310,9 +303,6 @@ impl RangeMap for DumbRangeMap {
                     match f(ann) {
                         AnnPosRelativeToInsert::BeforeInsert => unreachable!(),
                         AnnPosRelativeToInsert::AfterInsert => {}
-                        AnnPosRelativeToInsert::Deleted => {
-                            self.deleted.insert(ann.id);
-                        }
                         AnnPosRelativeToInsert::IncludeInsert => {
                             middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
