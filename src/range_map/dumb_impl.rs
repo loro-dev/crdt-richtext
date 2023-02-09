@@ -181,6 +181,7 @@ impl RangeMap for DumbRangeMap {
         DumbRangeMap {
             arr: Default::default(),
             ann: BTreeSet::new(),
+            deleted: Default::default(),
             len: 0,
         }
     }
