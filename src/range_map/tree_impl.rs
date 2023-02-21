@@ -1,19 +1,16 @@
 use bitvec::vec::BitVec;
 use generic_btree::{
-    BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec,
+    rle::{update_slice, HasLength, Mergeable, Sliceable},
+    BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, LengthFinder, Query, QueryResult,
+    SmallElemVec,
 };
-use std::{
-    collections::{BTreeSet, HashSet},
-    ops::{Index, RangeInclusive},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, ops::RangeInclusive, process::id, sync::Arc};
 
 use crate::{Annotation, OpID};
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::FxHashMap;
 
 use super::{RangeMap, Span};
 
-#[derive(Debug)]
 pub struct Tree {
     tree: BTree<TreeTrait>,
     id_to_ann: FxHashMap<OpID, Arc<Annotation>>,
@@ -23,11 +20,16 @@ pub struct Tree {
 
 impl Tree {
     pub fn new() -> Self {
+        // make 0 unavailable
+        let bit_to_id = vec![OpID {
+            client: 13123213213,
+            counter: 1233123123,
+        }];
         Self {
             tree: BTree::new(),
             id_to_ann: FxHashMap::default(),
             id_to_bit: FxHashMap::default(),
-            bit_to_id: Vec::new(),
+            bit_to_id,
         }
     }
 
@@ -59,20 +61,20 @@ impl Tree {
         &self,
         id: OpID,
     ) -> Option<(RangeInclusive<QueryResult>, RangeInclusive<usize>)> {
-        let mask = self.get_ann_musk(id)?;
+        let index = self.get_ann_musk(id)?;
         let (start, start_finder) = self
             .tree
-            .query_with_finder_return::<AnnotationFinderStart>(&mask);
+            .query_with_finder_return::<AnnotationFinderStart>(&index);
         let (end, end_finder) = self
             .tree
-            .query_with_finder_return::<AnnotationFinderEnd>(&mask);
+            .query_with_finder_return::<AnnotationFinderEnd>(&index);
 
         if !start.found {
             None
         } else {
             assert!(end.found);
             let start_index = start_finder.visited_len;
-            let end_index = self.tree.root_cache().len - end_finder.visited_len;
+            let end_index = self.tree.root_cache().len - end_finder.visited_len - 1;
             Some((start..=end, start_index..=end_index))
         }
     }
@@ -93,8 +95,65 @@ struct Elem {
 }
 
 impl Elem {
-    fn has_musk(&self, mask: usize) -> bool {
-        self.ann[mask]
+    fn has_musk(&self, musk: usize) -> bool {
+        if musk >= self.ann.len() {
+            false
+        } else {
+            self.ann[musk]
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+struct Buffer {
+    changes: Vec<isize>,
+}
+
+impl HasLength for Elem {
+    fn rle_len(&self) -> usize {
+        self.len
+    }
+}
+
+impl Sliceable for Elem {
+    fn slice(&self, range: impl std::ops::RangeBounds<usize>) -> Self {
+        let mut ann = self.ann.clone();
+        let len = match range.end_bound() {
+            std::ops::Bound::Included(x) => *x + 1,
+            std::ops::Bound::Excluded(x) => *x,
+            std::ops::Bound::Unbounded => self.len,
+        } - match range.start_bound() {
+            std::ops::Bound::Included(x) => *x,
+            std::ops::Bound::Excluded(x) => *x + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        Self { ann, len }
+    }
+
+    fn slice_(&mut self, range: impl std::ops::RangeBounds<usize>)
+    where
+        Self: Sized,
+    {
+        let len = match range.end_bound() {
+            std::ops::Bound::Included(x) => *x + 1,
+            std::ops::Bound::Excluded(x) => *x,
+            std::ops::Bound::Unbounded => self.len,
+        } - match range.start_bound() {
+            std::ops::Bound::Included(x) => *x,
+            std::ops::Bound::Excluded(x) => *x + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        self.len = len;
+    }
+}
+
+impl Mergeable for Elem {
+    fn can_merge(&self, rhs: &Self) -> bool {
+        self.ann == rhs.ann
+    }
+
+    fn merge_right(&mut self, rhs: &Self) {
+        self.len += rhs.len
     }
 }
 
@@ -117,18 +176,46 @@ impl RangeMap for Tree {
                     len,
                 },
             )
+        } else {
+            self.tree.insert_by_query_result(
+                result,
+                Elem {
+                    ann: Default::default(),
+                    len,
+                },
+            )
         }
     }
 
     fn delete(&mut self, pos: usize, len: usize) {
         self.tree.drain::<IndexFinder>(pos..pos + len);
+        // TODO: keep tombstones annotations
     }
 
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation) {
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
-        todo!()
+        let ann = Arc::new(annotation);
+        let idx = self.try_add_ann(ann);
+        self.tree.update_with_buffer(
+            range,
+            &mut |mut slice| {
+                update_slice(&mut slice, &mut |x| {
+                    if idx >= x.ann.len() {
+                        x.ann.resize(idx + 10, false);
+                    }
+                    x.ann.set(idx, true);
+                    true
+                })
+            },
+            |buffer, _| {
+                if buffer.is_none() {
+                    *buffer = Some(Buffer::default());
+                }
+                buffer.as_mut().unwrap().changes.push(idx as isize);
+                true
+            },
+        );
     }
-
     fn adjust_annotation(
         &mut self,
         target_id: OpID,
@@ -187,24 +274,41 @@ struct TreeTrait;
 
 impl BTreeTrait for TreeTrait {
     type Elem = Elem;
-
+    type WriteBuffer = Buffer;
     type Cache = Elem;
 
-    const MAX_LEN: usize = 16;
+    const MAX_LEN: usize = 4;
 
     fn element_to_cache(element: &Self::Elem) -> Self::Cache {
         element.clone()
     }
 
-    fn calc_cache_internal(caches: &[generic_btree::Child<Self::Cache>]) -> Self::Cache {
+    fn calc_cache_internal(caches: &[generic_btree::Child<Self>]) -> Self::Cache {
         if caches.is_empty() {
             return Default::default();
         }
 
-        let mut len = caches[0].cache.len;
-        let mut ann = caches[0].cache.ann.clone();
-        for cache in caches.iter().skip(1) {
-            ann |= &cache.cache.ann;
+        let mut len = 0;
+        let mut ann: BitVec = Default::default();
+        for cache in caches.iter() {
+            if let Some(buffer) = &cache.write_buffer {
+                let mut new_ann = cache.cache.ann.clone();
+                for &change in buffer.changes.iter() {
+                    if change > 0 {
+                        if change as usize > new_ann.len() {
+                            new_ann.resize(change as usize, false);
+                        }
+                        new_ann.set(change as usize, true);
+                    } else {
+                        new_ann.set(-change as usize, false);
+                    }
+                }
+
+                or_(&mut ann, &new_ann);
+            } else {
+                or_(&mut ann, &cache.cache.ann);
+            }
+
             len += cache.cache.len;
         }
 
@@ -218,12 +322,55 @@ impl BTreeTrait for TreeTrait {
         let mut len = caches[0].len;
         let mut ann = caches[0].ann.clone();
         for cache in caches.iter().skip(1) {
-            ann |= &cache.ann;
+            or_(&mut ann, &cache.ann);
             len += cache.len;
         }
 
         Elem { ann, len }
     }
+
+    fn apply_write_buffer_to_elements(
+        elements: &mut HeapVec<Self::Elem>,
+        write_buffer: &Self::WriteBuffer,
+    ) {
+        if write_buffer.changes.is_empty() {
+            return;
+        }
+
+        for (i, elem) in elements.iter_mut().enumerate() {
+            for &change in write_buffer.changes.iter() {
+                if change > 0 {
+                    elem.ann.set(change as usize, true);
+                } else {
+                    elem.ann.set(-change as usize, false);
+                }
+            }
+        }
+    }
+
+    fn apply_write_buffer_to_nodes(
+        children: &mut [generic_btree::Child<Self>],
+        write_buffer: &Self::WriteBuffer,
+    ) {
+        if write_buffer.changes.is_empty() {
+            return;
+        }
+
+        for child in children.iter_mut() {
+            let buffer = child.write_buffer.get_or_insert_with(Default::default);
+            for &change in write_buffer.changes.iter() {
+                buffer.changes.push(change);
+            }
+        }
+    }
+}
+
+fn or_(ann: &mut BitVec, new_ann: &BitVec) {
+    if ann.len() < new_ann.len() {
+        ann.resize(new_ann.len(), false);
+    }
+
+    *ann |= new_ann;
 }
 
 struct IndexFinder {
@@ -241,7 +388,7 @@ impl Query<TreeTrait> for IndexFinder {
     fn find_node(
         &mut self,
         _: &Self::QueryArg,
-        child_caches: &[generic_btree::Child<Elem>],
+        child_caches: &[generic_btree::Child<TreeTrait>],
     ) -> generic_btree::FindResult {
         for (i, cache) in child_caches.iter().enumerate() {
             if cache.cache.len == 0 && self.left == 0 {
@@ -364,11 +511,11 @@ impl Query<TreeTrait> for AnnotationFinderStart {
     fn find_node(
         &mut self,
         _: &Self::QueryArg,
-        child_caches: &[generic_btree::Child<<TreeTrait as BTreeTrait>::Cache>],
+        child_caches: &[generic_btree::Child<TreeTrait>],
     ) -> FindResult {
         for (i, cache) in child_caches.iter().enumerate() {
             if cache.cache.has_musk(self.target_musk) {
-                FindResult::new_found(i, 0);
+                return FindResult::new_found(i, 0);
             }
             self.visited_len += cache.cache.len;
         }
@@ -383,7 +530,7 @@ impl Query<TreeTrait> for AnnotationFinderStart {
     ) -> FindResult {
         for (i, cache) in elements.iter().enumerate() {
             if cache.has_musk(self.target_musk) {
-                FindResult::new_found(i, 0);
+                return FindResult::new_found(i, 0);
             }
             self.visited_len += cache.len;
         }
@@ -405,11 +552,11 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
     fn find_node(
         &mut self,
         _: &Self::QueryArg,
-        child_caches: &[generic_btree::Child<<TreeTrait as BTreeTrait>::Cache>],
+        child_caches: &[generic_btree::Child<TreeTrait>],
     ) -> FindResult {
         for (i, cache) in child_caches.iter().enumerate().rev() {
             if cache.cache.has_musk(self.target_musk) {
-                FindResult::new_found(i, 0);
+                return FindResult::new_found(i, 0);
             }
             self.visited_len += cache.cache.len;
         }
@@ -424,7 +571,7 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
     ) -> FindResult {
         for (i, cache) in elements.iter().enumerate().rev() {
             if cache.has_musk(self.target_musk) {
-                FindResult::new_found(i, 0);
+                return FindResult::new_found(i, 0);
             }
             self.visited_len += cache.len;
         }
@@ -434,14 +581,46 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
+    use crate::{range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
+
+    use super::*;
     use bitvec::vec::BitVec;
 
+    fn id(k: u64) -> OpID {
+        OpID {
+            client: k,
+            counter: 0,
+        }
+    }
+
+    fn a(n: u64) -> Annotation {
+        Annotation {
+            id: id(n),
+            range_lamport: (0, id(n)),
+            range: crate::AnchorRange {
+                start: Anchor {
+                    id: Some(id(n)),
+                    type_: AnchorType::Before,
+                },
+                end: Anchor {
+                    id: Some(id(n)),
+                    type_: AnchorType::Before,
+                },
+            },
+            merge_method: crate::RangeMergeRule::Merge,
+            type_: String::new(),
+            meta: None,
+        }
+    }
+
     #[test]
-    fn test_bitvec() {
-        let mut a: BitVec<usize> = BitVec::from_slice(&[32usize, 3usize]);
-        let b: BitVec<usize> = BitVec::from_slice(&[1]);
-        a.resize(501, false);
-        a.set(500, true);
+    fn test_annotate() {
+        let mut tree = Tree::new();
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.annotate(10, 10, a(2));
+        assert_eq!(tree.len(), 100);
+        let range = tree.get_annotation_range(id(2));
+        assert_eq!(range.unwrap().1, 10..=19);
     }
 }
