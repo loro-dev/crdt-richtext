@@ -235,10 +235,8 @@ impl RangeMap for Tree {
 
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<super::Span> {
         let mut ans = Vec::new();
-        for ElemSlice { elem, start, end } in self
-            .tree
-            .iter_range(self.tree.range::<IndexFinder>(pos..pos + len))
-        {
+        let range = self.tree.range::<IndexFinder>(pos..pos + len);
+        for ElemSlice { elem, start, end } in self.tree.iter_range(range) {
             let start = start.unwrap_or(0);
             let end = end.unwrap_or(elem.len);
             let mut annotations = BTreeSet::new();
@@ -390,36 +388,50 @@ impl Query<TreeTrait> for IndexFinder {
         _: &Self::QueryArg,
         child_caches: &[generic_btree::Child<TreeTrait>],
     ) -> generic_btree::FindResult {
+        if child_caches.is_empty() {
+            return FindResult::new_missing(0, self.left);
+        }
+
+        let mut last_left = self.left;
         for (i, cache) in child_caches.iter().enumerate() {
             if cache.cache.len == 0 && self.left == 0 {
                 return FindResult::new_found(i, self.left);
             }
 
             if self.left >= cache.cache.len {
+                last_left = self.left;
                 self.left -= cache.cache.len;
             } else {
                 return FindResult::new_found(i, self.left);
             }
         }
 
-        FindResult::new_missing(child_caches.len(), self.left)
+        self.left = last_left;
+        FindResult::new_missing(child_caches.len() - 1, last_left)
     }
 
     /// should prefer zero len element
     fn find_element(&mut self, _: &Self::QueryArg, elements: &[Elem]) -> generic_btree::FindResult {
+        if elements.is_empty() {
+            return FindResult::new_missing(0, self.left);
+        }
+
+        let mut last_left = self.left;
         for (i, cache) in elements.iter().enumerate() {
             if cache.len == 0 && self.left == 0 {
                 return FindResult::new_found(i, self.left);
             }
 
             if self.left >= cache.len {
+                last_left = self.left;
                 self.left -= cache.len;
             } else {
                 return FindResult::new_found(i, self.left);
             }
         }
 
-        FindResult::new_missing(elements.len(), self.left)
+        self.left = last_left;
+        FindResult::new_missing(elements.len() - 1, last_left)
     }
 
     fn delete(
@@ -582,6 +594,8 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::{range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
 
     use super::*;
@@ -614,6 +628,27 @@ mod tests {
         }
     }
 
+    fn make_spans(spans: Vec<(Vec<u64>, usize)>) -> Vec<Span> {
+        let mut map = HashMap::new();
+        let mut ans = Vec::new();
+        for i in 0..spans.len() {
+            let (annotations, len) = &spans[i];
+            let mut new_annotations = BTreeSet::new();
+            for ann in annotations {
+                let a = map.entry(*ann).or_insert_with(|| Arc::new(a(*ann))).clone();
+                let start = i == 0 || spans[i - 1].0.contains(ann);
+                let end = i == spans.len() - 1 || spans[i + 1].0.contains(ann);
+                new_annotations.insert(a);
+            }
+            ans.push(Span {
+                annotations: new_annotations,
+                len: *len,
+            });
+        }
+
+        ans
+    }
+
     #[test]
     fn test_annotate() {
         let mut tree = Tree::new();
@@ -622,5 +657,10 @@ mod tests {
         assert_eq!(tree.len(), 100);
         let range = tree.get_annotation_range(id(2));
         assert_eq!(range.unwrap().1, 10..=19);
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(
+            ans,
+            make_spans(vec![(vec![], 10), (vec![2], 10), (vec![], 80)])
+        );
     }
 }
