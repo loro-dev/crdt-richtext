@@ -1,10 +1,13 @@
 use bitvec::vec::BitVec;
 use generic_btree::{
     rle::{update_slice, HasLength, Mergeable, Sliceable},
-    BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, LengthFinder, Query, QueryResult,
-    SmallElemVec,
+    BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec,
 };
-use std::{collections::BTreeSet, ops::RangeInclusive, process::id, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    ops::{Range, RangeInclusive},
+    sync::Arc,
+};
 
 use crate::{Annotation, OpID};
 use fxhash::FxHashMap;
@@ -60,7 +63,7 @@ impl Tree {
     fn get_annotation_range(
         &self,
         id: OpID,
-    ) -> Option<(RangeInclusive<QueryResult>, RangeInclusive<usize>)> {
+    ) -> Option<(RangeInclusive<QueryResult>, Range<usize>)> {
         let index = self.get_ann_musk(id)?;
         let (start, start_finder) = self
             .tree
@@ -74,8 +77,8 @@ impl Tree {
         } else {
             assert!(end.found);
             let start_index = start_finder.visited_len;
-            let end_index = self.tree.root_cache().len - end_finder.visited_len - 1;
-            Some((start..=end, start_index..=end_index))
+            let end_index = self.tree.root_cache().len - end_finder.visited_len;
+            Some((start..=end, start_index..end_index))
         }
     }
 
@@ -259,27 +262,50 @@ impl RangeMap for Tree {
 
     fn delete_annotation(&mut self, id: OpID) {
         // use annotation finder to delete
-        todo!()
+        let Some((query_range, _)) = self.get_annotation_range(id) else { return };
+        let end = query_range.end().clone();
+        let musk = self.get_ann_musk(id).unwrap();
+        // TODO: Perf can use write buffer to speed up
+        self.tree
+            .update(query_range.start().clone()..end, &mut |slice| {
+                let start = slice.start.map(|x| x.0).unwrap_or(0);
+                let end = slice
+                    .end
+                    .map(|x| (x.0 + 1).min(slice.elements.len()))
+                    .unwrap_or(slice.elements.len());
+                for span in slice.elements[start..end].iter_mut() {
+                    span.ann.set(musk, false);
+                }
+
+                true
+            });
     }
 
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<super::Span> {
         let pos = pos.min(self.len());
         let len = len.min(self.len() - pos);
-        let mut ans = Vec::new();
+        let mut ans: Vec<Span> = Vec::new();
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
+        let mut last_ann = &BitVec::new();
         for ElemSlice { elem, start, end } in self.tree.iter_range(range) {
             let start = start.unwrap_or(0);
             let end = end.unwrap_or(elem.len);
-            let mut annotations = BTreeSet::new();
-            for ann_musk in elem.ann.iter_ones() {
-                let annotation = self.musk_to_ann(ann_musk);
-                annotations.insert(annotation.clone());
+            if last_ann.iter_ones().eq(elem.ann.iter_ones()) && !ans.is_empty() {
+                ans.last_mut().unwrap().len += end - start;
+            } else {
+                let mut annotations = BTreeSet::new();
+                for ann_musk in elem.ann.iter_ones() {
+                    let annotation = self.musk_to_ann(ann_musk);
+                    annotations.insert(annotation.clone());
+                }
+
+                ans.push(Span {
+                    annotations,
+                    len: end - start,
+                })
             }
 
-            ans.push(Span {
-                annotations,
-                len: end - start,
-            })
+            last_ann = &elem.ann;
         }
 
         ans
@@ -289,7 +315,7 @@ impl RangeMap for Tree {
         // use annotation finder to delete
         let (_, index_range) = self.get_annotation_range(id)?;
         let ann = self.id_to_ann.get(&id).unwrap();
-        Some((ann.clone(), *index_range.start()..*index_range.end() + 1))
+        Some((ann.clone(), index_range.start..index_range.end))
     }
 
     #[inline(always)]
@@ -707,7 +733,7 @@ mod tests {
         tree.annotate(10, 10, a(2));
         assert_eq!(tree.len(), 100);
         let range = tree.get_annotation_range(id(2));
-        assert_eq!(range.unwrap().1, 10..=19);
+        assert_eq!(range.unwrap().1, 10..20);
         let ans = tree.get_annotations(0, 100);
         assert_eq!(
             ans,
@@ -779,5 +805,31 @@ mod tests {
             ans,
             make_spans(vec![(vec![], 5), (vec![0], 5), (vec![], 80),])
         );
+    }
+
+    #[test]
+    fn delete_annotation() {
+        let mut tree = Tree::new();
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.annotate(5, 10, a(0));
+        tree.delete_annotation(id(0));
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(ans, make_spans(vec![(vec![], 100)]));
+    }
+
+    #[test]
+    fn delete_annotation_in_zero_len_span() {
+        let mut tree = Tree::new();
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.annotate(0, 10, a(0));
+        tree.delete(0, 10);
+        // now we have an empty span
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(ans, make_spans(vec![(vec![0], 0), (vec![], 90)]));
+
+        // annotation on the empty span is gone
+        tree.delete_annotation(id(0));
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(ans, make_spans(vec![(vec![], 90)]));
     }
 }
