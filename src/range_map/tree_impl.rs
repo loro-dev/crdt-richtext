@@ -1,6 +1,6 @@
 use bitvec::vec::BitVec;
 use generic_btree::{
-    rle::{update_slice, HasLength, Mergeable, Sliceable},
+    rle::{self, update_slice, HasLength, Mergeable, Sliceable},
     BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec,
 };
 use std::{
@@ -91,14 +91,6 @@ impl Tree {
     }
 
     fn insert_empty_span(&mut self, pos: usize, ann_bit_index: BitVec) {
-        let result = self.tree.query::<IndexFinder>(&pos);
-        if let Some(elem) = self.tree.get_elem_mut(result) {
-            if elem.len == 0 {
-                elem.ann |= &ann_bit_index;
-                return;
-            }
-        }
-
         let elem = Elem {
             ann: ann_bit_index,
             len: 0,
@@ -161,6 +153,22 @@ impl Elem {
     }
 }
 
+fn or_(ann: &mut BitVec, new_ann: &BitVec) {
+    if ann.len() < new_ann.len() {
+        ann.resize(new_ann.len(), false);
+    }
+
+    *ann |= new_ann;
+}
+
+fn set_bit(v: &mut BitVec, i: usize, b: bool) {
+    if i >= v.len() {
+        v.resize(i + 1, false);
+    }
+
+    v.set(i, b);
+}
+
 #[derive(Clone, Default, Debug)]
 struct Buffer {
     changes: Vec<isize>,
@@ -174,7 +182,7 @@ impl HasLength for Elem {
 
 impl Sliceable for Elem {
     fn slice(&self, range: impl std::ops::RangeBounds<usize>) -> Self {
-        let mut ann = self.ann.clone();
+        let ann = self.ann.clone();
         let len = match range.end_bound() {
             std::ops::Bound::Included(x) => *x + 1,
             std::ops::Bound::Excluded(x) => *x,
@@ -206,11 +214,21 @@ impl Sliceable for Elem {
 
 impl Mergeable for Elem {
     fn can_merge(&self, rhs: &Self) -> bool {
-        self.ann == rhs.ann
+        (self.len == 0 && rhs.len == 0) || self.ann.iter_ones().eq(rhs.ann.iter_ones())
     }
 
     fn merge_right(&mut self, rhs: &Self) {
-        self.len += rhs.len
+        self.len += rhs.len;
+        if self.len == 0 {
+            or_(&mut self.ann, &rhs.ann);
+        }
+    }
+
+    fn merge_left(&mut self, left: &Self) {
+        self.len += left.len;
+        if self.len == 0 {
+            or_(&mut self.ann, &left.ann);
+        }
     }
 }
 
@@ -262,7 +280,7 @@ impl RangeMap for Tree {
 
         if has_ann {
             let deleted_ann = !self.tree.root_cache().ann.clone();
-            ann_bit_index |= &deleted_ann;
+            or_(&mut ann_bit_index, &deleted_ann);
             if ann_bit_index.any() {
                 self.insert_empty_span(pos, ann_bit_index);
             }
@@ -505,14 +523,10 @@ impl BTreeTrait for TreeTrait {
             }
         }
     }
-}
 
-fn or_(ann: &mut BitVec, new_ann: &BitVec) {
-    if ann.len() < new_ann.len() {
-        ann.resize(new_ann.len(), false);
+    fn insert(elements: &mut HeapVec<Self::Elem>, index: usize, offset: usize, elem: Self::Elem) {
+        rle::insert_with_split(elements, index, offset, elem)
     }
-
-    *ann |= new_ann;
 }
 
 struct IndexFinder {
@@ -758,14 +772,6 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
     }
 }
 
-fn set_bit(v: &mut BitVec, i: usize, b: bool) {
-    if i >= v.len() {
-        v.resize(i + 1, false);
-    }
-
-    v.set(i, b);
-}
-
 #[cfg(test)]
 #[cfg(feature = "test")]
 mod tree_impl_tests {
@@ -774,7 +780,26 @@ mod tree_impl_tests {
     use crate::{range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
 
     use super::*;
-    use bitvec::vec::BitVec;
+
+    fn as_str(arr: Vec<Span>) -> Vec<String> {
+        arr.iter()
+            .map(|x| {
+                let mut s = x
+                    .annotations
+                    .iter()
+                    .map(|x| x.id.client.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                s.push(';');
+                s.push_str(&x.len.to_string());
+                s
+            })
+            .collect()
+    }
+
+    fn assert_span_eq(a: Vec<Span>, b: Vec<Span>) {
+        assert_eq!(as_str(a), as_str(b));
+    }
 
     fn id(k: u64) -> OpID {
         OpID {
@@ -873,9 +898,9 @@ mod tree_impl_tests {
             tree.delete(10, 10);
             // now we have an empty span
             let ans = tree.get_annotations(0, 100);
-            assert_eq!(
+            assert_span_eq(
                 ans,
-                make_spans(vec![(vec![], 10), (vec![0], 0), (vec![], 80),])
+                make_spans(vec![(vec![], 10), (vec![0], 0), (vec![], 80)]),
             );
 
             // should not create another empty span
@@ -1003,26 +1028,6 @@ mod tree_impl_tests {
             );
         }
 
-        fn as_str(arr: Vec<Span>) -> Vec<String> {
-            arr.iter()
-                .map(|x| {
-                    let mut s = x
-                        .annotations
-                        .iter()
-                        .map(|x| x.id.client.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    s.push(';');
-                    s.push_str(&x.len.to_string());
-                    s
-                })
-                .collect()
-        }
-
-        fn assert_span_eq(a: Vec<Span>, b: Vec<Span>) {
-            assert_eq!(as_str(a), as_str(b));
-        }
-
         #[test]
         fn expand_over_empty_span() {
             let mut tree = Tree::new();
@@ -1069,6 +1074,11 @@ mod tree_impl_tests {
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
+            let ans = tree.get_annotations(0, 100);
+            assert_span_eq(
+                ans,
+                make_spans(vec![(vec![], 10), (vec![0], 0), (vec![], 80)]),
+            );
             tree.adjust_annotation(id(0), 1, id(3), None, Some((2, Some(id(3)))));
             let ans = tree.get_annotations(0, 100);
             assert_span_eq(
