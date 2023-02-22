@@ -86,6 +86,15 @@ impl Tree {
             .unwrap();
         annotation
     }
+
+    fn insert_empty_span(&mut self, pos: usize, ann_musk: BitVec) {
+        let elem = Elem {
+            ann: ann_musk,
+            len: 0,
+        };
+
+        self.tree.insert::<IndexFinder>(&pos, elem);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -188,8 +197,28 @@ impl RangeMap for Tree {
     }
 
     fn delete(&mut self, pos: usize, len: usize) {
-        self.tree.drain::<IndexFinder>(pos..pos + len);
-        // TODO: keep tombstones annotations
+        let mut has_ann = false;
+        let mut ann_musk: BitVec = BitVec::new();
+        // We should leave deleted annotations in the tree, stored inside a empty span.
+        // But there may already have empty spans at `pos` and `pos + len`.
+        // So the `delete_range` implementation should be able to handle this case.
+        for span in self.tree.drain::<IndexFinder>(pos..pos + len) {
+            for ann in span.ann.iter_ones() {
+                if ann >= ann_musk.len() {
+                    ann_musk.resize(self.bit_to_id.len(), false);
+                }
+                ann_musk.set(ann, true);
+                has_ann = true;
+            }
+        }
+
+        if has_ann {
+            let deleted_ann = !self.tree.root_cache().ann.clone();
+            ann_musk |= &deleted_ann;
+            if ann_musk.any() {
+                self.insert_empty_span(pos, ann_musk);
+            }
+        }
     }
 
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation) {
@@ -234,6 +263,8 @@ impl RangeMap for Tree {
     }
 
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<super::Span> {
+        let pos = pos.min(self.len());
+        let len = len.min(self.len() - pos);
         let mut ans = Vec::new();
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
         for ElemSlice { elem, start, end } in self.tree.iter_range(range) {
@@ -443,6 +474,10 @@ impl Query<TreeTrait> for IndexFinder {
         unimplemented!("Not supported")
     }
 
+    /// If start or end is zero len element, we should drain it.
+    ///
+    /// Because IndexFinder scan from left to right and return when left length is zero,
+    /// the start is guarantee to include the zero len element.
     fn delete_range(
         elements: &mut HeapVec<<TreeTrait as BTreeTrait>::Elem>,
         _: &Self::QueryArg,
@@ -462,7 +497,7 @@ impl Query<TreeTrait> for IndexFinder {
         }
 
         fn drain_end(end: QueryResult, elements: &mut [Elem]) -> usize {
-            if end.elem_index >= elements.len() {
+            let end_index = if end.elem_index >= elements.len() {
                 end.elem_index
             } else if elements[end.elem_index].len == end.offset {
                 end.elem_index + 1
@@ -471,32 +506,50 @@ impl Query<TreeTrait> for IndexFinder {
             } else {
                 elements[end.elem_index].len -= end.offset;
                 end.elem_index
+            };
+
+            // if end is zero len element, we should drain it
+            if let Some(end) = elements.get(end_index) {
+                if end.len == 0 {
+                    end_index + 1
+                } else {
+                    end_index
+                }
+            } else {
+                end_index
             }
         }
 
+        let mut ans = SmallElemVec::new();
         match (start, end) {
             (None, None) => {
-                elements.clear();
+                ans.extend(elements.drain(..));
             }
             (None, Some(end)) => {
                 let end = drain_end(end, elements);
-                elements.drain(..end);
+                ans.extend(elements.drain(..end));
             }
             (Some(start), None) => {
                 let start = drain_start(start, elements);
-                elements.drain(start..);
+                ans.extend(elements.drain(start..));
             }
             (Some(start), Some(end)) => {
                 if start.elem_index == end.elem_index {
-                    elements[start.elem_index].len -= end.offset - start.offset;
+                    let len = end.offset - start.offset;
+                    elements[start.elem_index].len -= len;
+                    let new_elem = Elem {
+                        ann: elements[start.elem_index].ann.clone(),
+                        len,
+                    };
+                    ans.push(new_elem)
                 } else {
                     let start = drain_start(start, elements);
                     let end = drain_end(end, elements);
-                    elements.drain(start..end);
+                    ans.extend(elements.drain(start..end));
                 }
             }
         }
-        SmallElemVec::new()
+        ans
     }
 }
 
@@ -636,8 +689,6 @@ mod tests {
             let mut new_annotations = BTreeSet::new();
             for ann in annotations {
                 let a = map.entry(*ann).or_insert_with(|| Arc::new(a(*ann))).clone();
-                let start = i == 0 || spans[i - 1].0.contains(ann);
-                let end = i == spans.len() - 1 || spans[i + 1].0.contains(ann);
                 new_annotations.insert(a);
             }
             ans.push(Span {
@@ -650,7 +701,7 @@ mod tests {
     }
 
     #[test]
-    fn test_annotate() {
+    fn annotate() {
         let mut tree = Tree::new();
         tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
         tree.annotate(10, 10, a(2));
@@ -661,6 +712,72 @@ mod tests {
         assert_eq!(
             ans,
             make_spans(vec![(vec![], 10), (vec![2], 10), (vec![], 80)])
+        );
+    }
+
+    #[test]
+    fn delete_text_to_empty() {
+        let mut tree = Tree::new();
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.delete(10, 10);
+        assert_eq!(tree.len(), 90);
+        tree.delete(0, 90);
+        assert_eq!(tree.len(), 0);
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(ans, make_spans(vec![(vec![], 0)]));
+    }
+
+    #[test]
+    fn delete_text_with_annotation_to_empty() {
+        let mut tree = Tree::new();
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.annotate(0, 10, a(0));
+        tree.annotate(5, 10, a(1));
+        tree.annotate(95, 5, a(5));
+        tree.delete(0, 100);
+        assert_eq!(tree.len(), 0);
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(ans, make_spans(vec![(vec![0, 1, 5], 0)]));
+    }
+
+    #[test]
+    fn delete_text_with_empty_span_at_edge() {
+        let mut tree = Tree::new();
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.annotate(10, 10, a(0));
+        tree.delete(10, 10);
+        // now we have an empty span
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(
+            ans,
+            make_spans(vec![(vec![], 10), (vec![0], 0), (vec![], 80),])
+        );
+
+        // should not create another empty span
+        tree.delete(10, 10);
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(
+            ans,
+            make_spans(vec![(vec![], 10), (vec![0], 0), (vec![], 70),])
+        );
+
+        // should not create another empty span
+        tree.delete(0, 10);
+        let ans = tree.get_annotations(0, 100);
+        assert_eq!(ans, make_spans(vec![(vec![0], 0), (vec![], 70),]));
+    }
+
+    #[test]
+    fn delete_a_part_of_annotation() {
+        let mut tree = Tree::new();
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.annotate(5, 10, a(0));
+        tree.delete(10, 10);
+        let ans = tree.get_annotations(0, 100);
+        // should not create empty span
+        assert_eq!(
+            ans,
+            make_spans(vec![(vec![], 5), (vec![0], 5), (vec![], 80),])
         );
     }
 }
