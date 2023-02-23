@@ -25,8 +25,8 @@ impl Tree {
     pub fn new() -> Self {
         // make 0 unavailable
         let bit_to_id = vec![OpID {
-            client: 13123213213,
-            counter: 1233123123,
+            client: 44444444444,
+            counter: 444444,
         }];
         Self {
             tree: BTree::new(),
@@ -414,7 +414,6 @@ impl RangeMap for Tree {
             }
         }
 
-        dbg!(&left, &middle, &right);
         let path = right
             .map(|x| x.path())
             .unwrap_or_else(|| middle.unwrap().path())
@@ -446,25 +445,32 @@ impl RangeMap for Tree {
 
     fn delete(&mut self, pos: usize, len: usize) {
         let mut has_ann = false;
-        let mut ann_bit_index: BitVec = BitVec::new();
+        let mut ann_bit_mask: BitVec = BitVec::new();
         // We should leave deleted annotations in the tree, stored inside a empty span.
         // But there may already have empty spans at `pos` and `pos + len`.
         // So the `delete_range` implementation should be able to handle this case.
         for span in self.tree.drain::<IndexFinder>(pos..pos + len) {
             for ann in span.ann.iter_ones() {
-                if ann >= ann_bit_index.len() {
-                    ann_bit_index.resize(self.bit_to_id.len(), false);
+                if ann >= ann_bit_mask.len() {
+                    ann_bit_mask.resize(self.bit_to_id.len(), false);
                 }
-                ann_bit_index.set(ann, true);
+                ann_bit_mask.set(ann, true);
                 has_ann = true;
             }
         }
 
         if has_ann {
-            let deleted_ann = !self.tree.root_cache().ann.clone();
-            or_(&mut ann_bit_index, &deleted_ann);
-            if ann_bit_index.any() {
-                self.insert_empty_span(pos, ann_bit_index);
+            // insert empty span if any annotations got wipe out totally from the tree
+            let wiped_out = if self.tree.root_cache().ann.len() < ann_bit_mask.len() {
+                true
+            } else {
+                let mut deleted_ann = !self.tree.root_cache().ann.clone();
+                deleted_ann &= &ann_bit_mask;
+                deleted_ann.any()
+            };
+
+            if wiped_out {
+                self.insert_empty_span(pos, ann_bit_mask);
             }
         }
     }
@@ -1424,22 +1430,88 @@ mod tree_impl_tests {
         }
 
         #[test]
-        fn insert_to_tombstones_left() {}
+        fn test_insert_to_middle_among_tombstones() {
+            let mut tree = Tree::new();
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.annotate(10, 1, a(0));
+            tree.annotate(11, 1, a(1));
+            tree.annotate(12, 1, a(2));
+            tree.delete(10, 3);
+            tree.insert(10, 1, |ann| {
+                if ann.id == id(0) {
+                    AnnPosRelativeToInsert::BeforeInsert
+                } else if ann.id == id(2) {
+                    AnnPosRelativeToInsert::IncludeInsert
+                } else {
+                    AnnPosRelativeToInsert::AfterInsert
+                }
+            });
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..10);
+            assert_eq!(tree.get_annotation_pos(id(1)).unwrap().1, 11..11);
+            assert_eq!(tree.get_annotation_pos(id(2)).unwrap().1, 10..11);
+        }
 
         #[test]
-        fn insert_to_tombstones_right() {}
+        fn insert_to_beginning_with_empty_span() {
+            {
+                // after
+                let mut tree = Tree::new();
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.annotate(0, 1, a(0));
+                tree.delete(0, 1);
+                tree.insert(0, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+                assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 1..1);
+            }
+            {
+                // include
+                let mut tree = Tree::new();
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.annotate(0, 1, a(0));
+                tree.delete(0, 1);
+                tree.insert(0, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
+                assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 0..1);
+            }
+            {
+                // before
+                let mut tree = Tree::new();
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.annotate(0, 1, a(0));
+                tree.delete(0, 1);
+                tree.insert(0, 1, |_| AnnPosRelativeToInsert::BeforeInsert);
+                assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 0..0);
+            }
+        }
 
         #[test]
-        fn insert_to_tombstones_middle() {}
-
-        #[test]
-        fn should_panic_when_tombstones_pos_err() {}
-
-        #[test]
-        fn insert_to_beginning_with_empty_span() {}
-
-        #[test]
-        fn insert_to_end_with_empty_span() {}
+        fn insert_to_end_with_empty_span() {
+            {
+                // after
+                let mut tree = Tree::new();
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.annotate(99, 1, a(0));
+                tree.delete(99, 1);
+                tree.insert(99, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+                assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 100..100);
+            }
+            {
+                // include
+                let mut tree = Tree::new();
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.annotate(99, 1, a(0));
+                tree.delete(99, 1);
+                tree.insert(99, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
+                assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 99..100);
+            }
+            {
+                // before
+                let mut tree = Tree::new();
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.annotate(99, 1, a(0));
+                tree.delete(99, 1);
+                tree.insert(99, 1, |_| AnnPosRelativeToInsert::BeforeInsert);
+                assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 99..99);
+            }
+        }
 
         #[test]
         fn insert_should_create_new_empty_span_if_annotation_need_to_move_right() {}
