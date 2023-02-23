@@ -1,7 +1,7 @@
 use bitvec::vec::BitVec;
 use generic_btree::{
     rle::{self, update_slice, HasLength, Mergeable, Sliceable},
-    BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec,
+    BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec, StackVec,
 };
 use std::{
     collections::BTreeSet,
@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Annotation, OpID};
+use crate::{range_map::AnnPosRelativeToInsert, Annotation, OpID};
 use fxhash::FxHashMap;
 
 use super::{RangeMap, Span};
@@ -124,7 +124,7 @@ impl Tree {
     // TODO: Perf can use write buffer to speed up
     fn insert_or_delete_ann_inside_range(
         &mut self,
-        range: Range<QueryResult>,
+        range: Range<&QueryResult>,
         index: usize,
         is_insert: bool,
     ) {
@@ -159,6 +159,10 @@ fn or_(ann: &mut BitVec, new_ann: &BitVec) {
     }
 
     *ann |= new_ann;
+}
+
+fn and_(ann: &mut BitVec, new_ann: &BitVec) {
+    *ann &= new_ann;
 }
 
 fn set_bit(v: &mut BitVec, i: usize, b: bool) {
@@ -237,28 +241,206 @@ impl RangeMap for Tree {
         Self::new()
     }
 
-    fn insert<F>(&mut self, pos: usize, len: usize, f: F)
+    fn insert<F>(&mut self, pos: usize, len: usize, mut f: F)
     where
         F: FnMut(&Annotation) -> super::AnnPosRelativeToInsert,
     {
-        let result = self.tree.query::<IndexFinder>(&pos);
-        // TODO: handle anchors on the tombstones
-        if let Some(elem) = result.elem(&self.tree) {
-            self.tree.insert_by_query_result(
-                result,
-                Elem {
-                    ann: elem.ann.clone(),
-                    len,
-                },
+        let mut spans = self
+            .tree
+            .iter_range(
+                self.tree
+                    .range::<IndexFinder>(pos.saturating_sub(1)..(pos + 1).min(self.len())),
             )
-        } else {
-            self.tree.insert_by_query_result(
-                result,
+            .collect::<StackVec<_>>();
+
+        if !spans.is_empty() {
+            // pop redundant end if there are any
+            loop {
+                let last = spans.last().unwrap();
+                let len = last.elem.len;
+                if last.end == Some(0) && (len != 0 || spans.len() > 3) {
+                    spans.pop();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        dbg!(&spans);
+        assert!(spans.len() <= 3);
+        if spans.is_empty() {
+            drop(spans);
+            // TODO: Perf reuse the query
+            self.tree.insert::<IndexFinder>(
+                &pos,
                 Elem {
                     ann: Default::default(),
                     len,
                 },
-            )
+            );
+            return;
+        } else if spans.len() == 1 {
+            let ann = spans[0].elem.ann.clone();
+            drop(spans);
+            // TODO: Perf reuse the query
+            let result = self.tree.query::<IndexFinder>(&pos);
+            self.tree.insert_by_query_result(result, Elem { ann, len });
+            return;
+        }
+
+        // spans.len() == 2 || spans.len() == 3
+        debug_assert!(!std::ptr::eq(spans[0].elem, spans[1].elem));
+        debug_assert!(spans.iter().filter(|x| x.elem.len == 0).count() <= 1);
+        if spans.len() == 3 {
+            debug_assert!(!std::ptr::eq(spans[1].elem, spans[2].elem));
+            debug_assert!(spans[0].elem.len > 0);
+            debug_assert!(spans[2].elem.len > 0);
+            debug_assert_eq!(spans[1].elem.len, 0);
+        }
+
+        // need to use f to adjust the ranges of annotations
+        let left = if spans[0].elem.len > 0 {
+            Some(&spans[0])
+        } else {
+            debug_assert_eq!(spans.len(), 2);
+            None
+        };
+        let middle = if spans.len() == 3 {
+            Some(&spans[1])
+        } else if spans[0].elem.len == 0 {
+            Some(&spans[0])
+        } else if spans[1].elem.len == 0 {
+            Some(&spans[1])
+        } else {
+            None
+        };
+        let right = if spans.len() == 3 {
+            Some(&spans[2])
+        } else if spans.len() == 2 && spans[1].elem.len > 0 {
+            Some(&spans[1])
+        } else {
+            None
+        };
+
+        let mut shared: Option<BitVec> = None;
+        for a in left.iter().chain(middle.iter()).chain(right.iter()) {
+            match &mut shared {
+                Some(shared) => and_(shared, &a.elem.ann),
+                None => {
+                    shared = Some(a.elem.ann.clone());
+                }
+            }
+        }
+
+        let shared = shared.unwrap();
+        let mut new_elem = Elem::default();
+        new_elem.len = len;
+        let mut next_empty_elem = Elem::default();
+        new_elem.ann = shared.clone();
+        next_empty_elem.ann = shared.clone();
+        let mut middle_annotations = BitVec::new();
+
+        let mut use_next = false;
+        // middle
+        if let Some(middle) = middle {
+            for ann in middle.elem.ann.iter_ones() {
+                if shared.get(ann).as_deref().copied().unwrap_or(false) {
+                    set_bit(&mut middle_annotations, ann, true);
+                    continue;
+                }
+
+                match f(self.bit_index_to_ann(ann)) {
+                    AnnPosRelativeToInsert::BeforeInsert => {
+                        set_bit(&mut middle_annotations, ann, true);
+                    }
+                    AnnPosRelativeToInsert::AfterInsert => {
+                        use_next = true;
+                        set_bit(&mut next_empty_elem.ann, ann, true);
+                    }
+                    AnnPosRelativeToInsert::IncludeInsert => {
+                        set_bit(&mut next_empty_elem.ann, ann, true);
+                        set_bit(&mut middle_annotations, ann, true);
+                        set_bit(&mut new_elem.ann, ann, true);
+                    }
+                }
+            }
+        }
+
+        // left
+        let use_next = use_next; // make it immutable
+        if let Some(left) = left {
+            for ann in left.elem.ann.iter_ones() {
+                if shared.get(ann).as_deref().copied().unwrap_or(false) {
+                    continue;
+                }
+
+                match f(self.bit_index_to_ann(ann)) {
+                    AnnPosRelativeToInsert::BeforeInsert => {}
+                    AnnPosRelativeToInsert::AfterInsert => {
+                        // unreachable!()
+                    }
+                    AnnPosRelativeToInsert::IncludeInsert => {
+                        set_bit(&mut middle_annotations, ann, true);
+                        set_bit(&mut new_elem.ann, ann, true);
+                        if use_next {
+                            set_bit(&mut next_empty_elem.ann, ann, true);
+                        }
+                    }
+                }
+            }
+        }
+
+        // right
+        if let Some(right) = right {
+            for ann in right.elem.ann.iter_ones() {
+                if shared.get(ann).as_deref().copied().unwrap_or(false) {
+                    continue;
+                }
+
+                match f(self.bit_index_to_ann(ann)) {
+                    AnnPosRelativeToInsert::BeforeInsert => {
+                        // unreachable!()
+                    }
+                    AnnPosRelativeToInsert::AfterInsert => {}
+                    AnnPosRelativeToInsert::IncludeInsert => {
+                        set_bit(&mut middle_annotations, ann, true);
+                        set_bit(&mut new_elem.ann, ann, true);
+                        if use_next {
+                            debug_log::debug_log!("next from right {:?}", &ann);
+                            set_bit(&mut next_empty_elem.ann, ann, true);
+                        }
+                    }
+                }
+            }
+        }
+
+        dbg!(&left, &middle, &right);
+        let path = right
+            .map(|x| x.path())
+            .unwrap_or_else(|| middle.unwrap().path())
+            .clone();
+        if let Some(middle) = middle {
+            let path = middle.path().clone();
+            drop(spans);
+            self.tree.update(&path..&path, &mut |slice| {
+                let index = slice.start.unwrap().0;
+                assert_eq!(slice.elements[index].len, 0);
+                if slice.elements[index].ann == middle_annotations {
+                    false
+                } else {
+                    slice.elements[index].ann = middle_annotations.clone();
+                    true
+                }
+            });
+        } else {
+            drop(spans);
+        }
+
+        if use_next {
+            self.tree
+                .insert_many_by_query_result(&path, [new_elem, next_empty_elem]);
+        } else {
+            self.tree.insert_by_query_result(path, new_elem);
         }
     }
 
@@ -323,13 +505,13 @@ impl RangeMap for Tree {
                 std::cmp::Ordering::Less => {
                     // expand start
                     let new_start = self.tree.query::<IndexFinder>(&new_index);
-                    self.insert_or_delete_ann_inside_range(new_start..range_start, mask, true);
+                    self.insert_or_delete_ann_inside_range(&new_start..&range_start, mask, true);
                 }
                 std::cmp::Ordering::Greater => {
                     // shrink start
                     let new_start = self.tree.query::<IndexFinder>(&new_index);
                     final_pos = new_index;
-                    self.insert_or_delete_ann_inside_range(range_start..new_start, mask, false);
+                    self.insert_or_delete_ann_inside_range(&range_start..&new_start, mask, false);
                 }
                 std::cmp::Ordering::Equal => {}
             }
@@ -344,12 +526,12 @@ impl RangeMap for Tree {
                     // shrink end
                     let new_end = self.tree.query::<IndexFinder>(&new_index);
                     final_pos = new_index;
-                    self.insert_or_delete_ann_inside_range(new_end..range_end, mask, false);
+                    self.insert_or_delete_ann_inside_range(&new_end..&range_end, mask, false);
                 }
                 std::cmp::Ordering::Greater => {
                     // expand end
                     let new_end = self.tree.query::<IndexFinder>(&new_index);
-                    self.insert_or_delete_ann_inside_range(range_end..new_end, mask, true);
+                    self.insert_or_delete_ann_inside_range(&range_end..&new_end, mask, true);
                 }
                 std::cmp::Ordering::Equal => {}
             }
@@ -382,7 +564,7 @@ impl RangeMap for Tree {
         let Some((query_range, _)) = self.get_annotation_range(id) else { return };
         let (start, end) = query_range.into_inner();
         let bit_index = self.get_ann_bit_index(id).unwrap();
-        self.insert_or_delete_ann_inside_range(start..end, bit_index, false);
+        self.insert_or_delete_ann_inside_range(&start..&end, bit_index, false);
     }
 
     fn get_annotations(&self, pos: usize, len: usize) -> Vec<super::Span> {
@@ -392,7 +574,10 @@ impl RangeMap for Tree {
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
         let mut last_ann = &BitVec::new();
         // FIXME: should use iter_range_with_buffer_unloaded
-        for ElemSlice { elem, start, end } in self.tree.iter_range(range) {
+        for ElemSlice {
+            elem, start, end, ..
+        } in self.tree.iter_range(range)
+        {
             let start = start.unwrap_or(0);
             let end = end.unwrap_or(elem.len);
             if last_ann.iter_ones().eq(elem.ann.iter_ones()) && !ans.is_empty() {
@@ -524,7 +709,19 @@ impl BTreeTrait for TreeTrait {
         }
     }
 
-    fn insert(elements: &mut HeapVec<Self::Elem>, index: usize, offset: usize, elem: Self::Elem) {
+    fn insert(
+        elements: &mut HeapVec<Self::Elem>,
+        mut index: usize,
+        mut offset: usize,
+        elem: Self::Elem,
+    ) {
+        if index < elements.len() && elements[index].len == 0 {
+            // prefer inserting after zero-len element.
+            // because this is the behavior depended by RangeMap::insert impl
+            offset = 0;
+            index += 1;
+        }
+
         rle::insert_with_split(elements, index, offset, elem)
     }
 }
@@ -1134,5 +1331,74 @@ mod tree_impl_tests {
                 make_spans(vec![(vec![], 8), (vec![0], 22), (vec![], 70)]),
             );
         }
+    }
+
+    mod insert {
+        use super::*;
+
+        #[test]
+        fn test_insert_to_annotation() {
+            let mut tree = Tree::new();
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.annotate(10, 10, a(0));
+            tree.insert(20, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..20);
+
+            tree.insert(19, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..21);
+
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..22);
+        }
+
+        #[test]
+        fn insert_at_edge_with_diff_mark() {
+            let mut tree = Tree::new();
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.annotate(10, 10, a(0));
+
+            // not included in annotated range
+            tree.insert(20, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..20);
+
+            // included in annotated range
+            tree.insert(20, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..21);
+
+            // not included in annotated range
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..22);
+
+            // included in annotated range
+            tree.insert(11, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..23);
+        }
+
+        #[test]
+        fn test_insert_to_zero_len_position() {}
+
+        #[test]
+        fn insert_to_tombstones_left() {}
+
+        #[test]
+        fn insert_to_tombstones_right() {}
+
+        #[test]
+        fn insert_to_tombstones_middle() {}
+
+        #[test]
+        fn should_panic_when_tombstones_pos_err() {}
+
+        #[test]
+        fn insert_to_beginning_with_empty_span() {}
+
+        #[test]
+        fn insert_to_end_with_empty_span() {}
+
+        #[test]
+        fn insert_should_create_new_empty_span_if_annotation_need_to_move_right() {}
+
+        #[test]
+        fn move_annotations_right_without_creating_empty_span() {}
     }
 }
