@@ -724,6 +724,41 @@ impl BTreeTrait for TreeTrait {
 
         rle::insert_with_split(elements, index, offset, elem)
     }
+
+    fn insert_batch(
+        elements: &mut HeapVec<Self::Elem>,
+        mut index: usize,
+        mut offset: usize,
+        new_elements: impl IntoIterator<Item = Self::Elem>,
+    ) where
+        Self::Elem: Clone,
+    {
+        if index < elements.len() && elements[index].len == 0 {
+            // prefer inserting after zero-len element.
+            // because this is the behavior depended by RangeMap::insert impl
+            offset = 0;
+            index += 1;
+        }
+
+        if elements.is_empty() {
+            elements.insert_many(0, new_elements);
+            return;
+        }
+
+        // TODO: try merging
+        if offset == 0 {
+            elements.insert_many(index, new_elements);
+        } else if offset == elements[index].rle_len() {
+            elements.insert_many(index + 1, new_elements);
+        } else {
+            let right = elements[index].slice(offset..);
+            elements[index].slice_(..offset);
+            elements.insert_many(
+                index,
+                new_elements.into_iter().chain(Some(right).into_iter()),
+            );
+        }
+    }
 }
 
 struct IndexFinder {
@@ -1375,7 +1410,18 @@ mod tree_impl_tests {
         }
 
         #[test]
-        fn test_insert_to_zero_len_position() {}
+        fn test_insert_to_zero_len_position() {
+            let mut tree = Tree::new();
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.annotate(10, 10, a(0));
+            tree.delete(10, 10);
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::BeforeInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..10);
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..11);
+            tree.insert(11, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
+            assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..12);
+        }
 
         #[test]
         fn insert_to_tombstones_left() {}
