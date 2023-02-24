@@ -1433,6 +1433,7 @@ mod tree_impl_tests {
         fn test_insert_to_middle_among_tombstones() {
             let mut tree = Tree::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.annotate(0, 100, a(8));
             tree.annotate(10, 1, a(0));
             tree.annotate(11, 1, a(1));
             tree.annotate(12, 1, a(2));
@@ -1449,6 +1450,10 @@ mod tree_impl_tests {
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..10);
             assert_eq!(tree.get_annotation_pos(id(1)).unwrap().1, 11..11);
             assert_eq!(tree.get_annotation_pos(id(2)).unwrap().1, 10..11);
+            assert_eq!(tree.get_annotation_pos(id(8)).unwrap().1, 0..98);
+            for ann in tree.get_annotations(0, 98) {
+                assert!(ann.annotations.iter().any(|x| x.id == id(8)));
+            }
         }
 
         #[test]
@@ -1512,11 +1517,5 @@ mod tree_impl_tests {
                 assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 99..99);
             }
         }
-
-        #[test]
-        fn insert_should_create_new_empty_span_if_annotation_need_to_move_right() {}
-
-        #[test]
-        fn move_annotations_right_without_creating_empty_span() {}
     }
 }
