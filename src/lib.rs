@@ -520,6 +520,14 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
 
         ans
     }
+
+    pub fn len(&self) -> usize {
+        self.range_map.len() / 3
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.range_map.len() == 2
+    }
 }
 
 fn index_start<Index>(start: Anchor, index: &Index) -> usize

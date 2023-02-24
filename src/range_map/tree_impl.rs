@@ -20,6 +20,13 @@ pub struct TreeRangeMap {
     id_to_ann: FxHashMap<OpID, Arc<Annotation>>,
     id_to_bit: FxHashMap<OpID, usize>,
     bit_to_id: Vec<OpID>,
+    len: usize,
+}
+
+impl TreeRangeMap {
+    fn check(&self) {
+        assert_eq!(self.len, self.tree.root_cache().len);
+    }
 }
 
 impl TreeRangeMap {
@@ -34,6 +41,7 @@ impl TreeRangeMap {
             id_to_ann: FxHashMap::default(),
             id_to_bit: FxHashMap::default(),
             bit_to_id,
+            len: 0,
         }
     }
 
@@ -93,25 +101,23 @@ impl TreeRangeMap {
         self.tree.insert::<IndexFinder>(&pos, elem);
     }
 
-    fn annotate_by_range(&mut self, range: Range<QueryResult>, idx: usize) {
-        self.tree.update_with_buffer(
+    // TODO: Perf can use write buffer to speed up
+    fn annotate_by_range(&mut self, range: Range<&QueryResult>, idx: usize) {
+        self.tree.update(
             range,
             &mut |mut slice| {
                 update_slice(&mut slice, &mut |x| {
-                    if idx >= x.ann.len() {
-                        x.ann.resize(idx + 10, false);
-                    }
-                    x.ann.set(idx, true);
+                    set_bit(&mut x.ann, idx, true);
                     true
                 })
             },
-            |buffer, _| {
-                if buffer.is_none() {
-                    *buffer = Some(Buffer::default());
-                }
-                buffer.as_mut().unwrap().changes.push(idx as isize);
-                true
-            },
+            // |buffer, _| {
+            //     if buffer.is_none() {
+            //         *buffer = Some(Buffer::default());
+            //     }
+            //     buffer.as_mut().unwrap().changes.push(idx as isize);
+            //     true
+            // },
         );
     }
 
@@ -122,7 +128,9 @@ impl TreeRangeMap {
         index: usize,
         is_insert: bool,
     ) {
+        debug_log::debug_log!("{} {:?}", index, &range);
         self.tree.update(range, &mut |mut slice| {
+            debug_log::debug_dbg!(&slice.elements, &slice.start, &slice.end);
             update_slice(&mut slice, &mut |x| {
                 set_bit(&mut x.ann, index, is_insert);
                 true
@@ -246,6 +254,8 @@ impl RangeMap for TreeRangeMap {
     where
         F: FnMut(&Annotation) -> super::AnnPosRelativeToInsert,
     {
+        self.check();
+        self.len += len;
         let mut spans = self
             .tree
             .iter_range(
@@ -265,10 +275,20 @@ impl RangeMap for TreeRangeMap {
                     break;
                 }
             }
+            loop {
+                let first = spans.first().unwrap();
+                let len = first.elem.len;
+                if (first.start == Some(first.elem.len) && len != 0)
+                    || (len == 0 && spans.len() >= 3)
+                {
+                    spans.drain(0..1);
+                } else {
+                    break;
+                }
+            }
         }
 
-        dbg!(&spans);
-        assert!(spans.len() <= 3);
+        assert!(spans.len() <= 4);
         if spans.is_empty() {
             drop(spans);
             // TODO: Perf reuse the query
@@ -289,42 +309,34 @@ impl RangeMap for TreeRangeMap {
             return;
         }
 
-        // spans.len() == 2 || spans.len() == 3
-        debug_assert!(!std::ptr::eq(spans[0].elem, spans[1].elem));
-        debug_assert!(spans.iter().filter(|x| x.elem.len == 0).count() <= 1);
-        if spans.len() == 3 {
-            debug_assert!(!std::ptr::eq(spans[1].elem, spans[2].elem));
-            debug_assert!(spans[0].elem.len > 0);
-            debug_assert!(spans[2].elem.len > 0);
-            debug_assert_eq!(spans[1].elem.len, 0);
+        let mut middles = StackVec::new();
+        let mut left = None;
+        let mut right = None;
+
+        if spans[0].elem.len == 0 {
+            for span in spans.iter() {
+                if span.elem.len == 0 {
+                    middles.push(span);
+                } else {
+                    assert!(right.is_none());
+                    right = Some(span);
+                }
+            }
+        } else {
+            for span in spans.iter() {
+                if left.is_none() {
+                    left = Some(span);
+                } else if span.elem.len == 0 {
+                    middles.push(span);
+                } else {
+                    assert!(right.is_none());
+                    right = Some(span);
+                }
+            }
         }
 
-        // need to use f to adjust the ranges of annotations
-        let left = if spans[0].elem.len > 0 {
-            Some(&spans[0])
-        } else {
-            debug_assert_eq!(spans.len(), 2);
-            None
-        };
-        let middle = if spans.len() == 3 {
-            Some(&spans[1])
-        } else if spans[0].elem.len == 0 {
-            Some(&spans[0])
-        } else if spans[1].elem.len == 0 {
-            Some(&spans[1])
-        } else {
-            None
-        };
-        let right = if spans.len() == 3 {
-            Some(&spans[2])
-        } else if spans.len() == 2 && spans[1].elem.len > 0 {
-            Some(&spans[1])
-        } else {
-            None
-        };
-
         let mut shared: Option<BitVec> = None;
-        for a in left.iter().chain(middle.iter()).chain(right.iter()) {
+        for a in left.iter().chain(middles.iter()).chain(right.iter()) {
             match &mut shared {
                 Some(shared) => and_(shared, &a.elem.ann),
                 None => {
@@ -342,7 +354,7 @@ impl RangeMap for TreeRangeMap {
 
         let mut use_next = false;
         // middle
-        if let Some(middle) = middle {
+        for middle in middles.iter() {
             for ann in middle.elem.ann.iter_ones() {
                 if shared.get(ann).as_deref().copied().unwrap_or(false) {
                     set_bit(&mut middle_annotations, ann, true);
@@ -416,10 +428,11 @@ impl RangeMap for TreeRangeMap {
 
         let path = right
             .map(|x| x.path())
-            .unwrap_or_else(|| middle.unwrap().path())
+            .unwrap_or_else(|| middles.last().unwrap().path())
             .clone();
-        if let Some(middle) = middle {
+        if let Some(middle) = middles.last() {
             let path = middle.path().clone();
+            drop(middles);
             drop(spans);
             self.tree.update(&path..&path, &mut |slice| {
                 let index = slice.start.unwrap().0;
@@ -432,6 +445,7 @@ impl RangeMap for TreeRangeMap {
                 }
             });
         } else {
+            drop(middles);
             drop(spans);
         }
 
@@ -441,9 +455,16 @@ impl RangeMap for TreeRangeMap {
         } else {
             self.tree.insert_by_query_result(path, new_elem);
         }
+
+        debug_assert_eq!(self.len(), self.len);
+        self.check();
     }
 
     fn delete(&mut self, pos: usize, len: usize) {
+        self.check();
+        debug_assert_eq!(self.len(), self.len);
+        self.len -= len;
+        assert!(pos + len <= self.len());
         let mut has_ann = false;
         let mut ann_bit_mask: BitVec = BitVec::new();
         // We should leave deleted annotations in the tree, stored inside a empty span.
@@ -473,13 +494,20 @@ impl RangeMap for TreeRangeMap {
                 self.insert_empty_span(pos, ann_bit_mask);
             }
         }
+
+        debug_assert_eq!(self.len(), self.len);
+        self.check();
     }
 
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation) {
+        self.check();
+        debug_assert_eq!(self.len(), self.len);
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
         let ann = Arc::new(annotation);
         let idx = self.try_add_ann(ann);
-        self.annotate_by_range(range, idx);
+        self.annotate_by_range(&range.start..&range.end, idx);
+        debug_assert_eq!(self.len(), self.len);
+        self.check();
     }
 
     fn adjust_annotation(
@@ -490,6 +518,8 @@ impl RangeMap for TreeRangeMap {
         start_shift: Option<(isize, Option<OpID>)>,
         end_shift: Option<(isize, Option<OpID>)>,
     ) {
+        self.check();
+        debug_assert_eq!(self.len(), self.len);
         if let Some(ann) = self.id_to_ann.get(&target_id) {
             // skip update if the current lamport is larger
             if ann.range_lamport > (lamport, patch_id) {
@@ -563,17 +593,25 @@ impl RangeMap for TreeRangeMap {
         }
 
         *ann = Arc::new(new_ann);
+        debug_assert_eq!(self.len(), self.len);
+        self.check();
     }
 
     fn delete_annotation(&mut self, id: OpID) {
+        self.check();
+        debug_assert_eq!(self.len(), self.len);
         // use annotation finder to delete
         let Some((query_range, _)) = self.get_annotation_range(id) else { return };
         let (start, end) = query_range.into_inner();
         let bit_index = self.get_ann_bit_index(id).unwrap();
         self.insert_or_delete_ann_inside_range(&start..&end, bit_index, false);
+        debug_assert_eq!(self.len(), self.len);
+        self.check();
     }
 
     fn get_annotations(&mut self, pos: usize, len: usize) -> Vec<super::Span> {
+        self.check();
+        debug_assert_eq!(self.len(), self.len);
         let pos = pos.min(self.len());
         let len = len.min(self.len() - pos);
         let mut ans: Vec<Span> = Vec::new();
@@ -604,6 +642,8 @@ impl RangeMap for TreeRangeMap {
             last_ann = &elem.ann;
         }
 
+        debug_assert_eq!(self.len(), self.len);
+        self.check();
         ans
     }
 
