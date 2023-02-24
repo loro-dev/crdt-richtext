@@ -33,8 +33,8 @@ pub trait RangeMap {
 /// the position of annotation relative to a new insert
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnnPosRelativeToInsert {
-    BeforeInsert,
-    AfterInsert,
+    Before,
+    After,
     IncludeInsert,
 }
 

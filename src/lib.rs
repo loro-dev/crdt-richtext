@@ -89,6 +89,7 @@ impl RangeOp {
         }
     }
 
+    #[allow(unused)]
     fn set_id(&mut self, id: OpID) {
         match self {
             RangeOp::Patch(x) => x.id = id,
@@ -96,6 +97,7 @@ impl RangeOp {
         }
     }
 
+    #[allow(unused)]
     fn lamport(&self) -> Lamport {
         match self {
             RangeOp::Patch(x) => x.lamport,
@@ -234,8 +236,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             debug_log::debug_dbg!(ann);
             match (start_before_insert, end_after_insert) {
                 (true, true) => AnnPosRelativeToInsert::IncludeInsert,
-                (true, false) => AnnPosRelativeToInsert::BeforeInsert,
-                (false, true) => AnnPosRelativeToInsert::AfterInsert,
+                (true, false) => AnnPosRelativeToInsert::Before,
+                (false, true) => AnnPosRelativeToInsert::After,
                 (false, false) => unreachable!(),
             }
         });
@@ -498,8 +500,8 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             let len = (next_index + 2) / 3 - (last_index + 2) / 3;
             span.len = len;
 
-            let mut annotations: HashMap<String, ((Lamport, OpID), Vec<Arc<Annotation>>)> =
-                HashMap::new();
+            type Key = (Lamport, OpID);
+            let mut annotations: HashMap<String, (Key, Vec<Arc<Annotation>>)> = HashMap::new();
             for a in std::mem::take(&mut span.annotations) {
                 if let Some(x) = annotations.get_mut(&a.type_) {
                     if a.merge_method == RangeMergeRule::Inclusive {

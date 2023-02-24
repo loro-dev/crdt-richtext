@@ -49,13 +49,6 @@ impl Tree {
         }
     }
 
-    fn new_bit_vec(&self) -> BitVec {
-        let size = self.bit_to_id.len();
-        let mut v = BitVec::with_capacity(size.max(32));
-        v.resize(size, false);
-        v
-    }
-
     fn get_ann_bit_index(&self, id: OpID) -> Option<usize> {
         self.id_to_bit.get(&id).copied()
     }
@@ -149,6 +142,13 @@ impl Elem {
             false
         } else {
             self.ann[bit_index]
+        }
+    }
+
+    fn new(len: usize) -> Self {
+        Elem {
+            ann: Default::default(),
+            len,
         }
     }
 }
@@ -333,8 +333,7 @@ impl RangeMap for Tree {
         }
 
         let shared = shared.unwrap();
-        let mut new_elem = Elem::default();
-        new_elem.len = len;
+        let mut new_elem = Elem::new(len);
         let mut next_empty_elem = Elem::default();
         new_elem.ann = shared.clone();
         next_empty_elem.ann = shared.clone();
@@ -350,10 +349,10 @@ impl RangeMap for Tree {
                 }
 
                 match f(self.bit_index_to_ann(ann)) {
-                    AnnPosRelativeToInsert::BeforeInsert => {
+                    AnnPosRelativeToInsert::Before => {
                         set_bit(&mut middle_annotations, ann, true);
                     }
-                    AnnPosRelativeToInsert::AfterInsert => {
+                    AnnPosRelativeToInsert::After => {
                         use_next = true;
                         set_bit(&mut next_empty_elem.ann, ann, true);
                     }
@@ -375,8 +374,8 @@ impl RangeMap for Tree {
                 }
 
                 match f(self.bit_index_to_ann(ann)) {
-                    AnnPosRelativeToInsert::BeforeInsert => {}
-                    AnnPosRelativeToInsert::AfterInsert => {
+                    AnnPosRelativeToInsert::Before => {}
+                    AnnPosRelativeToInsert::After => {
                         // unreachable!()
                     }
                     AnnPosRelativeToInsert::IncludeInsert => {
@@ -398,10 +397,10 @@ impl RangeMap for Tree {
                 }
 
                 match f(self.bit_index_to_ann(ann)) {
-                    AnnPosRelativeToInsert::BeforeInsert => {
+                    AnnPosRelativeToInsert::Before => {
                         // unreachable!()
                     }
-                    AnnPosRelativeToInsert::AfterInsert => {}
+                    AnnPosRelativeToInsert::After => {}
                     AnnPosRelativeToInsert::IncludeInsert => {
                         set_bit(&mut middle_annotations, ann, true);
                         set_bit(&mut new_elem.ann, ann, true);
@@ -1069,8 +1068,7 @@ mod tree_impl_tests {
     fn make_spans(spans: Vec<(Vec<u64>, usize)>) -> Vec<Span> {
         let mut map = HashMap::new();
         let mut ans = Vec::new();
-        for i in 0..spans.len() {
-            let (annotations, len) = &spans[i];
+        for (annotations, len) in spans.iter() {
             let mut new_annotations = BTreeSet::new();
             for ann in annotations {
                 let a = map.entry(*ann).or_insert_with(|| Arc::new(a(*ann))).clone();
@@ -1088,7 +1086,7 @@ mod tree_impl_tests {
     #[test]
     fn annotate() {
         let mut tree = Tree::new();
-        tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+        tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
         tree.annotate(10, 10, a(2));
         assert_eq!(tree.len(), 100);
         let range = tree.get_annotation_range(id(2));
@@ -1106,7 +1104,7 @@ mod tree_impl_tests {
         #[test]
         fn delete_text_to_empty() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.delete(10, 10);
             assert_eq!(tree.len(), 90);
             tree.delete(0, 90);
@@ -1118,7 +1116,7 @@ mod tree_impl_tests {
         #[test]
         fn delete_text_with_annotation_to_empty() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.annotate(5, 10, a(1));
             tree.annotate(95, 5, a(5));
@@ -1131,7 +1129,7 @@ mod tree_impl_tests {
         #[test]
         fn delete_text_with_empty_span_at_edge() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
             // now we have an empty span
@@ -1158,7 +1156,7 @@ mod tree_impl_tests {
         #[test]
         fn delete_a_part_of_annotation() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(5, 10, a(0));
             tree.delete(10, 10);
             let ans = tree.get_annotations(0, 100);
@@ -1172,7 +1170,7 @@ mod tree_impl_tests {
         #[test]
         fn delete_annotation() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(5, 10, a(0));
             tree.delete_annotation(id(0));
             let ans = tree.get_annotations(0, 100);
@@ -1182,7 +1180,7 @@ mod tree_impl_tests {
         #[test]
         fn delete_annotation_in_zero_len_span() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.delete(0, 10);
             // now we have an empty span
@@ -1198,7 +1196,7 @@ mod tree_impl_tests {
         #[test]
         fn delete_across_several_span() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.annotate(5, 10, a(1));
             tree.annotate(6, 10, a(2));
@@ -1220,7 +1218,7 @@ mod tree_impl_tests {
         #[test]
         fn expand() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(1, 9, a(0));
             // expand end
             tree.adjust_annotation(id(0), 1, id(1), None, Some((1, Some(id(0)))));
@@ -1239,7 +1237,7 @@ mod tree_impl_tests {
         #[test]
         fn should_change_anchor_id() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.adjust_annotation(id(0), 1, id(1), None, Some((1, Some(id(4)))));
             let span = tree.get_annotations(2, 1)[0].clone();
@@ -1250,7 +1248,7 @@ mod tree_impl_tests {
         #[test]
         fn shrink() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             // shrink end
             tree.adjust_annotation(id(0), 1, id(1), None, Some((-1, Some(id(0)))));
@@ -1269,7 +1267,7 @@ mod tree_impl_tests {
         #[test]
         fn expand_over_empty_span() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
             tree.annotate(9, 1, a(1));
@@ -1290,7 +1288,7 @@ mod tree_impl_tests {
         #[test]
         fn shrink_to_create_an_empty_span() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.adjust_annotation(
                 id(0),
@@ -1309,7 +1307,7 @@ mod tree_impl_tests {
         #[test]
         fn expand_from_empty_span_over_empty_span() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
             let ans = tree.get_annotations(0, 100);
@@ -1328,7 +1326,7 @@ mod tree_impl_tests {
         #[test]
         fn should_ignore_adjustment_if_lamport_is_too_small() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             // set lamport to 2 but not change the range
             tree.adjust_annotation(
@@ -1380,26 +1378,26 @@ mod tree_impl_tests {
         #[test]
         fn test_insert_to_annotation() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
-            tree.insert(20, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(20, 1, |_| AnnPosRelativeToInsert::After);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..20);
 
-            tree.insert(19, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(19, 1, |_| AnnPosRelativeToInsert::After);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..21);
 
-            tree.insert(10, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::After);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..22);
         }
 
         #[test]
         fn insert_at_edge_with_diff_mark() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
 
             // not included in annotated range
-            tree.insert(20, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(20, 1, |_| AnnPosRelativeToInsert::After);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..20);
 
             // included in annotated range
@@ -1407,7 +1405,7 @@ mod tree_impl_tests {
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..21);
 
             // not included in annotated range
-            tree.insert(10, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::After);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..22);
 
             // included in annotated range
@@ -1418,12 +1416,12 @@ mod tree_impl_tests {
         #[test]
         fn test_insert_to_zero_len_position() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
-            tree.insert(10, 1, |_| AnnPosRelativeToInsert::BeforeInsert);
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::Before);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..10);
-            tree.insert(10, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(10, 1, |_| AnnPosRelativeToInsert::After);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..11);
             tree.insert(11, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 11..12);
@@ -1432,7 +1430,7 @@ mod tree_impl_tests {
         #[test]
         fn test_insert_to_middle_among_tombstones() {
             let mut tree = Tree::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 100, a(8));
             tree.annotate(10, 1, a(0));
             tree.annotate(11, 1, a(1));
@@ -1440,11 +1438,11 @@ mod tree_impl_tests {
             tree.delete(10, 3);
             tree.insert(10, 1, |ann| {
                 if ann.id == id(0) {
-                    AnnPosRelativeToInsert::BeforeInsert
+                    AnnPosRelativeToInsert::Before
                 } else if ann.id == id(2) {
                     AnnPosRelativeToInsert::IncludeInsert
                 } else {
-                    AnnPosRelativeToInsert::AfterInsert
+                    AnnPosRelativeToInsert::After
                 }
             });
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..10);
@@ -1461,16 +1459,16 @@ mod tree_impl_tests {
             {
                 // after
                 let mut tree = Tree::new();
-                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(0, 1, a(0));
                 tree.delete(0, 1);
-                tree.insert(0, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(0, 1, |_| AnnPosRelativeToInsert::After);
                 assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 1..1);
             }
             {
                 // include
                 let mut tree = Tree::new();
-                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(0, 1, a(0));
                 tree.delete(0, 1);
                 tree.insert(0, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
@@ -1479,10 +1477,10 @@ mod tree_impl_tests {
             {
                 // before
                 let mut tree = Tree::new();
-                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(0, 1, a(0));
                 tree.delete(0, 1);
-                tree.insert(0, 1, |_| AnnPosRelativeToInsert::BeforeInsert);
+                tree.insert(0, 1, |_| AnnPosRelativeToInsert::Before);
                 assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 0..0);
             }
         }
@@ -1492,16 +1490,16 @@ mod tree_impl_tests {
             {
                 // after
                 let mut tree = Tree::new();
-                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(99, 1, a(0));
                 tree.delete(99, 1);
-                tree.insert(99, 1, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(99, 1, |_| AnnPosRelativeToInsert::After);
                 assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 100..100);
             }
             {
                 // include
                 let mut tree = Tree::new();
-                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(99, 1, a(0));
                 tree.delete(99, 1);
                 tree.insert(99, 1, |_| AnnPosRelativeToInsert::IncludeInsert);
@@ -1510,10 +1508,10 @@ mod tree_impl_tests {
             {
                 // before
                 let mut tree = Tree::new();
-                tree.insert(0, 100, |_| AnnPosRelativeToInsert::AfterInsert);
+                tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(99, 1, a(0));
                 tree.delete(99, 1);
-                tree.insert(99, 1, |_| AnnPosRelativeToInsert::BeforeInsert);
+                tree.insert(99, 1, |_| AnnPosRelativeToInsert::Before);
                 assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 99..99);
             }
         }

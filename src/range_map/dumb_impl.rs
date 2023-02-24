@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-
-use crate::{Anchor, AnchorType};
-
 use super::*;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -255,10 +251,10 @@ impl RangeMap for DumbRangeMap {
                     }
 
                     match f(&ann) {
-                        AnnPosRelativeToInsert::BeforeInsert => {
+                        AnnPosRelativeToInsert::Before => {
                             middle_annotations.insert(ann);
                         }
-                        AnnPosRelativeToInsert::AfterInsert => {
+                        AnnPosRelativeToInsert::After => {
                             use_next = true;
                             next_empty_span.annotations.insert(ann);
                         }
@@ -280,8 +276,8 @@ impl RangeMap for DumbRangeMap {
                     }
 
                     match f(ann) {
-                        AnnPosRelativeToInsert::BeforeInsert => {}
-                        AnnPosRelativeToInsert::AfterInsert => unreachable!(),
+                        AnnPosRelativeToInsert::Before => {}
+                        AnnPosRelativeToInsert::After => unreachable!(),
                         AnnPosRelativeToInsert::IncludeInsert => {
                             middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
@@ -302,8 +298,8 @@ impl RangeMap for DumbRangeMap {
                     }
 
                     match f(ann) {
-                        AnnPosRelativeToInsert::BeforeInsert => unreachable!(),
-                        AnnPosRelativeToInsert::AfterInsert => {}
+                        AnnPosRelativeToInsert::Before => unreachable!(),
+                        AnnPosRelativeToInsert::After => {}
                         AnnPosRelativeToInsert::IncludeInsert => {
                             middle_annotations.insert(ann.clone());
                             new_insert_span.annotations.insert(ann.clone());
@@ -564,71 +560,48 @@ impl RangeMap for DumbRangeMap {
     }
 }
 
-fn id(k: u64) -> OpID {
-    OpID {
-        client: k,
-        counter: 0,
-    }
-}
-
-fn a(n: u64) -> Annotation {
-    Annotation {
-        id: id(n),
-        range_lamport: (0, id(n)),
-        range: crate::AnchorRange {
-            start: Anchor {
-                id: Some(id(n)),
-                type_: AnchorType::Before,
-            },
-            end: Anchor {
-                id: Some(id(n)),
-                type_: AnchorType::Before,
-            },
-        },
-        merge_method: crate::RangeMergeRule::Merge,
-        type_: String::new(),
-        meta: None,
-    }
-}
-
-fn make_spans(spans: Vec<(Vec<u64>, usize)>) -> Vec<Span> {
-    let mut map = HashMap::new();
-    let mut ans = Vec::new();
-    for i in 0..spans.len() {
-        let (annotations, len) = &spans[i];
-        let mut new_annotations = BTreeSet::new();
-        for ann in annotations {
-            let a = map.entry(*ann).or_insert_with(|| Arc::new(a(*ann))).clone();
-            let start = i == 0 || spans[i - 1].0.contains(ann);
-            let end = i == spans.len() - 1 || spans[i + 1].0.contains(ann);
-            new_annotations.insert(a);
-        }
-        ans.push(Span {
-            annotations: new_annotations,
-            len: *len,
-        });
-    }
-
-    ans
-}
-
-fn from_spans(spans: &[Span]) -> Vec<(Vec<u64>, usize)> {
-    spans
-        .into_iter()
-        .map(|Span { annotations, len }| {
-            (
-                annotations
-                    .into_iter()
-                    .map(|x| x.id.client)
-                    .collect::<Vec<_>>(),
-                *len,
-            )
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod test {
+    use crate::{Anchor, AnchorType};
+
+    fn id(k: u64) -> OpID {
+        OpID {
+            client: k,
+            counter: 0,
+        }
+    }
+
+    fn a(n: u64) -> Annotation {
+        Annotation {
+            id: id(n),
+            range_lamport: (0, id(n)),
+            range: crate::AnchorRange {
+                start: Anchor {
+                    id: Some(id(n)),
+                    type_: AnchorType::Before,
+                },
+                end: Anchor {
+                    id: Some(id(n)),
+                    type_: AnchorType::Before,
+                },
+            },
+            merge_method: crate::RangeMergeRule::Merge,
+            type_: String::new(),
+            meta: None,
+        }
+    }
+
+    fn from_spans(spans: &[Span]) -> Vec<(Vec<u64>, usize)> {
+        spans
+            .iter()
+            .map(|Span { annotations, len }| {
+                (
+                    annotations.iter().map(|x| x.id.client).collect::<Vec<_>>(),
+                    *len,
+                )
+            })
+            .collect()
+    }
 
     use super::*;
 

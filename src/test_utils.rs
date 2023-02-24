@@ -232,7 +232,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             debug_log::group!("merge {i}->{j}");
             b.merge(a);
             debug_log::group_end!();
-            let patches = a
+            let _patches = a
                 .range_ops
                 .iter()
                 .filter(|x| match x {
@@ -471,11 +471,10 @@ impl Actor {
     }
 
     fn next_id(&self) -> OpID {
-        let id = OpID {
+        OpID {
             client: self.list.id as ClientID,
             counter: self.list.max_clock as Counter,
-        };
-        id
+        }
     }
 
     fn _use_next_id(&mut self) -> OpID {
@@ -614,6 +613,7 @@ impl Actor {
         }
     }
 
+    #[allow(unused)]
     fn check(&self) {
         assert_eq!(self.len, self.list.content.real_len());
         assert_eq!(self.len * 3 + 2, self.range.range_map.len());
@@ -632,6 +632,7 @@ impl Actor {
         }
     }
 
+    #[allow(unused)]
     fn check_eq(&mut self, other: &mut Self) {
         assert_eq!(self.len(), other.len());
         assert_eq!(self.list.content, other.list.content);
@@ -642,19 +643,18 @@ impl Actor {
         assert_eq!(self.deleted, other.deleted);
     }
 
+    #[allow(unused)]
     fn len(&self) -> usize {
         self.len
     }
 }
 
 fn get_insert_pos(pos: usize, container: &mut Container) -> usize {
-    let insert_pos = if pos == container.content.real_len() {
+    if pos == container.content.real_len() {
         container.content.len()
     } else {
         container.content.real_index(pos)
-    };
-
-    insert_pos
+    }
 }
 
 pub fn make_spans(spans: &[(Vec<&str>, usize)]) -> Vec<SimpleSpan> {

@@ -2106,6 +2106,7 @@ mod failed_tests {
         )
     }
 
+    #[allow(unused)]
     fn fuzz_empty() {
         fuzzing(2, vec![])
     }
@@ -2116,7 +2117,7 @@ mod failed_tests {
             2,
             vec![],
             |n, actions| fuzzing(n as usize, actions.to_vec()),
-            |n, actions| actions.to_vec(),
+            |_n, actions| actions.to_vec(),
         )
     }
 }
