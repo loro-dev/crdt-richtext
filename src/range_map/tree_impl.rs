@@ -573,13 +573,13 @@ impl RangeMap for Tree {
         self.insert_or_delete_ann_inside_range(&start..&end, bit_index, false);
     }
 
-    fn get_annotations(&self, pos: usize, len: usize) -> Vec<super::Span> {
+    fn get_annotations(&mut self, pos: usize, len: usize) -> Vec<super::Span> {
         let pos = pos.min(self.len());
         let len = len.min(self.len() - pos);
         let mut ans: Vec<Span> = Vec::new();
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
         let mut last_ann = &BitVec::new();
-        // FIXME: should use iter_range_with_buffer_unloaded
+        self.tree.flush_write_buffer();
         for ElemSlice {
             elem, start, end, ..
         } in self.tree.iter_range(range)

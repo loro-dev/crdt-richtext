@@ -438,7 +438,7 @@ impl Actor {
         self.range_ops.push(self.range.annotate(ann, range));
     }
 
-    pub fn get_annotations(&self, range: impl RangeBounds<usize>) -> Vec<SimpleSpan> {
+    pub fn get_annotations(&mut self, range: impl RangeBounds<usize>) -> Vec<SimpleSpan> {
         let mut spans = vec![];
         for span in self
             .range
@@ -632,7 +632,7 @@ impl Actor {
         }
     }
 
-    fn check_eq(&self, other: &Self) {
+    fn check_eq(&mut self, other: &mut Self) {
         assert_eq!(self.len(), other.len());
         assert_eq!(self.list.content, other.list.content);
         assert_eq!(

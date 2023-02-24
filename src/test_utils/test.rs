@@ -137,7 +137,7 @@ fn test_sync() {
     actor.merge(&actor_b);
     actor_b.merge(&actor);
     actor.check();
-    actor.check_eq(&actor_b);
+    actor.check_eq(&mut actor_b);
 }
 
 #[test]

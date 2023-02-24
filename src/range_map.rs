@@ -25,7 +25,7 @@ pub trait RangeMap {
     );
     fn delete_annotation(&mut self, id: OpID);
     /// TODO: need to clarify the rules when encounter an empty span on the edges
-    fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span>;
+    fn get_annotations(&mut self, pos: usize, len: usize) -> Vec<Span>;
     fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, Range<usize>)>;
     fn len(&self) -> usize;
 }

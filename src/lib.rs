@@ -13,7 +13,6 @@ type Lamport = u32;
 type ClientID = u64;
 type Counter = u32;
 
-// TODO: make it generic?
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OpID {
     client: ClientID,
@@ -476,7 +475,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         }
     }
 
-    pub fn get_annotations(&self, range: impl RangeBounds<usize>) -> Vec<Span> {
+    pub fn get_annotations(&mut self, range: impl RangeBounds<usize>) -> Vec<Span> {
         let start = match range.start_bound() {
             std::ops::Bound::Included(x) => x * 3 + 2,
             std::ops::Bound::Excluded(_) => unreachable!(),

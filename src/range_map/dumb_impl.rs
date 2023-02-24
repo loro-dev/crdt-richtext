@@ -454,7 +454,7 @@ impl RangeMap for DumbRangeMap {
         }
     }
 
-    fn get_annotations(&self, pos: usize, len: usize) -> Vec<Span> {
+    fn get_annotations(&mut self, pos: usize, len: usize) -> Vec<Span> {
         if len == 0 {
             return vec![];
         }
