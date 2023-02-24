@@ -462,20 +462,17 @@ impl RangeMap for TreeRangeMap {
 
     fn delete(&mut self, pos: usize, len: usize) {
         self.check();
-        debug_assert_eq!(self.len(), self.len);
         self.len -= len;
         assert!(pos + len <= self.len());
         let mut has_ann = false;
         let mut ann_bit_mask: BitVec = BitVec::new();
+
         // We should leave deleted annotations in the tree, stored inside a empty span.
         // But there may already have empty spans at `pos` and `pos + len`.
         // So the `delete_range` implementation should be able to handle this case.
         for span in self.tree.drain::<IndexFinder>(pos..pos + len) {
             for ann in span.ann.iter_ones() {
-                if ann >= ann_bit_mask.len() {
-                    ann_bit_mask.resize(self.bit_to_id.len(), false);
-                }
-                ann_bit_mask.set(ann, true);
+                set_bit(&mut ann_bit_mask, ann, true);
                 has_ann = true;
             }
         }
@@ -495,7 +492,6 @@ impl RangeMap for TreeRangeMap {
             }
         }
 
-        debug_assert_eq!(self.len(), self.len);
         self.check();
     }
 
@@ -614,35 +610,41 @@ impl RangeMap for TreeRangeMap {
         debug_assert_eq!(self.len(), self.len);
         let pos = pos.min(self.len());
         let len = len.min(self.len() - pos);
-        let mut ans: Vec<Span> = Vec::new();
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
-        let mut last_ann = &BitVec::new();
         self.tree.flush_write_buffer();
+        let mut elements: Vec<Elem> = Vec::new();
+        // TODO: Merge siblings empty spans
         for ElemSlice {
             elem, start, end, ..
         } in self.tree.iter_range(range)
         {
             let start = start.unwrap_or(0);
             let end = end.unwrap_or(elem.len);
-            if last_ann.iter_ones().eq(elem.ann.iter_ones()) && !ans.is_empty() {
-                ans.last_mut().unwrap().len += end - start;
-            } else {
-                let mut annotations = BTreeSet::new();
-                for ann_bit_index in elem.ann.iter_ones() {
-                    let annotation = self.bit_index_to_ann(ann_bit_index);
-                    annotations.insert(annotation.clone());
+            let elem = Elem {
+                ann: elem.ann.clone(),
+                len: end - start,
+            };
+            match elements.last_mut() {
+                Some(last) if last.can_merge(&elem) => {
+                    last.merge_right(&elem);
                 }
-
-                ans.push(Span {
-                    annotations,
-                    len: end - start,
-                })
-            }
-
-            last_ann = &elem.ann;
+                _ => {
+                    elements.push(elem);
+                }
+            };
         }
 
-        debug_assert_eq!(self.len(), self.len);
+        let ans: Vec<Span> = elements
+            .into_iter()
+            .map(|x| Span {
+                annotations: x
+                    .ann
+                    .iter_ones()
+                    .map(|x| self.bit_index_to_ann(x).clone())
+                    .collect(),
+                len: x.len,
+            })
+            .collect();
         self.check();
         ans
     }
@@ -1044,6 +1046,32 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
         }
 
         FindResult::new_missing(0, 0)
+    }
+}
+
+impl Mergeable for Span {
+    fn can_merge(&self, rhs: &Self) -> bool {
+        self.annotations == rhs.annotations || (self.len == 0 && rhs.len == 0)
+    }
+
+    fn merge_right(&mut self, rhs: &Self) {
+        if self.len == 0 && rhs.len == 0 {
+            for v in rhs.annotations.iter() {
+                self.annotations.insert(v.clone());
+            }
+        } else {
+            self.len += rhs.len
+        }
+    }
+
+    fn merge_left(&mut self, left: &Self) {
+        if self.len == 0 && left.len == 0 {
+            for v in left.annotations.iter() {
+                self.annotations.insert(v.clone());
+            }
+        } else {
+            self.len += left.len
+        }
     }
 }
 
