@@ -14,14 +14,15 @@ use fxhash::FxHashMap;
 
 use super::{RangeMap, Span};
 
-pub struct Tree {
+#[derive(Debug)]
+pub struct TreeRangeMap {
     tree: BTree<TreeTrait>,
     id_to_ann: FxHashMap<OpID, Arc<Annotation>>,
     id_to_bit: FxHashMap<OpID, usize>,
     bit_to_id: Vec<OpID>,
 }
 
-impl Tree {
+impl TreeRangeMap {
     pub fn new() -> Self {
         // make 0 unavailable
         let bit_to_id = vec![OpID {
@@ -236,7 +237,7 @@ impl Mergeable for Elem {
     }
 }
 
-impl RangeMap for Tree {
+impl RangeMap for TreeRangeMap {
     fn init() -> Self {
         Self::new()
     }
@@ -258,7 +259,7 @@ impl RangeMap for Tree {
             loop {
                 let last = spans.last().unwrap();
                 let len = last.elem.len;
-                if last.end == Some(0) && (len != 0 || spans.len() > 3) {
+                if (last.end == Some(0) && len != 0) || (len == 0 && spans.len() >= 3) {
                     spans.pop();
                 } else {
                     break;
@@ -645,12 +646,9 @@ impl BTreeTrait for TreeTrait {
                 let mut new_ann = cache.cache.ann.clone();
                 for &change in buffer.changes.iter() {
                     if change > 0 {
-                        if change as usize > new_ann.len() {
-                            new_ann.resize(change as usize, false);
-                        }
-                        new_ann.set(change as usize, true);
+                        set_bit(&mut new_ann, change as usize, true);
                     } else {
-                        new_ann.set(-change as usize, false);
+                        set_bit(&mut new_ann, -change as usize, false);
                     }
                 }
 
@@ -690,9 +688,9 @@ impl BTreeTrait for TreeTrait {
         for elem in elements.iter_mut() {
             for &change in write_buffer.changes.iter() {
                 if change > 0 {
-                    elem.ann.set(change as usize, true);
+                    set_bit(&mut elem.ann, change as usize, true);
                 } else {
-                    elem.ann.set(-change as usize, false);
+                    set_bit(&mut elem.ann, -change as usize, false);
                 }
             }
         }
@@ -1085,7 +1083,7 @@ mod tree_impl_tests {
 
     #[test]
     fn annotate() {
-        let mut tree = Tree::new();
+        let mut tree = TreeRangeMap::new();
         tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
         tree.annotate(10, 10, a(2));
         assert_eq!(tree.len(), 100);
@@ -1103,7 +1101,7 @@ mod tree_impl_tests {
 
         #[test]
         fn delete_text_to_empty() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.delete(10, 10);
             assert_eq!(tree.len(), 90);
@@ -1115,7 +1113,7 @@ mod tree_impl_tests {
 
         #[test]
         fn delete_text_with_annotation_to_empty() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.annotate(5, 10, a(1));
@@ -1128,7 +1126,7 @@ mod tree_impl_tests {
 
         #[test]
         fn delete_text_with_empty_span_at_edge() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
@@ -1155,7 +1153,7 @@ mod tree_impl_tests {
 
         #[test]
         fn delete_a_part_of_annotation() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(5, 10, a(0));
             tree.delete(10, 10);
@@ -1169,7 +1167,7 @@ mod tree_impl_tests {
 
         #[test]
         fn delete_annotation() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(5, 10, a(0));
             tree.delete_annotation(id(0));
@@ -1179,7 +1177,7 @@ mod tree_impl_tests {
 
         #[test]
         fn delete_annotation_in_zero_len_span() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.delete(0, 10);
@@ -1195,7 +1193,7 @@ mod tree_impl_tests {
 
         #[test]
         fn delete_across_several_span() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.annotate(5, 10, a(1));
@@ -1217,7 +1215,7 @@ mod tree_impl_tests {
         use super::*;
         #[test]
         fn expand() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(1, 9, a(0));
             // expand end
@@ -1236,7 +1234,7 @@ mod tree_impl_tests {
 
         #[test]
         fn should_change_anchor_id() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.adjust_annotation(id(0), 1, id(1), None, Some((1, Some(id(4)))));
@@ -1247,7 +1245,7 @@ mod tree_impl_tests {
 
         #[test]
         fn shrink() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             // shrink end
@@ -1266,7 +1264,7 @@ mod tree_impl_tests {
 
         #[test]
         fn expand_over_empty_span() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
@@ -1287,7 +1285,7 @@ mod tree_impl_tests {
 
         #[test]
         fn shrink_to_create_an_empty_span() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 10, a(0));
             tree.adjust_annotation(
@@ -1306,7 +1304,7 @@ mod tree_impl_tests {
 
         #[test]
         fn expand_from_empty_span_over_empty_span() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
@@ -1325,7 +1323,7 @@ mod tree_impl_tests {
 
         #[test]
         fn should_ignore_adjustment_if_lamport_is_too_small() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             // set lamport to 2 but not change the range
@@ -1377,7 +1375,7 @@ mod tree_impl_tests {
 
         #[test]
         fn test_insert_to_annotation() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.insert(20, 1, |_| AnnPosRelativeToInsert::After);
@@ -1392,7 +1390,7 @@ mod tree_impl_tests {
 
         #[test]
         fn insert_at_edge_with_diff_mark() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
 
@@ -1415,7 +1413,7 @@ mod tree_impl_tests {
 
         #[test]
         fn test_insert_to_zero_len_position() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
             tree.delete(10, 10);
@@ -1429,7 +1427,7 @@ mod tree_impl_tests {
 
         #[test]
         fn test_insert_to_middle_among_tombstones() {
-            let mut tree = Tree::new();
+            let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(0, 100, a(8));
             tree.annotate(10, 1, a(0));
@@ -1458,7 +1456,7 @@ mod tree_impl_tests {
         fn insert_to_beginning_with_empty_span() {
             {
                 // after
-                let mut tree = Tree::new();
+                let mut tree = TreeRangeMap::new();
                 tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(0, 1, a(0));
                 tree.delete(0, 1);
@@ -1467,7 +1465,7 @@ mod tree_impl_tests {
             }
             {
                 // include
-                let mut tree = Tree::new();
+                let mut tree = TreeRangeMap::new();
                 tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(0, 1, a(0));
                 tree.delete(0, 1);
@@ -1476,7 +1474,7 @@ mod tree_impl_tests {
             }
             {
                 // before
-                let mut tree = Tree::new();
+                let mut tree = TreeRangeMap::new();
                 tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(0, 1, a(0));
                 tree.delete(0, 1);
@@ -1489,7 +1487,7 @@ mod tree_impl_tests {
         fn insert_to_end_with_empty_span() {
             {
                 // after
-                let mut tree = Tree::new();
+                let mut tree = TreeRangeMap::new();
                 tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(99, 1, a(0));
                 tree.delete(99, 1);
@@ -1498,7 +1496,7 @@ mod tree_impl_tests {
             }
             {
                 // include
-                let mut tree = Tree::new();
+                let mut tree = TreeRangeMap::new();
                 tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(99, 1, a(0));
                 tree.delete(99, 1);
@@ -1507,7 +1505,7 @@ mod tree_impl_tests {
             }
             {
                 // before
-                let mut tree = Tree::new();
+                let mut tree = TreeRangeMap::new();
                 tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
                 tree.annotate(99, 1, a(0));
                 tree.delete(99, 1);

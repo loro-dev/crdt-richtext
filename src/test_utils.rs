@@ -1,5 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
+use crate::range_map::tree_impl::TreeRangeMap;
+
 use super::range_map::dumb_impl::DumbRangeMap;
 use super::*;
 use arbitrary::Arbitrary;
@@ -35,7 +37,7 @@ impl From<&Span> for SimpleSpan {
 
 pub struct Actor {
     list: Container,
-    range: CrdtRange<DumbRangeMap>,
+    range: CrdtRange<TreeRangeMap>,
     visited: HashSet<OpID>,
     list_ops: Vec<Op>,
     range_ops: Vec<RangeOp>,
