@@ -2203,6 +2203,76 @@ mod failed_tests {
         )
     }
 
+    #[test]
+    fn fuzz_27() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 112,
+                    pos: 112,
+                    len: 199,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 205,
+                },
+                Insert {
+                    actor: 13,
+                    pos: 13,
+                    len: 13,
+                },
+                Insert {
+                    actor: 13,
+                    pos: 13,
+                    len: 13,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 48,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 255,
+                    len: 255,
+                },
+                Insert {
+                    actor: 57,
+                    pos: 51,
+                    len: 112,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 247,
+                    len: 57,
+                },
+                Delete {
+                    actor: 205,
+                    pos: 0,
+                    len: 255,
+                },
+                Insert {
+                    actor: 41,
+                    pos: 0,
+                    len: 122,
+                },
+                Sync(35, 0),
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 43,
+                },
+                Delete {
+                    actor: 103,
+                    pos: 103,
+                    len: 103,
+                },
+            ],
+        )
+    }
+
     #[allow(unused)]
     fn fuzz_empty() {
         fuzzing(2, vec![])
