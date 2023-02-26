@@ -431,7 +431,6 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         )
         .unwrap_or(self.range_map.len());
 
-        println!("APPLY REMOTE");
         self.range_map.adjust_annotation(
             patch.target_range_id,
             patch.lamport,

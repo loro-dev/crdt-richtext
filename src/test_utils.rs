@@ -2,7 +2,6 @@ use std::collections::{BTreeSet, HashSet};
 
 use crate::range_map::tree_impl::TreeRangeMap;
 
-use super::range_map::dumb_impl::DumbRangeMap;
 use super::*;
 use arbitrary::Arbitrary;
 use crdt_list::crdt::ListCrdt;
@@ -234,9 +233,11 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             let (a, b) = arref::array_mut_ref!(&mut actors, [i, j]);
             a.check();
             b.check();
+            println!("merge {i}<-{j}");
             debug_log::group!("merge {i}<-{j}");
             a.merge(b);
             debug_log::group_end!();
+            println!("merge {j}<-{i}");
             debug_log::group!("merge {i}->{j}");
             b.merge(a);
             debug_log::group_end!();
@@ -545,7 +546,6 @@ impl Actor {
 
     fn merge(&mut self, other: &Self) {
         debug_log::debug_dbg!(&self.list.id);
-        debug_log::debug_dbg!(&self.range);
         assert_ne!(self.list.id, other.list.id);
         // insert text
         for op in other.list_ops.iter() {

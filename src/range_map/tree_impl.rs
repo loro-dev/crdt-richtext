@@ -4,7 +4,6 @@ use generic_btree::{
     BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec, StackVec,
 };
 use std::{
-    collections::BTreeSet,
     ops::{Range, RangeInclusive},
     sync::Arc,
 };
@@ -542,7 +541,6 @@ impl RangeMap for TreeRangeMap {
         start_shift: Option<(isize, Option<OpID>)>,
         end_shift: Option<(isize, Option<OpID>)>,
     ) {
-        self.check();
         debug_assert_eq!(self.len(), self.len);
         if let Some(ann) = self.id_to_ann.get(&target_id) {
             // skip update if the current lamport is larger
@@ -554,57 +552,24 @@ impl RangeMap for TreeRangeMap {
             return;
         };
         let mask = self.get_ann_bit_index(target_id).unwrap();
-        let mut final_pos = 0;
+        let Some(( range, index_range )) = self.get_annotation_range(target_id) else { return };
+        let (start, end) = range.into_inner();
+        self.insert_or_delete_ann_inside_range(&start..&end, mask, false);
 
-        // query pos then update
-        if let Some((index_shift, _)) = start_shift {
-            let Some(( range, index_range )) = self.get_annotation_range(target_id) else { return };
-            let (range_start, _) = range.into_inner();
-            let new_index = (index_range.start as isize + index_shift) as usize;
-            match index_shift.cmp(&0) {
-                std::cmp::Ordering::Less => {
-                    // expand start
-                    let new_start = self.tree.query::<IndexFinder>(&new_index);
-                    self.insert_or_delete_ann_inside_range(&new_start..&range_start, mask, true);
-                }
-                std::cmp::Ordering::Greater => {
-                    // shrink start
-                    let new_start = self.tree.query::<IndexFinder>(&new_index);
-                    final_pos = new_index;
-                    self.insert_or_delete_ann_inside_range(&range_start..&new_start, mask, false);
-                }
-                std::cmp::Ordering::Equal => {}
-            }
-        }
+        let new_start = if let Some((index_shift, _)) = start_shift {
+            (index_range.start as isize + index_shift) as usize
+        } else {
+            index_range.start
+        };
+        let new_end = if let Some((index_shift, _)) = end_shift {
+            (index_range.end as isize + index_shift) as usize
+        } else {
+            index_range.end
+        };
+        let new_range = self.tree.range::<IndexFinder>(new_start..new_end);
+        self.insert_or_delete_ann_inside_range(&new_range.start..&new_range.end, mask, true);
 
-        if let Some((index_shift, _)) = end_shift {
-            let Some(( range, index_range )) = self.get_annotation_range(target_id) else { return };
-            let (_, range_end) = range.into_inner();
-            let new_index = (index_range.end as isize + index_shift) as usize;
-            match index_shift.cmp(&0) {
-                std::cmp::Ordering::Less => {
-                    // shrink end
-                    let new_end = self.tree.query::<IndexFinder>(&new_index);
-                    final_pos = new_index;
-                    self.insert_or_delete_ann_inside_range(&new_end..&range_end, mask, false);
-                }
-                std::cmp::Ordering::Greater => {
-                    // expand end
-                    let new_end = self.tree.query::<IndexFinder>(&new_index);
-                    self.insert_or_delete_ann_inside_range(&range_end..&new_end, mask, true);
-                }
-                std::cmp::Ordering::Equal => {}
-            }
-        }
-
-        if !*self.tree.root_cache().ann.get(mask).unwrap() {
-            // if the annotation is not in the tree, we should insert it
-            let mut bits = BitVec::new();
-            set_bit(&mut bits, mask, true);
-            self.insert_empty_span(final_pos, bits);
-        }
-
-        // update annotation range
+        // update annotation's anchors
         // TODO: Perf remove Arc requirement on RangeMap
         let ann = self.id_to_ann.get_mut(&target_id).unwrap();
         let mut new_ann = (**ann).clone();
@@ -618,7 +583,6 @@ impl RangeMap for TreeRangeMap {
 
         *ann = Arc::new(new_ann);
         debug_assert_eq!(self.len(), self.len);
-        self.check();
     }
 
     fn delete_annotation(&mut self, id: OpID) {
@@ -1116,7 +1080,7 @@ impl Mergeable for Span {
 #[cfg(test)]
 #[cfg(feature = "test")]
 mod tree_impl_tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
 
     use crate::{range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
 
