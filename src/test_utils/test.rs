@@ -2273,6 +2273,286 @@ mod failed_tests {
         )
     }
 
+    #[test]
+    fn fuzz_28() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 190,
+                    pos: 190,
+                    len: 190,
+                },
+                Insert {
+                    actor: 190,
+                    pos: 43,
+                    len: 190,
+                },
+                Sync(255, 255),
+                Delete {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                },
+                Delete {
+                    actor: 66,
+                    pos: 66,
+                    len: 75,
+                },
+                Insert {
+                    actor: 52,
+                    pos: 56,
+                    len: 49,
+                },
+                Insert {
+                    actor: 190,
+                    pos: 190,
+                    len: 66,
+                },
+                Delete {
+                    actor: 66,
+                    pos: 75,
+                    len: 189,
+                },
+                Annotate {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                    annotation: Link,
+                },
+                Insert {
+                    actor: 56,
+                    pos: 49,
+                    len: 57,
+                },
+                Insert {
+                    actor: 48,
+                    pos: 54,
+                    len: 48,
+                },
+                Insert {
+                    actor: 48,
+                    pos: 55,
+                    len: 189,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 255,
+                },
+                Delete {
+                    actor: 78,
+                    pos: 78,
+                    len: 78,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 49,
+                    pos: 53,
+                    len: 50,
+                },
+                Insert {
+                    actor: 54,
+                    pos: 50,
+                    len: 48,
+                },
+                Insert {
+                    actor: 190,
+                    pos: 158,
+                    len: 190,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 114,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 255,
+                },
+                Delete {
+                    actor: 78,
+                    pos: 78,
+                    len: 78,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Sync(172, 189),
+                Delete {
+                    actor: 75,
+                    pos: 189,
+                    len: 189,
+                },
+                Insert {
+                    actor: 189,
+                    pos: 189,
+                    len: 189,
+                },
+                Delete {
+                    actor: 114,
+                    pos: 114,
+                    len: 114,
+                },
+                Delete {
+                    actor: 66,
+                    pos: 66,
+                    len: 66,
+                },
+                Insert {
+                    actor: 39,
+                    pos: 189,
+                    len: 189,
+                },
+                Insert {
+                    actor: 78,
+                    pos: 78,
+                    len: 78,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn fuzz_29() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 10,
+                },
+                Annotate {
+                    actor: 0,
+                    pos: 3,
+                    len: 3,
+                    annotation: Bold,
+                },
+                Sync(1, 0),
+                Delete {
+                    actor: 1,
+                    pos: 2,
+                    len: 7,
+                },
+                Annotate {
+                    actor: 0,
+                    pos: 2,
+                    len: 2,
+                    annotation: Link,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 4,
+                    len: 10,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 7,
+                    len: 10,
+                },
+                Sync(1, 0),
+                Insert {
+                    actor: 0,
+                    pos: 3,
+                    len: 10,
+                },
+            ],
+        )
+    }
+
     #[allow(unused)]
     fn fuzz_empty() {
         fuzzing(2, vec![])

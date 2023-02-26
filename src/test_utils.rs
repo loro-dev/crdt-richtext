@@ -164,6 +164,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
                 return;
             }
             actors[actor as usize].insert(pos as usize, len as usize);
+            actors[actor as usize].check();
         }
         Action::Delete { actor, pos, len } => {
             if len == 0 {
@@ -171,6 +172,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
             }
 
             actors[actor as usize].delete(pos as usize, len as usize);
+            actors[actor as usize].check();
         }
         Action::Annotate {
             actor,
@@ -203,10 +205,12 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
                         .un_annotate(pos as usize..=pos as usize + len as usize - 1, "link");
                 }
             }
+            actors[actor as usize].check();
         }
         Action::Sync(a, b) => {
             let (a, b) = arref::array_mut_ref!(actors, [a as usize, b as usize]);
             a.merge(b);
+            a.check();
         }
     }
 }
@@ -228,6 +232,8 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
     for i in 0..actors.len() {
         for j in (i + 1)..actors.len() {
             let (a, b) = arref::array_mut_ref!(&mut actors, [i, j]);
+            a.check();
+            b.check();
             debug_log::group!("merge {i}<-{j}");
             a.merge(b);
             debug_log::group_end!();
@@ -253,7 +259,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             //     .join(", "));
             // dbg!(&patches);
             // dbg!(&a.range);
-            // dbg!(&b.range);
+            // dbg!(&a.get_annotations(..));
             assert_eq!(a.get_annotations(..), b.get_annotations(..));
         }
     }
@@ -379,6 +385,10 @@ impl Actor {
         }
         self.list.max_clock += range_ops.len();
         self.next_lamport += range_ops.len() as Lamport;
+        for op in range_ops.iter() {
+            self.visited.insert(op.id());
+        }
+
         self.range_ops.extend(range_ops);
     }
 
@@ -547,6 +557,37 @@ impl Actor {
             }
         }
 
+        {
+            // delete text
+            let mut new_deleted: HashSet<ListOpId> = HashSet::new();
+            for id in other.deleted.iter() {
+                if !self.deleted.contains(id) {
+                    new_deleted.insert(*id);
+                    self.deleted.insert(*id);
+                    self.len -= 1;
+                }
+            }
+
+            let mut deleted_text: Vec<(usize, usize)> = vec![];
+            let container = &mut self.list;
+            for (text_index, op) in container.content.iter_real_mut().enumerate() {
+                if new_deleted.contains(&op.id) {
+                    op.deleted = true;
+                    if let Some(last) = deleted_text.last_mut() {
+                        if last.0 + last.1 == text_index {
+                            last.1 += 1;
+                            continue;
+                        }
+                    }
+
+                    deleted_text.push((text_index, 1));
+                }
+            }
+            for (index, len) in deleted_text.iter().rev() {
+                self.range.delete_text(*index, *len);
+            }
+        }
+
         debug_log::debug_dbg!(self
             .list
             .content
@@ -569,32 +610,9 @@ impl Actor {
         }
         debug_log::group_end!();
 
-        // delete text
-        let mut new_deleted: HashSet<ListOpId> = HashSet::new();
-        for id in other.deleted.iter() {
-            if !self.deleted.contains(id) {
-                new_deleted.insert(*id);
-                self.deleted.insert(*id);
-                self.len -= 1;
-            }
-        }
-
-        let container = &mut self.list;
-        let mut deleted_text = vec![];
-        for (text_index, op) in container.content.iter_real_mut().enumerate() {
-            if new_deleted.contains(&op.id) {
-                op.deleted = true;
-                deleted_text.push(text_index);
-            }
-        }
-
-        for index in deleted_text.iter().rev() {
-            // TODO: connect continuous deletes
-            self.range.delete_text(*index, 1);
-        }
-
         // lamport
         self.next_lamport = std::cmp::max(self.next_lamport, other.next_lamport);
+        self.check();
     }
 
     fn integrate_insert_op(&mut self, op: &Op, is_local: bool) {
@@ -616,7 +634,7 @@ impl Actor {
     }
 
     #[allow(unused)]
-    fn check(&self) {
+    fn check(&mut self) {
         assert_eq!(self.len, self.list.content.real_len());
         assert_eq!(self.len * 3 + 2, self.range.range_map.len());
         assert!(self
@@ -632,6 +650,55 @@ impl Actor {
         for id in range_op_id_set {
             assert!(self.visited.contains(&id));
         }
+
+        let mut ann_set = BTreeSet::new();
+        for span in self.range.get_annotations(..) {
+            for ann in span.annotations.iter() {
+                ann_set.insert(ann.clone());
+            }
+        }
+
+        for ann in ann_set {
+            let ann_range = self.range.get_annotation_range(ann.id).unwrap();
+            let (mut start, start_deleted) = ann
+                .range
+                .start
+                .id
+                .map(|x| self.id_pos(x))
+                .unwrap_or((0, true));
+            if !start_deleted && ann.range.start.type_ == AnchorType::After {
+                start += 1;
+            }
+
+            let (mut end, end_deleted) = ann
+                .range
+                .end
+                .id
+                .map(|x| self.id_pos(x))
+                .unwrap_or((self.len, true));
+            if !end_deleted && ann.range.end.type_ == AnchorType::After {
+                end += 1;
+            }
+
+            let anchor_range = start..end;
+            assert_eq!(ann_range, anchor_range);
+        }
+    }
+
+    fn id_pos(&self, id: OpID) -> (usize, bool) {
+        let mut index = 0;
+        for item in self.list.content.iter() {
+            let item_id: OpID = item.id.into();
+            if item_id == id {
+                return (index, item.deleted);
+            }
+
+            if !item.deleted {
+                index += 1;
+            }
+        }
+
+        panic!()
     }
 
     #[allow(unused)]

@@ -250,18 +250,19 @@ impl RangeMap for TreeRangeMap {
         Self::new()
     }
 
+    // TODO: refactor: split this method
     fn insert<F>(&mut self, pos: usize, len: usize, mut f: F)
     where
         F: FnMut(&Annotation) -> super::AnnPosRelativeToInsert,
     {
         self.check();
         self.len += len;
+        let neighbor_range = self
+            .tree
+            .range::<IndexFinder>(pos.saturating_sub(1)..(pos + 1).min(self.len()));
         let mut spans = self
             .tree
-            .iter_range(
-                self.tree
-                    .range::<IndexFinder>(pos.saturating_sub(1)..(pos + 1).min(self.len())),
-            )
+            .iter_range(neighbor_range.clone())
             .collect::<StackVec<_>>();
 
         if !spans.is_empty() {
@@ -289,7 +290,16 @@ impl RangeMap for TreeRangeMap {
         }
 
         assert!(spans.len() <= 4);
+
+        debug_assert!(
+            spans
+                .iter()
+                .map(|x| { x.end.unwrap_or(x.elem.len) - x.start.unwrap_or(0) })
+                .sum::<usize>()
+                <= 2
+        );
         if spans.is_empty() {
+            // empty tree, insert directly
             drop(spans);
             // TODO: Perf reuse the query
             self.tree.insert::<IndexFinder>(
@@ -301,6 +311,8 @@ impl RangeMap for TreeRangeMap {
             );
             return;
         } else if spans.len() == 1 {
+            // single span, so we know what the annotations of new insertion
+            // insert directly
             let ann = spans[0].elem.ann.clone();
             drop(spans);
             // TODO: Perf reuse the query
@@ -430,20 +442,36 @@ impl RangeMap for TreeRangeMap {
             .map(|x| x.path())
             .unwrap_or_else(|| middles.last().unwrap().path())
             .clone();
-        if let Some(middle) = middles.last() {
-            let path = middle.path().clone();
+        if middles.last().is_some() {
             drop(middles);
             drop(spans);
-            self.tree.update(&path..&path, &mut |slice| {
-                let index = slice.start.unwrap().0;
-                assert_eq!(slice.elements[index].len, 0);
-                if slice.elements[index].ann == middle_annotations {
-                    false
-                } else {
-                    slice.elements[index].ann = middle_annotations.clone();
-                    true
-                }
-            });
+            let mut visited_zero_span = false;
+            self.tree
+                .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
+                    let start = slice.start.unwrap_or((0, 0));
+                    let end = slice.end.unwrap_or((slice.elements.len(), 0));
+                    let mut updated = false;
+                    for index in start.0..=end.0 {
+                        if slice.elements.len() <= index {
+                            break;
+                        }
+
+                        if visited_zero_span && slice.elements[index].len != 0 {
+                            break;
+                        }
+
+                        visited_zero_span = true;
+                        if slice.elements[index].len == 0
+                            && slice.elements[index].ann != middle_annotations
+                        {
+                            updated = true;
+                            slice.elements[index].ann = middle_annotations.clone();
+                        }
+                    }
+
+                    updated
+                });
+            assert!(visited_zero_span);
         } else {
             drop(middles);
             drop(spans);
@@ -650,6 +678,16 @@ impl RangeMap for TreeRangeMap {
     }
 
     fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, std::ops::Range<usize>)> {
+        let mut ans = vec![];
+        for s in self.tree.iter() {
+            let v = s
+                .ann
+                .iter_ones()
+                .map(|x| self.bit_index_to_ann(x).clone())
+                .collect::<Vec<_>>();
+            ans.push((v, s.len));
+        }
+
         // use annotation finder to delete
         let (_, index_range) = self.get_annotation_range(id)?;
         let ann = self.id_to_ann.get(&id).unwrap();

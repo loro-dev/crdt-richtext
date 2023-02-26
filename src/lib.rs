@@ -1,8 +1,20 @@
+//! This Rust crate provides an implementation of Peritext that is optimized for
+//! performance. This crate uses a separate data structure to store the range
+//! annotation, decoupled from the underlying list CRDT. This implementation depends
+//! on `RangeMap` trait, which can be implemented efficiently to make the overall
+//! algorithm fast.
+//!
+//! This implementation provides another property to the algorithm: *all local operations' effects
+//! can be calculated without using CRDTs*. (This requires List CRDT will not insert new elements
+//! into the middle of tombstones).
+//!
+//!
+
 use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap},
     fmt::Debug,
-    ops::{Bound, RangeBounds},
+    ops::{Bound, Range, RangeBounds},
     sync::Arc,
 };
 
@@ -419,6 +431,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         )
         .unwrap_or(self.range_map.len());
 
+        println!("APPLY REMOTE");
         self.range_map.adjust_annotation(
             patch.target_range_id,
             patch.lamport,
@@ -475,6 +488,11 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 self.range_map.annotate(start, end - start, a)
             }
         }
+    }
+
+    pub fn get_annotation_range(&mut self, id: OpID) -> Option<Range<usize>> {
+        let (_, range) = self.range_map.get_annotation_pos(id)?;
+        Some((range.start / 3)..(range.end / 3))
     }
 
     pub fn get_annotations(&mut self, range: impl RangeBounds<usize>) -> Vec<Span> {
