@@ -26,6 +26,22 @@ impl TreeRangeMap {
     fn check(&self) {
         assert_eq!(self.len, self.tree.root_cache().len);
     }
+
+    #[allow(unused)]
+    pub(crate) fn log_inner(&self) {
+        let mut inner_spans = vec![];
+        for span in self.tree.iter() {
+            inner_spans.push((
+                span.ann
+                    .iter_ones()
+                    .map(|x| self.bit_index_to_ann(x))
+                    .collect::<Vec<_>>(),
+                span.len,
+            ));
+        }
+
+        dbg!(inner_spans);
+    }
 }
 
 impl TreeRangeMap {
@@ -541,7 +557,6 @@ impl RangeMap for TreeRangeMap {
         start_shift: Option<(isize, Option<OpID>)>,
         end_shift: Option<(isize, Option<OpID>)>,
     ) {
-        debug_assert_eq!(self.len(), self.len);
         if let Some(ann) = self.id_to_ann.get(&target_id) {
             // skip update if the current lamport is larger
             if ann.range_lamport > (lamport, patch_id) {
@@ -566,8 +581,11 @@ impl RangeMap for TreeRangeMap {
         } else {
             index_range.end
         };
-        let new_range = self.tree.range::<IndexFinder>(new_start..new_end);
-        self.insert_or_delete_ann_inside_range(&new_range.start..&new_range.end, mask, true);
+
+        if new_start < new_end {
+            let new_range = self.tree.range::<IndexFinder>(new_start..new_end);
+            self.insert_or_delete_ann_inside_range(&new_range.start..&new_range.end, mask, true);
+        }
 
         // update annotation's anchors
         // TODO: Perf remove Arc requirement on RangeMap
@@ -582,7 +600,7 @@ impl RangeMap for TreeRangeMap {
         }
 
         *ann = Arc::new(new_ann);
-        debug_assert_eq!(self.len(), self.len);
+        self.check();
     }
 
     fn delete_annotation(&mut self, id: OpID) {
@@ -762,8 +780,8 @@ impl BTreeTrait for TreeTrait {
         mut offset: usize,
         elem: Self::Elem,
     ) {
-        if index < elements.len() && elements[index].len == 0 {
-            // prefer inserting after zero-len element.
+        while index < elements.len() && elements[index].len == 0 {
+            // always inserting after zero-len element.
             // because this is the behavior depended by RangeMap::insert impl
             offset = 0;
             index += 1;
@@ -780,8 +798,8 @@ impl BTreeTrait for TreeTrait {
     ) where
         Self::Elem: Clone,
     {
-        if index < elements.len() && elements[index].len == 0 {
-            // prefer inserting after zero-len element.
+        while index < elements.len() && elements[index].len == 0 {
+            // always inserting after zero-len element.
             // because this is the behavior depended by RangeMap::insert impl
             offset = 0;
             index += 1;
@@ -1350,25 +1368,6 @@ mod tree_impl_tests {
                     (vec![1], 2),
                     (vec![], 78),
                 ]),
-            );
-        }
-
-        #[test]
-        fn shrink_to_create_an_empty_span() {
-            let mut tree = TreeRangeMap::new();
-            tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
-            tree.annotate(0, 10, a(0));
-            tree.adjust_annotation(
-                id(0),
-                1,
-                id(2),
-                Some((5, Some(id(3)))),
-                Some((-5, Some(id(2)))),
-            );
-            let ans = tree.get_annotations(0, 100);
-            assert_span_eq(
-                ans,
-                make_spans(vec![(vec![], 5), (vec![0], 0), (vec![], 95)]),
             );
         }
 

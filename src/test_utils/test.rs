@@ -2553,6 +2553,47 @@ mod failed_tests {
         )
     }
 
+    #[test]
+    fn fuzz_30() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 10,
+                },
+                Annotate {
+                    actor: 0,
+                    pos: 3,
+                    len: 3,
+                    annotation: UnBold,
+                },
+                Annotate {
+                    actor: 0,
+                    pos: 3,
+                    len: 3,
+                    annotation: Link,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 3,
+                    len: 3,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 6,
+                    len: 10,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 3,
+                    len: 10,
+                },
+            ],
+        )
+    }
+
     #[allow(unused)]
     fn fuzz_empty() {
         fuzzing(2, vec![])
