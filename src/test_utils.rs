@@ -222,7 +222,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
     for mut action in actions {
         preprocess_action(&actors, &mut action);
-        println!("{:?},", &action);
+        // println!("{:?},", &action);
         debug_log::group!("{:?},", &action);
         apply_action(&mut actors, action);
         debug_log::group_end!();
@@ -259,6 +259,8 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             // dbg!(&patches);
             // dbg!(&a.range);
             // dbg!(&a.get_annotations(..));
+            // a.range.range_map.log_inner();
+            // b.range.range_map.log_inner();
             assert_eq!(a.get_annotations(..), b.get_annotations(..));
         }
     }
@@ -679,6 +681,7 @@ impl Actor {
             }
 
             let anchor_range = start..end;
+            self.range.range_map.log_inner();
             assert_eq!(ann_range, anchor_range);
         }
     }

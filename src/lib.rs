@@ -190,7 +190,7 @@ impl OpID {
 
 #[derive(Debug)]
 pub struct CrdtRange<R> {
-    range_map: R,
+    pub(crate) range_map: R,
 }
 
 impl<R: RangeMap + Debug> CrdtRange<R> {
@@ -245,7 +245,6 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 Some(id) => cmp(id) == Ordering::Greater,
                 None => true,
             };
-            debug_log::debug_dbg!(ann);
             match (start_before_insert, end_after_insert) {
                 (true, true) => AnnPosRelativeToInsert::IncludeInsert,
                 (true, false) => AnnPosRelativeToInsert::Before,

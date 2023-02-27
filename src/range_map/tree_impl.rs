@@ -40,7 +40,7 @@ impl TreeRangeMap {
             ));
         }
 
-        dbg!(inner_spans);
+        debug_log::debug_dbg!(inner_spans);
     }
 }
 
@@ -270,6 +270,7 @@ impl RangeMap for TreeRangeMap {
     where
         F: FnMut(&Annotation) -> super::AnnPosRelativeToInsert,
     {
+        debug_log::group!("TreeImpl Insert");
         self.check();
         self.len += len;
         let neighbor_range = self
@@ -304,6 +305,7 @@ impl RangeMap for TreeRangeMap {
             }
         }
 
+        debug_log::debug_dbg!(&spans);
         assert!(spans.len() <= 4);
 
         debug_assert!(
@@ -324,6 +326,7 @@ impl RangeMap for TreeRangeMap {
                     len,
                 },
             );
+            debug_log::group_end!();
             return;
         } else if spans.len() == 1 {
             // single span, so we know what the annotations of new insertion
@@ -333,6 +336,7 @@ impl RangeMap for TreeRangeMap {
             // TODO: Perf reuse the query
             let result = self.tree.query::<IndexFinder>(&pos);
             self.tree.insert_by_query_result(result, Elem { ann, len });
+            debug_log::group_end!();
             return;
         }
 
@@ -461,8 +465,13 @@ impl RangeMap for TreeRangeMap {
             drop(middles);
             drop(spans);
             let mut visited_zero_span = false;
+            let mut done = false;
             self.tree
                 .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
+                    if done {
+                        return false;
+                    }
+
                     let start = slice.start.unwrap_or((0, 0));
                     let end = slice.end.unwrap_or((slice.elements.len(), 0));
                     let mut updated = false;
@@ -472,6 +481,7 @@ impl RangeMap for TreeRangeMap {
                         }
 
                         if visited_zero_span && slice.elements[index].len != 0 {
+                            done = true;
                             break;
                         }
 
@@ -501,6 +511,7 @@ impl RangeMap for TreeRangeMap {
 
         debug_assert_eq!(self.len(), self.len);
         self.check();
+        debug_log::group_end!();
     }
 
     fn delete(&mut self, pos: usize, len: usize) {
@@ -585,6 +596,14 @@ impl RangeMap for TreeRangeMap {
         if new_start < new_end {
             let new_range = self.tree.range::<IndexFinder>(new_start..new_end);
             self.insert_or_delete_ann_inside_range(&new_range.start..&new_range.end, mask, true);
+        } else {
+            // insert an empty span at target position
+            self.log_inner();
+            let mut bit_vec = BitVec::new();
+            set_bit(&mut bit_vec, mask, true);
+            self.insert_empty_span(new_start, bit_vec);
+            debug_log::debug_dbg!(&self.bit_index_to_ann(mask));
+            self.log_inner();
         }
 
         // update annotation's anchors
