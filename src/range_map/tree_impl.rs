@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{range_map::AnnPosRelativeToInsert, Annotation, OpID};
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 
 use super::{RangeMap, Span};
 
@@ -25,6 +25,27 @@ pub struct TreeRangeMap {
 impl TreeRangeMap {
     fn check(&self) {
         assert_eq!(self.len, self.tree.root_cache().len);
+        self.check_isolated_ann()
+    }
+
+    #[allow(unused)]
+    fn check_isolated_ann(&self) {
+        let mut visited_ann = FxHashSet::default();
+        let mut active_ann = FxHashSet::default();
+        for span in self.tree.iter() {
+            let mut new_active = FxHashSet::default();
+            for ann in span.ann.iter_ones() {
+                let id = self.bit_to_id[ann];
+                assert!(!visited_ann.contains(&id));
+                new_active.insert(id);
+            }
+            for ann in active_ann.iter() {
+                if !new_active.contains(ann) {
+                    visited_ann.insert(*ann);
+                }
+            }
+            active_ann = new_active;
+        }
     }
 
     #[allow(unused)]
