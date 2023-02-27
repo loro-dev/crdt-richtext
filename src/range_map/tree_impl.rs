@@ -306,8 +306,6 @@ impl RangeMap for TreeRangeMap {
         }
 
         debug_log::debug_dbg!(&spans);
-        assert!(spans.len() <= 4);
-
         debug_assert!(
             spans
                 .iter()
