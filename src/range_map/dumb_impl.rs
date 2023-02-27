@@ -222,7 +222,6 @@ impl RangeMap for DumbRangeMap {
             next = Some(index);
         }
 
-        debug_log::debug_dbg!(&self, pos, len, last, middle, next);
         if !done {
             let mut shared: Option<BTreeSet<_>> = None;
             for a in last.iter().chain(middle.iter()).chain(next.iter()) {
@@ -330,7 +329,6 @@ impl RangeMap for DumbRangeMap {
             }
         }
 
-        debug_log::debug_dbg!(&self);
         debug_log::debug_dbg!("AFTER INSERT", &self);
         self.check();
     }

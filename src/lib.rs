@@ -284,8 +284,6 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         ans: &mut Vec<RangeOp>,
     ) {
         assert!(non_empty_span_count <= 2);
-        debug_log::group!("LOCAL HANDLER");
-        debug_log::debug_dbg!("Before", &self.range_map);
         let mut visited_left = false;
         let mut pure_left = BTreeSet::new();
         let mut pure_middle = BTreeSet::new();
@@ -404,8 +402,6 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 }
             }
         }
-        debug_log::debug_dbg!("After", &self.range_map);
-        debug_log::group_end!();
     }
 
     /// NOTE: This is error-prone, need more attention

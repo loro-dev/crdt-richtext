@@ -262,7 +262,19 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             // a.range.range_map.log_inner();
             // b.range.range_map.log_inner();
 
-            // assert_eq!(a.get_ann_set(), b.get_ann_set());
+            assert_eq!(
+                a.get_ann_set(),
+                b.get_ann_set(),
+                "annotation set not eq \nA={:#?}\n\n B={:#?}",
+                a.get_ann_set()
+                    .into_iter()
+                    .map(|x| x.id)
+                    .collect::<Vec<_>>(),
+                b.get_ann_set()
+                    .into_iter()
+                    .map(|x| x.id)
+                    .collect::<Vec<_>>()
+            );
             assert_eq!(a.get_annotations(..), b.get_annotations(..));
         }
     }
@@ -296,7 +308,6 @@ impl Actor {
             self.list_ops.push(op);
         }
 
-        debug_log::debug_dbg!(&self.range);
         self.next_lamport += len as Lamport;
         self._range_insert(len, &op, arr_pos, true);
         debug_log::group_end!();
@@ -590,14 +601,14 @@ impl Actor {
             }
         }
 
-        debug_log::debug_dbg!(self
-            .list
-            .content
-            .iter()
-            .enumerate()
-            .map(|(i, x)| format!("{}:{}-{}", i, x.id.client_id, x.id.clock))
-            .collect::<Vec<_>>()
-            .join(", "));
+        // debug_log::debug_dbg!(self
+        //     .list
+        //     .content
+        //     .iter()
+        //     .enumerate()
+        //     .map(|(i, x)| format!("{}:{}-{}", i, x.id.client_id, x.id.clock))
+        //     .collect::<Vec<_>>()
+        //     .join(", "));
         // annotation
         debug_log::group!("apply remote annotation");
         for op in other.range_ops.iter() {
@@ -614,6 +625,7 @@ impl Actor {
 
         // lamport
         self.next_lamport = std::cmp::max(self.next_lamport, other.next_lamport);
+        self.check();
     }
 
     fn integrate_insert_op(&mut self, op: &Op, is_local: bool) {
@@ -677,19 +689,12 @@ impl Actor {
             }
 
             let anchor_range = start..end;
-            self.range.range_map.log_inner();
             assert_eq!(ann_range, anchor_range);
         }
     }
 
     fn get_ann_set(&mut self) -> BTreeSet<Arc<Annotation>> {
-        let mut ann_set = BTreeSet::new();
-        for span in self.range.get_annotations(..) {
-            for ann in span.annotations.iter() {
-                ann_set.insert(ann.clone());
-            }
-        }
-        ann_set
+        self.range.range_map.get_all_alive_ann()
     }
 
     fn id_pos(&self, id: OpID) -> (usize, bool) {

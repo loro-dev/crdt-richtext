@@ -4,7 +4,8 @@ use generic_btree::{
     BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec, StackVec,
 };
 use std::{
-    ops::{ControlFlow, Range, RangeInclusive},
+    collections::BTreeSet,
+    ops::{Range, RangeInclusive},
     sync::Arc,
 };
 
@@ -19,18 +20,22 @@ pub struct TreeRangeMap {
     id_to_ann: FxHashMap<OpID, Arc<Annotation>>,
     id_to_bit: FxHashMap<OpID, usize>,
     bit_to_id: Vec<OpID>,
+    expected_root_cache: BitVec,
     len: usize,
 }
 
 impl TreeRangeMap {
     fn check(&self) {
         assert_eq!(self.len, self.tree.root_cache().len);
-        self.check_isolated_ann()
+        assert!(self
+            .expected_root_cache
+            .iter_ones()
+            .eq(self.tree.root_cache().ann.iter_ones()));
+        // self.check_isolated_ann()
     }
 
     #[allow(unused)]
     fn check_isolated_ann(&self) {
-        self.log_inner();
         let mut visited_ann = FxHashSet::default();
         let mut active_ann = FxHashSet::default();
         for span in self.tree.iter() {
@@ -114,7 +119,6 @@ impl TreeRangeMap {
                 }
             }
         }
-        debug_log::debug_dbg!(&spans);
         debug_assert!(
             spans
                 .iter()
@@ -176,8 +180,18 @@ impl TreeRangeMap {
         let shared = shared.unwrap();
         let mut next_empty_elem = Elem::default();
         or_(&mut new_elem.ann, &shared);
-        next_empty_elem.ann = shared.clone();
-        let mut middle_annotations = BitVec::new();
+        if new_elem.len == 0 && !middles.is_empty() {
+            for m in middles.iter() {
+                or_(&mut new_elem.ann, &m.elem.ann);
+            }
+            let trim_start = spans[0].elem.len != 0;
+            drop(middles);
+            drop(spans);
+            self.set_middle_empty_spans_annotations(neighbor_range, new_elem.ann, trim_start);
+            return;
+        }
+        next_empty_elem.ann = new_elem.ann.clone();
+        let mut middle_annotations = new_elem.ann.clone();
         let mut use_next = false;
         for middle in middles.iter() {
             for ann in middle.elem.ann.iter_ones() {
@@ -239,7 +253,6 @@ impl TreeRangeMap {
                         set_bit(&mut middle_annotations, ann, true);
                         set_bit(&mut new_elem.ann, ann, true);
                         if use_next {
-                            debug_log::debug_log!("next from right {:?}", &ann);
                             set_bit(&mut next_empty_elem.ann, ann, true);
                         }
                     }
@@ -251,41 +264,10 @@ impl TreeRangeMap {
             .unwrap_or_else(|| middles.last().unwrap().path())
             .clone();
         if middles.last().is_some() {
+            let trim_start = spans[0].elem.len != 0;
             drop(middles);
             drop(spans);
-            let mut visited_zero_span = false;
-            let mut done = false;
-            self.tree
-                .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
-                    if done {
-                        return false;
-                    }
-
-                    let start = slice.start.unwrap_or((0, 0));
-                    let end = slice.end.unwrap_or((slice.elements.len(), 0));
-                    let mut updated = false;
-                    for index in start.0..=end.0 {
-                        if slice.elements.len() <= index {
-                            break;
-                        }
-
-                        if visited_zero_span && slice.elements[index].len != 0 {
-                            done = true;
-                            break;
-                        }
-
-                        visited_zero_span = true;
-                        if slice.elements[index].len == 0
-                            && slice.elements[index].ann != middle_annotations
-                        {
-                            updated = true;
-                            slice.elements[index].ann = middle_annotations.clone();
-                        }
-                    }
-
-                    updated
-                });
-            assert!(visited_zero_span);
+            self.set_middle_empty_spans_annotations(neighbor_range, middle_annotations, trim_start);
         } else {
             drop(middles);
             drop(spans);
@@ -297,6 +279,68 @@ impl TreeRangeMap {
         } else {
             self.tree.insert_by_query_result(path, new_elem);
         }
+    }
+
+    /// Set the annotations of the middle empty spans.
+    ///
+    /// - Need to skip the first few non empty spans, (if skip_start_empty_spans=true)
+    /// - Annotate all the continuous empty spans after the first non empty spans
+    /// - Stop when meet the first non empty span after the continuous empty spans
+    fn set_middle_empty_spans_annotations(
+        &mut self,
+        neighbor_range: Range<QueryResult>,
+        middle_annotations: BitVec,
+        skip_start_empty_spans: bool,
+    ) {
+        let mut meet_non_empty_span = !skip_start_empty_spans;
+        let mut visited_zero_span = false;
+        let mut done = false;
+        self.tree
+            .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
+                if done {
+                    return false;
+                }
+
+                let start = slice.start.unwrap_or((0, 0));
+                let end = slice.end.unwrap_or((slice.elements.len(), 0));
+                let mut updated = false;
+                for index in start.0..=end.0 {
+                    if slice.elements.len() <= index {
+                        break;
+                    }
+
+                    if slice.elements[index].len == 0 {
+                        if !meet_non_empty_span {
+                            continue;
+                        }
+                    } else {
+                        meet_non_empty_span = true;
+                    }
+
+                    if visited_zero_span && slice.elements[index].len != 0 {
+                        done = true;
+                        break;
+                    }
+
+                    visited_zero_span = true;
+                    if slice.elements[index].len == 0
+                        && slice.elements[index].ann != middle_annotations
+                    {
+                        updated = true;
+                        slice.elements[index].ann = middle_annotations.clone();
+                    }
+                }
+
+                updated
+            });
+        assert!(visited_zero_span);
+    }
+
+    pub(crate) fn get_all_alive_ann(&self) -> BTreeSet<Arc<Annotation>> {
+        self.bit_vec_to_ann_vec(&self.tree.root_cache().ann)
+            .into_iter()
+            .cloned()
+            .collect()
     }
 }
 
@@ -312,6 +356,7 @@ impl TreeRangeMap {
             id_to_ann: FxHashMap::default(),
             id_to_bit: FxHashMap::default(),
             bit_to_id,
+            expected_root_cache: Default::default(),
             len: 0,
         }
     }
@@ -325,6 +370,7 @@ impl TreeRangeMap {
             self.id_to_bit.insert(id, bit);
             self.bit_to_id.push(id);
             self.id_to_ann.insert(id, ann);
+            set_bit(&mut self.expected_root_cache, bit, true);
             bit
         }
     }
@@ -370,7 +416,8 @@ impl TreeRangeMap {
     }
 
     // TODO: Perf can use write buffer to speed up
-    fn annotate_by_range(&mut self, range: Range<&QueryResult>, idx: usize) {
+    fn update_range(&mut self, range: Range<&QueryResult>, idx: usize) {
+        assert_ne!(range.start, range.end);
         self.tree.update(
             range,
             &mut |mut slice| {
@@ -396,7 +443,6 @@ impl TreeRangeMap {
         index: usize,
         is_insert: bool,
     ) {
-        debug_log::debug_log!("{} {:?}", index, &range);
         self.tree.update(range, &mut |mut slice| {
             update_slice(&mut slice, &mut |x| {
                 set_bit(&mut x.ann, index, is_insert);
@@ -523,7 +569,6 @@ impl RangeMap for TreeRangeMap {
         F: FnMut(&Annotation) -> super::AnnPosRelativeToInsert,
     {
         debug_log::group!("TreeImpl Insert");
-        self.log_inner();
         self.check();
         self.len += len;
         let new_elem = Elem::new(len);
@@ -532,7 +577,6 @@ impl RangeMap for TreeRangeMap {
 
         debug_assert_eq!(self.len(), self.len);
         self.check();
-        self.log_inner();
         debug_log::group_end!();
     }
 
@@ -558,9 +602,15 @@ impl RangeMap for TreeRangeMap {
             let wiped_out = if self.tree.root_cache().ann.len() < ann_bit_mask.len() {
                 true
             } else {
-                let mut deleted_ann = !self.tree.root_cache().ann.clone();
-                deleted_ann &= &ann_bit_mask;
-                deleted_ann.any()
+                let root_ann = &self.tree.root_cache().ann;
+                'outer: {
+                    for index in ann_bit_mask.iter_ones() {
+                        if !*root_ann.get(index).unwrap() {
+                            break 'outer true;
+                        }
+                    }
+                    false
+                }
             };
 
             if wiped_out {
@@ -577,7 +627,11 @@ impl RangeMap for TreeRangeMap {
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
         let ann = Arc::new(annotation);
         let idx = self.try_add_ann(ann);
-        self.annotate_by_range(&range.start..&range.end, idx);
+        if len == 0 {
+            self.insert_empty_span(pos, new_by_one_idx(idx));
+        } else {
+            self.update_range(&range.start..&range.end, idx);
+        }
         debug_assert_eq!(self.len(), self.len);
         self.check();
     }
@@ -617,16 +671,21 @@ impl RangeMap for TreeRangeMap {
             index_range.end
         };
 
+        self.log_inner();
+        assert!(self.get_annotation_range(target_id).is_none());
         if new_start < new_end {
+            debug_log::debug_log!("Insert new range");
             let new_range = self.tree.range::<IndexFinder>(new_start..new_end);
             self.insert_or_delete_ann_inside_range(&new_range.start..&new_range.end, mask, true);
         } else {
             // insert an empty span at target position
-            let mut bit_vec = BitVec::new();
-            set_bit(&mut bit_vec, mask, true);
+            let bit_vec = new_by_one_idx(mask);
+            debug_log::group!("Insert empty span {}", new_start);
             self.insert_empty_span(new_start, bit_vec);
             debug_log::debug_dbg!(&self.bit_index_to_ann(mask));
+            debug_log::group_end!();
         }
+        self.log_inner();
 
         // update annotation's anchors
         // TODO: Perf remove Arc requirement on RangeMap
@@ -654,6 +713,7 @@ impl RangeMap for TreeRangeMap {
         let bit_index = self.get_ann_bit_index(id).unwrap();
         self.insert_or_delete_ann_inside_range(&start..&end, bit_index, false);
         debug_assert_eq!(self.len(), self.len);
+        set_bit(&mut self.expected_root_cache, bit_index, false);
         self.check();
     }
 
@@ -708,6 +768,12 @@ impl RangeMap for TreeRangeMap {
     fn len(&self) -> usize {
         self.tree.root_cache().len
     }
+}
+
+fn new_by_one_idx(mask: usize) -> BitVec {
+    let mut bit_vec = BitVec::new();
+    set_bit(&mut bit_vec, mask, true);
+    bit_vec
 }
 
 fn get_slice_len(slice: &ElemSlice<Elem>) -> usize {
