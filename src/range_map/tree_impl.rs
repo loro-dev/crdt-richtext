@@ -103,10 +103,7 @@ impl TreeRangeMap {
     }
 
     fn bit_index_to_ann(&self, ann_bit_index: usize) -> &Arc<Annotation> {
-        let annotation = self
-            .id_to_ann
-            .get(self.bit_to_id.get(ann_bit_index).unwrap())
-            .unwrap();
+        let annotation = self.id_to_ann.get(&self.bit_to_id[ann_bit_index]).unwrap();
         annotation
     }
 
@@ -690,16 +687,6 @@ impl RangeMap for TreeRangeMap {
     }
 
     fn get_annotation_pos(&self, id: OpID) -> Option<(Arc<Annotation>, std::ops::Range<usize>)> {
-        let mut ans = vec![];
-        for s in self.tree.iter() {
-            let v = s
-                .ann
-                .iter_ones()
-                .map(|x| self.bit_index_to_ann(x).clone())
-                .collect::<Vec<_>>();
-            ans.push((v, s.len));
-        }
-
         // use annotation finder to delete
         let (_, index_range) = self.get_annotation_range(id)?;
         let ann = self.id_to_ann.get(&id).unwrap();
