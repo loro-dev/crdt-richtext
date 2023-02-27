@@ -261,6 +261,8 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             // dbg!(&a.get_annotations(..));
             // a.range.range_map.log_inner();
             // b.range.range_map.log_inner();
+
+            // assert_eq!(a.get_ann_set(), b.get_ann_set());
             assert_eq!(a.get_annotations(..), b.get_annotations(..));
         }
     }
@@ -651,12 +653,7 @@ impl Actor {
             assert!(self.visited.contains(&id));
         }
 
-        let mut ann_set = BTreeSet::new();
-        for span in self.range.get_annotations(..) {
-            for ann in span.annotations.iter() {
-                ann_set.insert(ann.clone());
-            }
-        }
+        let ann_set = self.get_ann_set();
 
         for ann in ann_set {
             let ann_range = self.range.get_annotation_range(ann.id).unwrap();
@@ -684,6 +681,16 @@ impl Actor {
             self.range.range_map.log_inner();
             assert_eq!(ann_range, anchor_range);
         }
+    }
+
+    fn get_ann_set(&mut self) -> BTreeSet<Arc<Annotation>> {
+        let mut ann_set = BTreeSet::new();
+        for span in self.range.get_annotations(..) {
+            for ann in span.annotations.iter() {
+                ann_set.insert(ann.clone());
+            }
+        }
+        ann_set
     }
 
     fn id_pos(&self, id: OpID) -> (usize, bool) {
