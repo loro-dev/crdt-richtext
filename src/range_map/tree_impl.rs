@@ -29,18 +29,21 @@ impl TreeRangeMap {
 
     #[allow(unused)]
     pub(crate) fn log_inner(&self) {
-        let mut inner_spans = vec![];
-        for span in self.tree.iter() {
-            inner_spans.push((
-                span.ann
-                    .iter_ones()
-                    .map(|x| self.bit_index_to_ann(x))
-                    .collect::<Vec<_>>(),
-                span.len,
-            ));
-        }
+        if cfg!(debug_assertions) {
+            let mut inner_spans = vec![];
+            for span in self.tree.iter() {
+                let ann = &span.ann;
+                inner_spans.push((self.bit_vec_to_ann_vec(ann), span.len));
+            }
 
-        debug_log::debug_dbg!(inner_spans);
+            debug_log::debug_dbg!(inner_spans);
+        }
+    }
+
+    fn bit_vec_to_ann_vec(&self, ann: &BitVec) -> Vec<&Arc<Annotation>> {
+        ann.iter_ones()
+            .map(|x| self.bit_index_to_ann(x))
+            .collect::<Vec<_>>()
     }
 }
 
@@ -271,6 +274,7 @@ impl RangeMap for TreeRangeMap {
         F: FnMut(&Annotation) -> super::AnnPosRelativeToInsert,
     {
         debug_log::group!("TreeImpl Insert");
+        self.log_inner();
         self.check();
         self.len += len;
         let neighbor_range = self
@@ -284,19 +288,31 @@ impl RangeMap for TreeRangeMap {
         if !spans.is_empty() {
             // pop redundant end if there are any
             loop {
+                if spans.len() == 1 {
+                    break;
+                }
+
                 let last = spans.last().unwrap();
                 let len = last.elem.len;
-                if (last.end == Some(0) && len != 0) || (len == 0 && spans.len() >= 3) {
+                if (last.end == Some(0) && len != 0)
+                    || (len == 0 && spans.len() >= 3)
+                    || get_slice_len(&spans[0]) == 2
+                {
                     spans.pop();
                 } else {
                     break;
                 }
             }
             loop {
+                if spans.len() == 1 {
+                    break;
+                }
+
                 let first = spans.first().unwrap();
                 let len = first.elem.len;
                 if (first.start == Some(first.elem.len) && len != 0)
                     || (len == 0 && spans.len() >= 3)
+                    || get_slice_len(spans.last().unwrap()) == 2
                 {
                     spans.drain(0..1);
                 } else {
@@ -509,6 +525,7 @@ impl RangeMap for TreeRangeMap {
 
         debug_assert_eq!(self.len(), self.len);
         self.check();
+        self.log_inner();
         debug_log::group_end!();
     }
 
@@ -641,15 +658,11 @@ impl RangeMap for TreeRangeMap {
         self.tree.flush_write_buffer();
         let mut elements: Vec<Elem> = Vec::new();
         // TODO: Merge siblings empty spans
-        for ElemSlice {
-            elem, start, end, ..
-        } in self.tree.iter_range(range)
-        {
-            let start = start.unwrap_or(0);
-            let end = end.unwrap_or(elem.len);
+        for slice in self.tree.iter_range(range) {
+            let len = get_slice_len(&slice);
             let elem = Elem {
-                ann: elem.ann.clone(),
-                len: end - start,
+                ann: slice.elem.ann.clone(),
+                len,
             };
             match elements.last_mut() {
                 Some(last) if last.can_merge(&elem) => {
@@ -697,6 +710,12 @@ impl RangeMap for TreeRangeMap {
     fn len(&self) -> usize {
         self.tree.root_cache().len
     }
+}
+
+fn get_slice_len(slice: &ElemSlice<Elem>) -> usize {
+    let start = slice.start.unwrap_or(0);
+    let end = slice.end.unwrap_or(slice.elem.len);
+    end - start
 }
 
 #[derive(Debug)]
