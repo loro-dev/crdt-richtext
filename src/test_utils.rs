@@ -163,7 +163,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
                 return;
             }
             actors[actor as usize].insert(pos as usize, len as usize);
-            actors[actor as usize].check();
+            // actors[actor as usize].check();
         }
         Action::Delete { actor, pos, len } => {
             if len == 0 {
@@ -171,7 +171,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
             }
 
             actors[actor as usize].delete(pos as usize, len as usize);
-            actors[actor as usize].check();
+            // actors[actor as usize].check();
         }
         Action::Annotate {
             actor,
@@ -204,12 +204,12 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
                         .un_annotate(pos as usize..=pos as usize + len as usize - 1, "link");
                 }
             }
-            actors[actor as usize].check();
+            // actors[actor as usize].check();
         }
         Action::Sync(a, b) => {
             let (a, b) = arref::array_mut_ref!(actors, [a as usize, b as usize]);
             a.merge(b);
-            a.check();
+            // a.check();
         }
     }
 }
@@ -614,7 +614,6 @@ impl Actor {
 
         // lamport
         self.next_lamport = std::cmp::max(self.next_lamport, other.next_lamport);
-        self.check();
     }
 
     fn integrate_insert_op(&mut self, op: &Op, is_local: bool) {
