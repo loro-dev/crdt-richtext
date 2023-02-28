@@ -14,13 +14,19 @@ arref = "0.1.0"
 debug-log = "0.1.4"
 heapless = "0.7.16"
 fxhash = "0.2.1"
-generic-btree = {version="0.1.0",path="../generic-btree"}
+generic-btree = { version = "0.1.0", path = "../generic-btree" }
 bitvec = "1.0.1"
+
+[dev-dependencies]
+criterion = "0.4.0"
+arbtest = "0.2.0"
+color-backtrace = "0.5.1"
+ctor = "0.1.26"
 
 [features]
 test = ["crdt-list", "rand", "arbitrary"]
 
-[dev-dependencies]
-arbtest = "0.2.0"
-color-backtrace = "0.5.1"
-ctor = "0.1.26"
+
+[[bench]]
+name = "bench"
+harness = false
