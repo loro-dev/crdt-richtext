@@ -30,3 +30,8 @@ name = "five-actors"
 path = "fuzz_targets/five-actors.rs"
 test = false
 doc = false
+
+
+[profile.release]
+lto = true
+opt-level = 3

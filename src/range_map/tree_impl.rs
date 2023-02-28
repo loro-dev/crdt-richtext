@@ -790,53 +790,54 @@ impl BTreeTrait for TreeTrait {
     type WriteBuffer = Buffer;
     type Cache = Elem;
 
-    const MAX_LEN: usize = 4;
+    const MAX_LEN: usize = 8;
 
     fn element_to_cache(element: &Self::Elem) -> Self::Cache {
         element.clone()
     }
 
-    fn calc_cache_internal(caches: &[generic_btree::Child<Self>]) -> Self::Cache {
-        if caches.is_empty() {
-            return Default::default();
-        }
-
-        let mut len = 0;
-        let mut ann: BitVec = Default::default();
-        for cache in caches.iter() {
-            if let Some(buffer) = &cache.write_buffer {
-                let mut new_ann = cache.cache.ann.clone();
-                for &change in buffer.changes.iter() {
-                    if change > 0 {
-                        set_bit(&mut new_ann, change as usize, true);
-                    } else {
-                        set_bit(&mut new_ann, -change as usize, false);
+    fn calc_cache_internal(cache: &mut Self::Cache, caches: &[generic_btree::Child<Self>]) {
+        cache.ann.clear();
+        cache.len = 0;
+        if !caches.is_empty() {
+            let mut len = 0;
+            let ann = &mut cache.ann;
+            for cache in caches.iter() {
+                if let Some(buffer) = &cache.write_buffer {
+                    let mut new_ann = cache.cache.ann.clone();
+                    for &change in buffer.changes.iter() {
+                        if change > 0 {
+                            set_bit(&mut new_ann, change as usize, true);
+                        } else {
+                            set_bit(&mut new_ann, -change as usize, false);
+                        }
                     }
+
+                    or_(ann, &new_ann);
+                } else {
+                    or_(ann, &cache.cache.ann);
                 }
 
-                or_(&mut ann, &new_ann);
-            } else {
-                or_(&mut ann, &cache.cache.ann);
+                len += cache.cache.len;
             }
 
-            len += cache.cache.len;
+            cache.len = len;
         }
-
-        Elem { ann, len }
     }
 
-    fn calc_cache_leaf(caches: &[Self::Elem]) -> Self::Cache {
-        if caches.is_empty() {
-            return Default::default();
-        }
-        let mut len = caches[0].len;
-        let mut ann = caches[0].ann.clone();
-        for cache in caches.iter().skip(1) {
-            or_(&mut ann, &cache.ann);
-            len += cache.len;
-        }
+    fn calc_cache_leaf(cache: &mut Self::Cache, caches: &[Self::Elem]) {
+        cache.ann.clear();
+        cache.len = 0;
+        if !caches.is_empty() {
+            let mut len = 0;
+            let ann = &mut cache.ann;
+            for cache in caches.iter() {
+                or_(ann, &cache.ann);
+                len += cache.len;
+            }
 
-        Elem { ann, len }
+            cache.len = len;
+        };
     }
 
     fn apply_write_buffer_to_elements(

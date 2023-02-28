@@ -18,7 +18,6 @@ pub fn bench(c: &mut Criterion) {
     let actions: [Action; 1000] = u.arbitrary().unwrap();
     let actions = actions.to_vec();
     let mut b = c.benchmark_group("fuzz");
-    b.sample_size(10);
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     b.bench_function("5 actors 1000 actions", |b| {
         b.iter(|| fuzzing(5, actions.clone()));
