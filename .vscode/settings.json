@@ -1,3 +1,4 @@
 {
-  "rust-analyzer.cargo.features": ["test"]
+  "rust-analyzer.cargo.features": ["test"],
+  "cSpell.words": ["flamegraph"]
 }

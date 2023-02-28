@@ -18,6 +18,11 @@ generic-btree = { version = "0.1.0", path = "../generic-btree" }
 bitvec = "1.0.1"
 
 [dev-dependencies]
+pprof = { version = "0.11.1", features = [
+  "flamegraph",
+  "criterion",
+  "frame-pointer",
+] }
 criterion = "0.4.0"
 arbtest = "0.2.0"
 color-backtrace = "0.5.1"
