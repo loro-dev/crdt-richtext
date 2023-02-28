@@ -3051,6 +3051,42 @@ mod failed_tests {
         )
     }
 
+    #[test]
+    fn fuzz_35() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    len: 10,
+                },
+                Sync(1, 0),
+                Annotate {
+                    actor: 0,
+                    pos: 3,
+                    len: 3,
+                    annotation: Link,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 4,
+                    len: 4,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 3,
+                    len: 3,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 3,
+                    len: 1,
+                },
+            ],
+        )
+    }
+
     #[allow(unused)]
     fn fuzz_empty() {
         fuzzing(2, vec![])

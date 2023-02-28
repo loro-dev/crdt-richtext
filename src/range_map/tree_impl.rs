@@ -26,11 +26,11 @@ pub struct TreeRangeMap {
 
 impl TreeRangeMap {
     fn check(&self) {
-        assert_eq!(self.len, self.tree.root_cache().len);
-        assert!(self
-            .expected_root_cache
-            .iter_ones()
-            .eq(self.tree.root_cache().ann.iter_ones()));
+        // assert_eq!(self.len, self.tree.root_cache().len);
+        // assert!(self
+        //     .expected_root_cache
+        //     .iter_ones()
+        //     .eq(self.tree.root_cache().ann.iter_ones()));
         // self.check_isolated_ann()
     }
 

@@ -8,6 +8,7 @@ use crdt_list::crdt::ListCrdt;
 use crdt_list::test::TestFramework;
 use crdt_list::yata::{self};
 use crdt_list::yata_dumb_impl::{Container, Op, OpId as ListOpId, YataImpl};
+use fxhash::FxHashSet;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SimpleSpan {
@@ -332,8 +333,9 @@ impl Actor {
                 .get(next_alive_arr_index)
                 .map(|x| x.id.into())
         };
+        let mut last_alive_arr_index;
         let left = if arr_pos != 0 {
-            let mut last_alive_arr_index = arr_pos - 1;
+            last_alive_arr_index = arr_pos - 1;
             while self
                 .list
                 .content
@@ -361,7 +363,8 @@ impl Actor {
         };
 
         let new_op_id = first_op.id;
-        let mut left_set: BTreeSet<OpID> = BTreeSet::new();
+        let mut left_set: FxHashSet<OpID> =
+            FxHashSet::with_capacity_and_hasher(arr_pos, Default::default());
         let mut i = 0;
         let mut text_pos = 0;
         while self.list.content[i].id != new_op_id {
@@ -385,7 +388,7 @@ impl Actor {
             self.next_lamport,
             self.next_id(),
             |a| {
-                // this can be O(lgN) using a proper data structure
+                // this can be O(lgN) when using a proper data structure
                 if left_set.contains(&a) {
                     Ordering::Less
                 } else {

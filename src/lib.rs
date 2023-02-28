@@ -200,9 +200,17 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
         CrdtRange { range_map: r }
     }
 
-    /// `cmp` compare the positions of the given op and insert_op
+    /// Insert a new span of text into the range. It's used to sync
+    /// List Crdt insert ops.  
     ///
-    /// It may generate Patch only when is_local=true
+    /// It will only generate new RangeOp(Patches) when inserting new
+    /// text locally and there are annotations attached to the tombstones
+    /// at `pos`.
+    ///
+    /// - `cmp(target)` returns whether the target is in right side or
+    ///   left side of the new inserted op. `target` may be any op id
+    ///   from the List CRDT because it's used to test both sides of an
+    ///   annotation
     pub fn insert_text<Cmp>(
         &mut self,
         pos: usize,
