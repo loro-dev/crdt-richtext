@@ -18,7 +18,9 @@ use std::{
     sync::Arc,
 };
 
-use range_map::{AnnPosRelativeToInsert, RangeMap, Span};
+pub use range_map::tree_impl::TreeRangeMap;
+pub use range_map::RangeMap;
+use range_map::{AnnPosRelativeToInsert, Span};
 
 mod range_map;
 type Lamport = u32;

@@ -452,6 +452,12 @@ impl TreeRangeMap {
     }
 }
 
+impl Default for TreeRangeMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Elem {
     ann: BitVec,
