@@ -1,10 +1,10 @@
-use bitvec::vec::BitVec;
 use generic_btree::{
-    rle::{self, update_slice, HasLength, Mergeable, Sliceable},
+    rle::{self, HasLength, Mergeable, Sliceable},
     BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec, StackVec,
 };
 use std::{
     collections::BTreeSet,
+    mem::take,
     ops::{Range, RangeInclusive},
     sync::Arc,
 };
@@ -14,19 +14,118 @@ use fxhash::{FxHashMap, FxHashSet};
 
 use super::{RangeMap, Span};
 
+type AnnIdx = i32;
+
 #[derive(Debug)]
 pub struct TreeRangeMap {
     tree: BTree<TreeTrait>,
     id_to_ann: FxHashMap<OpID, Arc<Annotation>>,
-    id_to_bit: FxHashMap<OpID, usize>,
-    bit_to_id: Vec<OpID>,
-    expected_root_cache: BitVec,
+    id_to_idx: FxHashMap<OpID, AnnIdx>,
+    idx_to_ann: Vec<Arc<Annotation>>,
+    expected_root_cache: Elem,
     len: usize,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+struct AnchorSet {
+    start: FxHashSet<AnnIdx>,
+    /// this is inclusive end. The
+    end: FxHashSet<AnnIdx>,
+}
+
+impl AnchorSet {
+    fn union_(&mut self, other: &Self) {
+        self.start.extend(other.start.iter());
+        self.end.extend(other.end.iter());
+    }
+
+    fn is_empty(&self) -> bool {
+        self.start.is_empty() && self.end.is_empty()
+    }
+
+    fn difference(&self, old: &AnchorSet, output: &mut CacheDiff) {
+        for ann in self.start.difference(&old.start) {
+            output.start.insert(*ann);
+        }
+        for ann in self.end.difference(&old.end) {
+            output.start.insert(*ann);
+        }
+        for ann in old.start.difference(&self.start) {
+            output.start.insert(-*ann);
+        }
+        for ann in old.end.difference(&self.end) {
+            output.start.insert(-*ann);
+        }
+    }
+
+    fn apply_diff(&mut self, diff: &CacheDiff) {
+        for ann in diff.start.iter() {
+            if *ann >= 0 {
+                self.start.insert(*ann);
+            } else {
+                self.start.remove(&(-*ann));
+            }
+        }
+        for ann in diff.end.iter() {
+            if *ann >= 0 {
+                self.end.insert(*ann);
+            } else {
+                self.end.remove(&(-*ann));
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.start.clear();
+        self.end.clear();
+    }
+}
+
+/// If a annotation is inside anchor set, it's either
+///
+/// - start at the 0 offset position
+/// - or end at the len offset position
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+struct Elem {
+    anchor_set: AnchorSet,
+    len: usize,
+}
+impl Elem {
+    fn new(len: usize) -> Elem {
+        Elem {
+            anchor_set: Default::default(),
+            len,
+        }
+    }
+
+    fn split_right(&mut self, offset: usize) -> Elem {
+        let ans = Elem {
+            anchor_set: AnchorSet {
+                start: Default::default(),
+                end: take(&mut self.anchor_set.end),
+            },
+            len: self.len - offset,
+        };
+        self.len = offset;
+        ans
+    }
+
+    fn apply_diff(&mut self, diff: &CacheDiff) {
+        self.anchor_set.apply_diff(diff);
+        self.len = (self.len as isize + diff.len_diff) as usize;
+    }
+}
+
+#[derive(Default)]
+struct CacheDiff {
+    start: FxHashSet<AnnIdx>,
+    end: FxHashSet<AnnIdx>,
+    len_diff: isize,
 }
 
 impl TreeRangeMap {
     fn check(&self) {
-        // assert_eq!(self.len, self.tree.root_cache().len);
+        assert_eq!(self.len, self.tree.root_cache().len);
         // assert!(self
         //     .expected_root_cache
         //     .iter_ones()
@@ -35,42 +134,28 @@ impl TreeRangeMap {
     }
 
     #[allow(unused)]
-    fn check_isolated_ann(&self) {
-        let mut visited_ann = FxHashSet::default();
-        let mut active_ann = FxHashSet::default();
-        for span in self.tree.iter() {
-            let mut new_active = FxHashSet::default();
-            for ann in span.ann.iter_ones() {
-                let id = self.bit_to_id[ann];
-                assert!(!visited_ann.contains(&id));
-                new_active.insert(id);
-            }
-            for ann in active_ann.iter() {
-                if !new_active.contains(ann) {
-                    visited_ann.insert(*ann);
-                }
-            }
-            active_ann = new_active;
-        }
-    }
-
-    #[allow(unused)]
     pub(crate) fn log_inner(&self) {
         if cfg!(debug_assertions) {
             let mut inner_spans = vec![];
+            let mut cache = FxHashSet::default();
             for span in self.tree.iter() {
-                let ann = &span.ann;
-                inner_spans.push((self.bit_vec_to_ann_vec(ann), span.len));
+                for ann in span.anchor_set.start.iter() {
+                    assert!(!cache.contains(ann));
+                    cache.insert(*ann);
+                }
+                for ann in span.anchor_set.end.iter() {
+                    assert!(cache.contains(ann));
+                    cache.remove(ann);
+                }
+                let v: Vec<_> = cache
+                    .iter()
+                    .map(|x| self.idx_to_ann[*x as usize].clone())
+                    .collect();
+                inner_spans.push((v, span.len));
             }
 
             debug_log::debug_dbg!(inner_spans);
         }
-    }
-
-    fn bit_vec_to_ann_vec(&self, ann: &BitVec) -> Vec<&Arc<Annotation>> {
-        ann.iter_ones()
-            .map(|x| self.bit_index_to_ann(x))
-            .collect::<Vec<_>>()
     }
 
     fn insert_elem<F>(&mut self, pos: usize, mut new_elem: Elem, mut f: F)
@@ -136,7 +221,6 @@ impl TreeRangeMap {
         } else if spans.len() == 1 {
             // single span, so we know what the annotations of new insertion
             // insert directly
-            or_(&mut new_elem.ann, &spans[0].elem.ann);
             drop(spans);
             // TODO: Perf reuse the query
             let result = self.tree.query::<IndexFinder>(&pos);
@@ -168,120 +252,162 @@ impl TreeRangeMap {
                 }
             }
         }
-        let mut shared: Option<BitVec> = None;
-        for a in left.iter().chain(middles.iter()).chain(right.iter()) {
-            match &mut shared {
-                Some(shared) => and_(shared, &a.elem.ann),
-                None => {
-                    shared = Some(a.elem.ann.clone());
-                }
-            }
-        }
-        let shared = shared.unwrap();
-        let mut next_empty_elem = Elem::default();
-        or_(&mut new_elem.ann, &shared);
+
+        let mut next_anchor_set = AnchorSet::default();
         if new_elem.len == 0 && !middles.is_empty() {
-            for m in middles.iter() {
-                or_(&mut new_elem.ann, &m.elem.ann);
-            }
             let trim_start = spans[0].elem.len != 0;
             drop(middles);
             drop(spans);
-            self.set_middle_empty_spans_annotations(neighbor_range, new_elem.ann, trim_start);
+            self.set_middle_empty_spans_annotations(
+                neighbor_range,
+                new_elem.anchor_set,
+                trim_start,
+            );
             return;
         }
-        next_empty_elem.ann = new_elem.ann.clone();
-        let mut middle_annotations = new_elem.ann.clone();
+        let mut middle_annotations = AnchorSet::default();
         let mut use_next = false;
         for middle in middles.iter() {
-            for ann in middle.elem.ann.iter_ones() {
-                if shared.get(ann).as_deref().copied().unwrap_or(false) {
-                    set_bit(&mut middle_annotations, ann, true);
-                    continue;
-                }
-
-                match f(self.bit_index_to_ann(ann)) {
+            for &ann in middle.elem.anchor_set.start.iter() {
+                match f(self.idx_to_ann(ann)) {
                     AnnPosRelativeToInsert::Before => {
-                        set_bit(&mut middle_annotations, ann, true);
+                        middle_annotations.start.insert(ann);
                     }
                     AnnPosRelativeToInsert::After => {
                         use_next = true;
-                        set_bit(&mut next_empty_elem.ann, ann, true);
+                        next_anchor_set.start.insert(ann);
                     }
                     AnnPosRelativeToInsert::IncludeInsert => {
-                        set_bit(&mut next_empty_elem.ann, ann, true);
-                        set_bit(&mut middle_annotations, ann, true);
-                        set_bit(&mut new_elem.ann, ann, true);
+                        middle_annotations.start.insert(ann);
+                    }
+                }
+            }
+            for &ann in middle.elem.anchor_set.end.iter() {
+                match f(self.idx_to_ann(ann)) {
+                    AnnPosRelativeToInsert::Before => {
+                        middle_annotations.end.insert(ann);
+                    }
+                    AnnPosRelativeToInsert::After => {
+                        new_elem.anchor_set.end.insert(ann);
+                    }
+                    AnnPosRelativeToInsert::IncludeInsert => {
+                        new_elem.anchor_set.end.insert(ann);
                     }
                 }
             }
         }
-        let use_next = use_next;
-        if let Some(left) = left {
-            for ann in left.elem.ann.iter_ones() {
-                if shared.get(ann).as_deref().copied().unwrap_or(false) {
-                    continue;
-                }
 
-                match f(self.bit_index_to_ann(ann)) {
+        let use_next = use_next;
+        let mut new_end_set = Vec::new();
+        if let Some(left) = left {
+            for &ann in left.elem.anchor_set.end.iter() {
+                match f(self.idx_to_ann(ann)) {
                     AnnPosRelativeToInsert::Before => {}
                     AnnPosRelativeToInsert::After => {
-                        // unreachable!()
+                        new_end_set.push(ann);
                     }
                     AnnPosRelativeToInsert::IncludeInsert => {
-                        set_bit(&mut middle_annotations, ann, true);
-                        set_bit(&mut new_elem.ann, ann, true);
-                        if use_next {
-                            set_bit(&mut next_empty_elem.ann, ann, true);
-                        }
+                        new_end_set.push(ann);
                     }
                 }
             }
         }
+        let mut new_start_set = Vec::new();
         if let Some(right) = right {
-            for ann in right.elem.ann.iter_ones() {
-                if shared.get(ann).as_deref().copied().unwrap_or(false) {
-                    continue;
-                }
-
-                match f(self.bit_index_to_ann(ann)) {
+            for &ann in right.elem.anchor_set.start.iter() {
+                match f(self.idx_to_ann(ann)) {
                     AnnPosRelativeToInsert::Before => {
-                        // unreachable!()
+                        new_start_set.push(ann);
                     }
                     AnnPosRelativeToInsert::After => {}
                     AnnPosRelativeToInsert::IncludeInsert => {
-                        set_bit(&mut middle_annotations, ann, true);
-                        set_bit(&mut new_elem.ann, ann, true);
-                        if use_next {
-                            set_bit(&mut next_empty_elem.ann, ann, true);
-                        }
+                        new_start_set.push(ann);
                     }
                 }
             }
         }
+        let right_path = right.map(|x| *x.path());
+        let left_path = left.map(|x| *x.path());
         let path = right
-            .map(|x| x.path())
-            .unwrap_or_else(|| middles.last().unwrap().path())
-            .clone();
+            .map(|x| *x.path())
+            .unwrap_or_else(|| *middles.last().unwrap().path());
+        let middle_len = middles.len();
         if middles.last().is_some() {
             let trim_start = spans[0].elem.len != 0;
             drop(middles);
             drop(spans);
-            self.set_middle_empty_spans_annotations(neighbor_range, middle_annotations, trim_start);
+            self.set_middle_empty_spans_annotations(
+                neighbor_range.clone(),
+                middle_annotations,
+                trim_start,
+            );
         } else {
             drop(middles);
             drop(spans);
         }
 
-        if use_next {
+        for ann in new_start_set {
+            let right_path = &right_path.as_ref().unwrap();
             self.tree
-                .insert_many_by_query_result(&path, [new_elem, next_empty_elem]);
+                .get_elem_mut(right_path)
+                .unwrap()
+                .anchor_set
+                .start
+                .remove(&ann);
+            self.tree.recursive_update_cache(right_path.leaf, true);
+            new_elem.anchor_set.start.insert(ann);
+        }
+        for ann in new_end_set {
+            let left_path = &left_path.as_ref().unwrap();
+            self.tree
+                .get_elem_mut(left_path)
+                .unwrap()
+                .anchor_set
+                .end
+                .remove(&ann);
+            self.tree.recursive_update_cache(left_path.leaf, true);
+            new_elem.anchor_set.end.insert(ann);
+        }
+        if use_next {
+            self.tree.insert_many_by_query_result(
+                &path,
+                [
+                    new_elem,
+                    Elem {
+                        anchor_set: next_anchor_set,
+                        len: 0,
+                    },
+                ],
+            );
         } else {
             self.tree.insert_by_query_result(path, new_elem);
         }
+        if middle_len > 1 {
+            self.purge_redundant_empty_spans(neighbor_range)
+        }
     }
 
-    /// Set the annotations of the middle empty spans.
+    fn purge_redundant_empty_spans(&mut self, neighbor_range: Range<QueryResult>) {
+        self.tree
+            .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
+                let start = slice.start.unwrap_or((0, 0));
+                let end = slice.end.unwrap_or((slice.elements.len(), 0));
+                let mut updated = false;
+                if slice.elements[start.0..=end.0]
+                    .iter()
+                    .any(|x| x.len == 0 && x.anchor_set.is_empty())
+                {
+                    slice
+                        .elements
+                        .retain(|x| x.len != 0 || !x.anchor_set.is_empty());
+                    true
+                } else {
+                    false
+                }
+            });
+    }
+
+    /// Set the annotations of the middle empty spans. This method will only keep one empty span
     ///
     /// - Need to skip the first few non empty spans, (if skip_start_empty_spans=true)
     /// - Annotate all the continuous empty spans after the first non empty spans
@@ -289,7 +415,7 @@ impl TreeRangeMap {
     fn set_middle_empty_spans_annotations(
         &mut self,
         neighbor_range: Range<QueryResult>,
-        middle_annotations: BitVec,
+        middle_anchor_set: AnchorSet,
         skip_start_empty_spans: bool,
     ) {
         let mut meet_non_empty_span = !skip_start_empty_spans;
@@ -309,6 +435,7 @@ impl TreeRangeMap {
                         break;
                     }
 
+                    // skip the first empty spans
                     if slice.elements[index].len == 0 {
                         if !meet_non_empty_span {
                             continue;
@@ -318,16 +445,22 @@ impl TreeRangeMap {
                     }
 
                     if visited_zero_span && slice.elements[index].len != 0 {
+                        // it's the end of the continuous empty spans, terminate here
                         done = true;
                         break;
                     }
 
-                    visited_zero_span = true;
-                    if slice.elements[index].len == 0
-                        && slice.elements[index].ann != middle_annotations
-                    {
-                        updated = true;
-                        slice.elements[index].ann = middle_annotations.clone();
+                    if slice.elements[index].len == 0 {
+                        if visited_zero_span {
+                            if !slice.elements[index].anchor_set.is_empty() {
+                                updated = true;
+                                slice.elements[index].anchor_set.clear();
+                            }
+                        } else if slice.elements[index].anchor_set != middle_anchor_set {
+                            updated = true;
+                            slice.elements[index].anchor_set = middle_anchor_set.clone();
+                        }
+                        visited_zero_span = true;
                     }
                 }
 
@@ -337,11 +470,167 @@ impl TreeRangeMap {
     }
 
     pub(crate) fn get_all_alive_ann(&self) -> BTreeSet<Arc<Annotation>> {
-        self.bit_vec_to_ann_vec(&self.tree.root_cache().ann)
-            .into_iter()
-            .cloned()
+        self.tree
+            .root_cache()
+            .anchor_set
+            .start
+            .iter()
+            .map(|x| self.idx_to_ann[*x as usize].clone())
             .collect()
     }
+
+    fn remove_start(&mut self, start: &QueryResult, idx: AnnIdx) -> bool {
+        let elem_index = start.elem_index;
+        let mut removed = false;
+        self.tree.update_leaf(start.leaf, |elements| {
+            removed = elements[elem_index].anchor_set.start.remove(&idx);
+            removed
+        });
+        removed
+    }
+
+    fn remove_end(&mut self, end: &QueryResult, idx: AnnIdx) -> bool {
+        let elem_index = end.elem_index;
+        let mut removed = false;
+        self.tree.update_leaf(end.leaf, |elements| {
+            removed = elements[elem_index].anchor_set.end.remove(&idx);
+            removed
+        });
+        removed
+    }
+
+    fn set_start(&mut self, start: &QueryResult, idx: AnnIdx) {
+        let elem_index = start.elem_index;
+        let offset = start.offset;
+        self.tree.update_leaf(start.leaf, |elements| {
+            set_start(elements, elem_index, offset, idx)
+        })
+    }
+
+    fn set_end(&mut self, end: &QueryResult, idx: AnnIdx) {
+        dbg!(end, &self.tree);
+        let elem_index = end.elem_index;
+        let offset = end.offset;
+        self.tree.update_leaf(end.leaf, |elements| {
+            set_end(elements, elem_index, offset, idx)
+        })
+    }
+
+    fn set_anchor_set(&mut self, pos: usize, anchor_set: AnchorSet) {
+        if anchor_set.is_empty() {
+            return;
+        }
+
+        let path = self.tree.query::<IndexFinder>(&pos);
+        self.tree.update_leaf(path.leaf, |elements| {
+            set_anchor_set(anchor_set, path, elements)
+        })
+    }
+}
+
+fn set_anchor_set(anchor_set: AnchorSet, path: QueryResult, elements: &mut Vec<Elem>) -> bool {
+    if !anchor_set.start.is_empty() {
+        let mut elem_index = path.elem_index;
+        let mut offset = path.offset;
+        if elem_index < elements.len() && elements[elem_index].len == offset {
+            elem_index += 1;
+            offset = 0;
+        }
+        if elem_index >= elements.len() {
+            let mut new_anchor_set = AnchorSet::default();
+            for &idx in anchor_set.start.iter() {
+                new_anchor_set.start.insert(idx);
+            }
+            elements.push(Elem {
+                anchor_set: new_anchor_set,
+                len: 0,
+            });
+        } else if offset == 0 {
+            for &idx in anchor_set.start.iter() {
+                elements[elem_index].anchor_set.start.insert(idx);
+            }
+        } else {
+            let mut new_elem = elements[elem_index].split_right(offset);
+            for &idx in anchor_set.start.iter() {
+                new_elem.anchor_set.start.insert(idx);
+            }
+            elements.insert(elem_index + 1, new_elem);
+        }
+    }
+    if !anchor_set.end.is_empty() {
+        let mut elem_index = path.elem_index;
+        let mut offset = path.offset;
+        if offset == 0 && elem_index > 0 {
+            elem_index -= 1;
+            offset = elements[elem_index].len;
+        }
+        if elem_index == 0 && offset == 0 {
+            let mut new_anchor_set = AnchorSet::default();
+            for &idx in anchor_set.end.iter() {
+                new_anchor_set.end.insert(idx);
+            }
+            elements.insert(
+                0,
+                Elem {
+                    anchor_set: new_anchor_set,
+                    len: 0,
+                },
+            );
+        } else if offset == elements[elem_index].len {
+            for &idx in anchor_set.end.iter() {
+                elements[elem_index].anchor_set.end.insert(idx);
+            }
+        } else {
+            let new_elem = elements[elem_index].split_right(offset);
+            for &idx in anchor_set.end.iter() {
+                elements[elem_index].anchor_set.end.insert(idx);
+            }
+            elements.insert(elem_index + 1, new_elem);
+        }
+    }
+
+    true
+}
+
+fn set_end(elements: &mut Vec<Elem>, mut elem_index: usize, mut offset: usize, idx: i32) -> bool {
+    if offset == 0 && elem_index > 0 {
+        elem_index -= 1;
+        offset = elements[elem_index].len;
+    }
+    if elem_index == 0 && offset == 0 {
+        let mut anchor_set = AnchorSet::default();
+        anchor_set.end.insert(idx);
+        elements.insert(0, Elem { anchor_set, len: 0 });
+    } else if offset == elements[elem_index].len {
+        elements[elem_index].anchor_set.end.insert(idx);
+    } else {
+        assert!(offset < elements[elem_index].len);
+        let new_elem = elements[elem_index].split_right(offset);
+        elements[elem_index].anchor_set.end.insert(idx);
+        elements.insert(elem_index + 1, new_elem);
+    }
+
+    true
+}
+
+fn set_start(elements: &mut Vec<Elem>, mut elem_index: usize, mut offset: usize, idx: i32) -> bool {
+    if elem_index < elements.len() && elements[elem_index].len == offset {
+        elem_index += 1;
+        offset = 0;
+    }
+    if elem_index >= elements.len() {
+        let mut anchor_set = AnchorSet::default();
+        anchor_set.start.insert(idx);
+        elements.push(Elem { anchor_set, len: 0 });
+    } else if offset == 0 {
+        elements[elem_index].anchor_set.start.insert(idx);
+    } else {
+        let mut new_elem = elements[elem_index].split_right(offset);
+        new_elem.anchor_set.start.insert(idx);
+        elements.insert(elem_index + 1, new_elem);
+    }
+
+    true
 }
 
 impl TreeRangeMap {
@@ -353,43 +642,44 @@ impl TreeRangeMap {
         }];
         Self {
             tree: BTree::new(),
+            id_to_idx: FxHashMap::default(),
             id_to_ann: FxHashMap::default(),
-            id_to_bit: FxHashMap::default(),
-            bit_to_id,
+            idx_to_ann: Vec::new(),
             expected_root_cache: Default::default(),
             len: 0,
         }
     }
 
-    fn try_add_ann(&mut self, ann: Arc<Annotation>) -> usize {
+    fn try_add_ann(&mut self, ann: Arc<Annotation>) -> AnnIdx {
         let id = ann.id;
-        if let Some(bit) = self.id_to_bit.get(&id) {
-            *bit
+        if let Some(idx) = self.id_to_idx.get(&id) {
+            *idx
         } else {
-            let bit = self.bit_to_id.len();
-            self.id_to_bit.insert(id, bit);
-            self.bit_to_id.push(id);
+            let idx = self.id_to_idx.len() as AnnIdx;
+            self.id_to_idx.insert(id, idx);
+            self.idx_to_ann.push(ann.clone());
             self.id_to_ann.insert(id, ann);
-            set_bit(&mut self.expected_root_cache, bit, true);
-            bit
+            self.expected_root_cache.anchor_set.start.insert(idx);
+            self.expected_root_cache.anchor_set.end.insert(idx);
+            idx
         }
     }
 
-    fn get_ann_bit_index(&self, id: OpID) -> Option<usize> {
-        self.id_to_bit.get(&id).copied()
+    fn get_ann_idx(&self, id: OpID) -> Option<AnnIdx> {
+        self.id_to_idx.get(&id).copied()
     }
 
     fn get_annotation_range(
         &self,
         id: OpID,
     ) -> Option<(RangeInclusive<QueryResult>, Range<usize>)> {
-        let index = self.get_ann_bit_index(id)?;
+        let index = self.get_ann_idx(id)?;
         let (start, start_finder) = self
             .tree
-            .query_with_finder_return::<AnnotationFinderStart>(&index);
+            .query_with_finder_return::<AnnotationFinderStart>(&(index));
         let (end, end_finder) = self
             .tree
-            .query_with_finder_return::<AnnotationFinderEnd>(&index);
+            .query_with_finder_return::<AnnotationFinderEnd>(&(index));
 
         if !start.found {
             None
@@ -401,54 +691,46 @@ impl TreeRangeMap {
         }
     }
 
-    fn bit_index_to_ann(&self, ann_bit_index: usize) -> &Arc<Annotation> {
-        let annotation = self.id_to_ann.get(&self.bit_to_id[ann_bit_index]).unwrap();
+    fn idx_to_ann(&self, ann_bit_index: AnnIdx) -> &Arc<Annotation> {
+        let annotation = self.idx_to_ann.get(ann_bit_index as usize).unwrap();
         annotation
     }
 
-    fn insert_empty_span(&mut self, pos: usize, ann_bit_index: BitVec) {
-        let elem = Elem {
-            ann: ann_bit_index,
-            len: 0,
-        };
+    fn insert_ann_range(&mut self, range: Range<&QueryResult>, idx: AnnIdx) {
+        let start = range.start;
+        let end = range.end;
+        self.tree
+            .update2_leaf(start.leaf, range.end.leaf, |elements, target| {
+                let shared_target = target.is_none();
+                if shared_target {
+                    // start and end are at the same leaf
+                    assert!(
+                        end.elem_index > start.elem_index
+                            || (end.elem_index == start.elem_index && end.offset >= start.offset)
+                    );
 
-        self.insert_elem(pos, elem, |_| AnnPosRelativeToInsert::IncludeInsert)
-    }
-
-    // TODO: Perf can use write buffer to speed up
-    fn update_range(&mut self, range: Range<&QueryResult>, idx: usize) {
-        assert_ne!(range.start, range.end);
-        self.tree.update(
-            range,
-            &mut |mut slice| {
-                update_slice(&mut slice, &mut |x| {
-                    set_bit(&mut x.ann, idx, true);
-                    true
-                })
-            },
-            // |buffer, _| {
-            //     if buffer.is_none() {
-            //         *buffer = Some(Buffer::default());
-            //     }
-            //     buffer.as_mut().unwrap().changes.push(idx as isize);
-            //     true
-            // },
-        );
-    }
-
-    // TODO: Perf can use write buffer to speed up
-    fn insert_or_delete_ann_inside_range(
-        &mut self,
-        range: Range<&QueryResult>,
-        index: usize,
-        is_insert: bool,
-    ) {
-        self.tree.update(range, &mut |mut slice| {
-            update_slice(&mut slice, &mut |x| {
-                set_bit(&mut x.ann, index, is_insert);
-                true
+                    // Assumption: set_end won't affect start path
+                    let a = set_end(elements, end.elem_index, end.offset, idx);
+                    let b = set_start(elements, start.elem_index, start.offset, idx);
+                    a || b
+                } else if target.unwrap() == start.leaf {
+                    // set start
+                    set_start(elements, start.elem_index, start.offset, idx)
+                } else {
+                    // set end
+                    set_end(elements, end.elem_index, end.offset, idx)
+                }
             })
-        });
+    }
+
+    fn insert_or_delete_ann(&mut self, range: Range<&QueryResult>, index: AnnIdx, is_insert: bool) {
+        if is_insert {
+            self.set_start(range.start, index);
+            self.set_end(range.end, index);
+        } else {
+            assert!(self.remove_start(range.start, index));
+            assert!(self.remove_end(range.start, index));
+        }
     }
 }
 
@@ -457,50 +739,6 @@ impl Default for TreeRangeMap {
         Self::new()
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct Elem {
-    ann: BitVec,
-    len: usize,
-}
-
-impl Elem {
-    fn has_bit_index(&self, bit_index: usize) -> bool {
-        if bit_index >= self.ann.len() {
-            false
-        } else {
-            self.ann[bit_index]
-        }
-    }
-
-    fn new(len: usize) -> Self {
-        Elem {
-            ann: Default::default(),
-            len,
-        }
-    }
-}
-
-fn or_(ann: &mut BitVec, new_ann: &BitVec) {
-    if ann.len() < new_ann.len() {
-        ann.resize(new_ann.len(), false);
-    }
-
-    *ann |= new_ann;
-}
-
-fn and_(ann: &mut BitVec, new_ann: &BitVec) {
-    *ann &= new_ann;
-}
-
-fn set_bit(v: &mut BitVec, i: usize, b: bool) {
-    if i >= v.len() {
-        v.resize(i + 1, false);
-    }
-
-    v.set(i, b);
-}
-
 #[derive(Clone, Default, Debug)]
 struct Buffer {
     changes: Vec<isize>,
@@ -514,52 +752,84 @@ impl HasLength for Elem {
 
 impl Sliceable for Elem {
     fn slice(&self, range: impl std::ops::RangeBounds<usize>) -> Self {
-        let ann = self.ann.clone();
-        let len = match range.end_bound() {
-            std::ops::Bound::Included(x) => *x + 1,
-            std::ops::Bound::Excluded(x) => *x,
-            std::ops::Bound::Unbounded => self.len,
-        } - match range.start_bound() {
+        let start = match range.start_bound() {
             std::ops::Bound::Included(x) => *x,
             std::ops::Bound::Excluded(x) => *x + 1,
             std::ops::Bound::Unbounded => 0,
         };
-        Self { ann, len }
+        let end = match range.end_bound() {
+            std::ops::Bound::Included(x) => *x + 1,
+            std::ops::Bound::Excluded(x) => *x,
+            std::ops::Bound::Unbounded => self.len,
+        };
+        let len = end - start;
+        Self {
+            anchor_set: AnchorSet {
+                start: if start == 0 {
+                    self.anchor_set.start.clone()
+                } else {
+                    Default::default()
+                },
+                end: if end == self.len {
+                    self.anchor_set.end.clone()
+                } else {
+                    Default::default()
+                },
+            },
+            len,
+        }
     }
 
     fn slice_(&mut self, range: impl std::ops::RangeBounds<usize>)
     where
         Self: Sized,
     {
-        let len = match range.end_bound() {
-            std::ops::Bound::Included(x) => *x + 1,
-            std::ops::Bound::Excluded(x) => *x,
-            std::ops::Bound::Unbounded => self.len,
-        } - match range.start_bound() {
+        let start = match range.start_bound() {
             std::ops::Bound::Included(x) => *x,
             std::ops::Bound::Excluded(x) => *x + 1,
             std::ops::Bound::Unbounded => 0,
         };
+        let end = match range.end_bound() {
+            std::ops::Bound::Included(x) => *x + 1,
+            std::ops::Bound::Excluded(x) => *x,
+            std::ops::Bound::Unbounded => self.len,
+        };
+        let len = end - start;
+        if start != 0 {
+            self.anchor_set.start.clear();
+        }
+        if end != len {
+            self.anchor_set.end.clear();
+        }
         self.len = len;
     }
 }
 
 impl Mergeable for Elem {
     fn can_merge(&self, rhs: &Self) -> bool {
-        (self.len == 0 && rhs.len == 0) || self.ann.iter_ones().eq(rhs.ann.iter_ones())
+        (self.len == 0 && rhs.len == 0)
+            || (self.anchor_set.end.is_empty() && rhs.anchor_set.start.is_empty())
     }
 
     fn merge_right(&mut self, rhs: &Self) {
+        debug_assert!(self.can_merge(rhs));
         self.len += rhs.len;
         if self.len == 0 {
-            or_(&mut self.ann, &rhs.ann);
+            self.anchor_set.start.extend(rhs.anchor_set.start.iter());
+            self.anchor_set.end.extend(rhs.anchor_set.end.iter());
+        } else {
+            self.anchor_set.end = rhs.anchor_set.end.clone();
         }
     }
 
     fn merge_left(&mut self, left: &Self) {
+        debug_assert!(left.can_merge(self));
         self.len += left.len;
         if self.len == 0 {
-            or_(&mut self.ann, &left.ann);
+            self.anchor_set.start.extend(left.anchor_set.start.iter());
+            self.anchor_set.end.extend(left.anchor_set.end.iter());
+        } else {
+            self.anchor_set.start = left.anchor_set.start.clone();
         }
     }
 }
@@ -581,7 +851,6 @@ impl RangeMap for TreeRangeMap {
 
         self.insert_elem(pos, new_elem, f);
 
-        debug_assert_eq!(self.len(), self.len);
         self.check();
         debug_log::group_end!();
     }
@@ -590,38 +859,14 @@ impl RangeMap for TreeRangeMap {
         self.check();
         self.len -= len;
         assert!(pos + len <= self.len());
-        let mut has_ann = false;
-        let mut ann_bit_mask: BitVec = BitVec::new();
+        let mut anchor_set = AnchorSet::default();
 
-        // We should leave deleted annotations in the tree, stored inside a empty span.
-        // But there may already have empty spans at `pos` and `pos + len`.
-        // So the `delete_range` implementation should be able to handle this case.
         for span in self.tree.drain::<IndexFinder>(pos..pos + len) {
-            for ann in span.ann.iter_ones() {
-                set_bit(&mut ann_bit_mask, ann, true);
-                has_ann = true;
-            }
+            anchor_set.union_(&span.anchor_set);
         }
 
-        if has_ann {
-            // insert empty span if any annotations got wipe out totally from the tree
-            let wiped_out = if self.tree.root_cache().ann.len() < ann_bit_mask.len() {
-                true
-            } else {
-                let root_ann = &self.tree.root_cache().ann;
-                'outer: {
-                    for index in ann_bit_mask.iter_ones() {
-                        if !*root_ann.get(index).unwrap() {
-                            break 'outer true;
-                        }
-                    }
-                    false
-                }
-            };
-
-            if wiped_out {
-                self.insert_empty_span(pos, ann_bit_mask);
-            }
+        if !anchor_set.is_empty() {
+            self.set_anchor_set(pos, anchor_set);
         }
 
         self.check();
@@ -633,11 +878,7 @@ impl RangeMap for TreeRangeMap {
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
         let ann = Arc::new(annotation);
         let idx = self.try_add_ann(ann);
-        if len == 0 {
-            self.insert_empty_span(pos, new_by_one_idx(idx));
-        } else {
-            self.update_range(&range.start..&range.end, idx);
-        }
+        self.insert_ann_range(&range.start..&range.end, idx);
         debug_assert_eq!(self.len(), self.len);
         self.check();
     }
@@ -661,10 +902,10 @@ impl RangeMap for TreeRangeMap {
         } else {
             return;
         };
-        let mask = self.get_ann_bit_index(target_id).unwrap();
+        let idx = self.get_ann_idx(target_id).unwrap();
         let Some(( range, index_range )) = self.get_annotation_range(target_id) else { return };
         let (start, end) = range.into_inner();
-        self.insert_or_delete_ann_inside_range(&start..&end, mask, false);
+        self.insert_or_delete_ann(&start..&end, idx, false);
 
         let new_start = if let Some((index_shift, _)) = start_shift {
             (index_range.start as isize + index_shift) as usize
@@ -679,18 +920,9 @@ impl RangeMap for TreeRangeMap {
 
         self.log_inner();
         assert!(self.get_annotation_range(target_id).is_none());
-        if new_start < new_end {
-            debug_log::debug_log!("Insert new range");
-            let new_range = self.tree.range::<IndexFinder>(new_start..new_end);
-            self.insert_or_delete_ann_inside_range(&new_range.start..&new_range.end, mask, true);
-        } else {
-            // insert an empty span at target position
-            let bit_vec = new_by_one_idx(mask);
-            debug_log::group!("Insert empty span {}", new_start);
-            self.insert_empty_span(new_start, bit_vec);
-            debug_log::debug_dbg!(&self.bit_index_to_ann(mask));
-            debug_log::group_end!();
-        }
+        debug_log::debug_log!("Insert new range");
+        let new_range = self.tree.range::<IndexFinder>(new_start..new_end);
+        self.insert_or_delete_ann(&new_range.start..&new_range.end, idx, true);
         self.log_inner();
 
         // update annotation's anchors
@@ -712,53 +944,38 @@ impl RangeMap for TreeRangeMap {
 
     fn delete_annotation(&mut self, id: OpID) {
         self.check();
-        debug_assert_eq!(self.len(), self.len);
-        // use annotation finder to delete
-        let Some((query_range, _)) = self.get_annotation_range(id) else { return };
-        let (start, end) = query_range.into_inner();
-        let bit_index = self.get_ann_bit_index(id).unwrap();
-        self.insert_or_delete_ann_inside_range(&start..&end, bit_index, false);
-        debug_assert_eq!(self.len(), self.len);
-        set_bit(&mut self.expected_root_cache, bit_index, false);
+        let index = self.get_ann_idx(id).unwrap();
+        let (range, _) = self.get_annotation_range(id).unwrap();
+        self.insert_or_delete_ann(range.start()..range.end(), index, false);
         self.check();
     }
 
-    fn get_annotations(&mut self, pos: usize, len: usize) -> Vec<super::Span> {
+    fn get_annotations(&mut self, mut pos: usize, mut len: usize) -> Vec<super::Span> {
         self.check();
-        debug_assert_eq!(self.len(), self.len);
-        let pos = pos.min(self.len());
-        let len = len.min(self.len() - pos);
-        let range = self.tree.range::<IndexFinder>(pos..pos + len);
-        self.tree.flush_write_buffer();
-        let mut elements: Vec<Elem> = Vec::new();
-        // TODO: Merge siblings empty spans
-        for slice in self.tree.iter_range(range) {
-            let len = get_slice_len(&slice);
-            let elem = Elem {
-                ann: slice.elem.ann.clone(),
-                len,
-            };
-            match elements.last_mut() {
-                Some(last) if last.can_merge(&elem) => {
-                    last.merge_right(&elem);
-                }
-                _ => {
-                    elements.push(elem);
-                }
-            };
+        pos = pos.min(self.len());
+        len = len.min(self.len() - pos);
+        let (result, finder) = self
+            .tree
+            .query_with_finder_return::<IndexFinderWithStyles>(&pos);
+        let mut styles = finder.started_styles;
+        let end = self.tree.query::<IndexFinder>(&(pos + len));
+        let mut ans = Vec::new();
+        for elem in self.tree.iter_range(result..end) {
+            for ann in elem.elem.anchor_set.start.iter() {
+                styles.insert(*ann);
+            }
+            let annotations = styles
+                .iter()
+                .map(|x| self.idx_to_ann[*x as usize].clone())
+                .collect();
+            let start = elem.start.unwrap_or(0);
+            let end = elem.end.unwrap_or(elem.elem.len);
+            let len = end - start;
+            ans.push(Span { annotations, len });
+            for ann in elem.elem.anchor_set.end.iter() {
+                styles.remove(ann);
+            }
         }
-
-        let ans: Vec<Span> = elements
-            .into_iter()
-            .map(|x| Span {
-                annotations: x
-                    .ann
-                    .iter_ones()
-                    .map(|x| self.bit_index_to_ann(x).clone())
-                    .collect(),
-                len: x.len,
-            })
-            .collect();
         self.check();
         ans
     }
@@ -774,12 +991,6 @@ impl RangeMap for TreeRangeMap {
     fn len(&self) -> usize {
         self.tree.root_cache().len
     }
-}
-
-fn new_by_one_idx(mask: usize) -> BitVec {
-    let mut bit_vec = BitVec::new();
-    set_bit(&mut bit_vec, mask, true);
-    bit_vec
 }
 
 fn get_slice_len(slice: &ElemSlice<Elem>) -> usize {
@@ -802,83 +1013,48 @@ impl BTreeTrait for TreeTrait {
         element.clone()
     }
 
-    fn calc_cache_internal(cache: &mut Self::Cache, caches: &[generic_btree::Child<Self>]) {
-        cache.ann.clear();
-        cache.len = 0;
-        if !caches.is_empty() {
-            let mut len = 0;
-            let ann = &mut cache.ann;
-            for cache in caches.iter() {
-                if let Some(buffer) = &cache.write_buffer {
-                    let mut new_ann = cache.cache.ann.clone();
-                    for &change in buffer.changes.iter() {
-                        if change > 0 {
-                            set_bit(&mut new_ann, change as usize, true);
-                        } else {
-                            set_bit(&mut new_ann, -change as usize, false);
-                        }
-                    }
-
-                    or_(ann, &new_ann);
-                } else {
-                    or_(ann, &cache.cache.ann);
+    fn calc_cache_internal(
+        cache: &mut Self::Cache,
+        caches: &[generic_btree::Child<Self>],
+        diff: Option<CacheDiff>,
+    ) -> CacheDiff {
+        match diff {
+            Some(diff) => {
+                cache.apply_diff(&diff);
+                diff
+            }
+            None => {
+                let mut diff = CacheDiff::default();
+                let mut len = 0;
+                let mut new_set = AnchorSet::default();
+                for child in caches.iter() {
+                    len += child.cache.len;
+                    new_set.union_(&child.cache.anchor_set);
                 }
 
-                len += cache.cache.len;
-            }
-
-            cache.len = len;
-        }
-    }
-
-    fn calc_cache_leaf(cache: &mut Self::Cache, caches: &[Self::Elem]) {
-        cache.ann.clear();
-        cache.len = 0;
-        if !caches.is_empty() {
-            let mut len = 0;
-            let ann = &mut cache.ann;
-            for cache in caches.iter() {
-                or_(ann, &cache.ann);
-                len += cache.len;
-            }
-
-            cache.len = len;
-        };
-    }
-
-    fn apply_write_buffer_to_elements(
-        elements: &mut HeapVec<Self::Elem>,
-        write_buffer: &Self::WriteBuffer,
-    ) {
-        if write_buffer.changes.is_empty() {
-            return;
-        }
-
-        for elem in elements.iter_mut() {
-            for &change in write_buffer.changes.iter() {
-                if change > 0 {
-                    set_bit(&mut elem.ann, change as usize, true);
-                } else {
-                    set_bit(&mut elem.ann, -change as usize, false);
-                }
+                new_set.difference(&cache.anchor_set, &mut diff);
+                diff.len_diff = len as isize - cache.len as isize;
+                cache.len = len;
+                cache.anchor_set = new_set;
+                diff
             }
         }
     }
 
-    fn apply_write_buffer_to_nodes(
-        children: &mut [generic_btree::Child<Self>],
-        write_buffer: &Self::WriteBuffer,
-    ) {
-        if write_buffer.changes.is_empty() {
-            return;
+    fn calc_cache_leaf(cache: &mut Self::Cache, caches: &[Self::Elem]) -> CacheDiff {
+        let mut diff = CacheDiff::default();
+        let mut len = 0;
+        let mut new_set = AnchorSet::default();
+        for cache in caches.iter() {
+            len += cache.len;
+            new_set.union_(&cache.anchor_set);
         }
 
-        for child in children.iter_mut() {
-            let buffer = child.write_buffer.get_or_insert_with(Default::default);
-            for &change in write_buffer.changes.iter() {
-                buffer.changes.push(change);
-            }
-        }
+        new_set.difference(&cache.anchor_set, &mut diff);
+        diff.len_diff = len as isize - cache.len as isize;
+        cache.len = len;
+        cache.anchor_set = new_set;
+        diff
     }
 
     fn insert(
@@ -913,22 +1089,33 @@ impl BTreeTrait for TreeTrait {
         }
 
         if elements.is_empty() {
-            elements.insert_many(0, new_elements);
+            elements.splice(0..0, new_elements);
             return;
         }
 
         // TODO: try merging
         if offset == 0 {
-            elements.insert_many(index, new_elements);
+            elements.splice(index..index, new_elements);
         } else if offset == elements[index].rle_len() {
-            elements.insert_many(index + 1, new_elements);
+            elements.splice(index + 1..index + 1, new_elements);
         } else {
             let right = elements[index].slice(offset..);
             elements[index].slice_(..offset);
-            elements.insert_many(
-                index,
+            elements.splice(
+                index..index,
                 new_elements.into_iter().chain(Some(right).into_iter()),
             );
+        }
+    }
+
+    type CacheDiff = CacheDiff;
+
+    fn merge_cache_diff(diff1: &mut Self::CacheDiff, diff2: &Self::CacheDiff) {
+        for &ann in diff2.start.iter() {
+            diff1.start.insert(ann);
+        }
+        for &ann in diff2.end.iter() {
+            diff1.end.insert(ann);
         }
     }
 }
@@ -1009,13 +1196,13 @@ impl Query<TreeTrait> for IndexFinder {
     ///
     /// Because IndexFinder scan from left to right and return when left length is zero,
     /// the start is guarantee to include the zero len element.
-    fn delete_range(
-        elements: &mut HeapVec<<TreeTrait as BTreeTrait>::Elem>,
-        _: &Self::QueryArg,
-        _: &Self::QueryArg,
+    fn drain_range<'a>(
+        elements: &'a mut HeapVec<<TreeTrait as BTreeTrait>::Elem>,
+        _: &'_ Self::QueryArg,
+        _: &'_ Self::QueryArg,
         start: Option<generic_btree::QueryResult>,
         end: Option<generic_btree::QueryResult>,
-    ) -> SmallElemVec<Elem> {
+    ) -> Box<dyn Iterator<Item = Elem> + 'a> {
         fn drain_start(start: QueryResult, elements: &mut [Elem]) -> usize {
             if start.offset == 0 || start.elem_index >= elements.len() {
                 start.elem_index
@@ -1069,7 +1256,7 @@ impl Query<TreeTrait> for IndexFinder {
                     let len = end.offset - start.offset;
                     elements[start.elem_index].len -= len;
                     let new_elem = Elem {
-                        ann: elements[start.elem_index].ann.clone(),
+                        anchor_set: elements[start.elem_index].anchor_set.clone(),
                         len,
                     };
                     ans.push(new_elem)
@@ -1080,26 +1267,108 @@ impl Query<TreeTrait> for IndexFinder {
                 }
             }
         }
-        ans
+        Box::new(ans.into_iter())
+    }
+}
+
+struct IndexFinderWithStyles {
+    left: usize,
+    started_styles: FxHashSet<AnnIdx>,
+}
+
+impl Query<TreeTrait> for IndexFinderWithStyles {
+    type QueryArg = usize;
+
+    fn init(target: &Self::QueryArg) -> Self {
+        IndexFinderWithStyles {
+            left: *target,
+            started_styles: Default::default(),
+        }
+    }
+
+    /// should prefer zero len element
+    fn find_node(
+        &mut self,
+        _: &Self::QueryArg,
+        child_caches: &[generic_btree::Child<TreeTrait>],
+    ) -> generic_btree::FindResult {
+        if child_caches.is_empty() {
+            return FindResult::new_missing(0, self.left);
+        }
+
+        let mut last_left = self.left;
+        for (i, cache) in child_caches.iter().enumerate() {
+            if cache.cache.len == 0 && self.left == 0 {
+                return FindResult::new_found(i, self.left);
+            }
+
+            if self.left >= cache.cache.len {
+                last_left = self.left;
+                self.left -= cache.cache.len;
+            } else {
+                return FindResult::new_found(i, self.left);
+            }
+
+            for &ann in cache.cache.anchor_set.start.iter() {
+                self.started_styles.insert(ann);
+            }
+            for ann in cache.cache.anchor_set.end.iter() {
+                self.started_styles.remove(ann);
+            }
+        }
+
+        self.left = last_left;
+        FindResult::new_missing(child_caches.len() - 1, last_left)
+    }
+
+    /// should prefer zero len element
+    fn find_element(&mut self, _: &Self::QueryArg, elements: &[Elem]) -> generic_btree::FindResult {
+        if elements.is_empty() {
+            return FindResult::new_missing(0, self.left);
+        }
+
+        let mut last_left = self.left;
+        for (i, cache) in elements.iter().enumerate() {
+            if cache.len == 0 && self.left == 0 {
+                return FindResult::new_found(i, self.left);
+            }
+
+            if self.left >= cache.len {
+                last_left = self.left;
+                self.left -= cache.len;
+            } else {
+                return FindResult::new_found(i, self.left);
+            }
+
+            for &ann in cache.anchor_set.start.iter() {
+                self.started_styles.insert(ann);
+            }
+            for ann in cache.anchor_set.end.iter() {
+                self.started_styles.remove(ann);
+            }
+        }
+
+        self.left = last_left;
+        FindResult::new_missing(elements.len() - 1, last_left)
     }
 }
 
 struct AnnotationFinderStart {
-    target_bit_index: usize,
+    target: AnnIdx,
     visited_len: usize,
 }
 
 struct AnnotationFinderEnd {
-    target_bit_index: usize,
+    target: AnnIdx,
     visited_len: usize,
 }
 
 impl Query<TreeTrait> for AnnotationFinderStart {
-    type QueryArg = usize;
+    type QueryArg = AnnIdx;
 
     fn init(target: &Self::QueryArg) -> Self {
         Self {
-            target_bit_index: *target,
+            target: *target,
             visited_len: 0,
         }
     }
@@ -1110,7 +1379,7 @@ impl Query<TreeTrait> for AnnotationFinderStart {
         child_caches: &[generic_btree::Child<TreeTrait>],
     ) -> FindResult {
         for (i, cache) in child_caches.iter().enumerate() {
-            if cache.cache.has_bit_index(self.target_bit_index) {
+            if cache.cache.anchor_set.start.contains(&self.target) {
                 return FindResult::new_found(i, 0);
             }
             self.visited_len += cache.cache.len;
@@ -1125,7 +1394,7 @@ impl Query<TreeTrait> for AnnotationFinderStart {
         elements: &[<TreeTrait as BTreeTrait>::Elem],
     ) -> FindResult {
         for (i, cache) in elements.iter().enumerate() {
-            if cache.has_bit_index(self.target_bit_index) {
+            if cache.anchor_set.start.contains(&self.target) {
                 return FindResult::new_found(i, 0);
             }
             self.visited_len += cache.len;
@@ -1136,11 +1405,11 @@ impl Query<TreeTrait> for AnnotationFinderStart {
 }
 
 impl Query<TreeTrait> for AnnotationFinderEnd {
-    type QueryArg = usize;
+    type QueryArg = AnnIdx;
 
     fn init(target: &Self::QueryArg) -> Self {
         Self {
-            target_bit_index: *target,
+            target: *target,
             visited_len: 0,
         }
     }
@@ -1151,7 +1420,7 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
         child_caches: &[generic_btree::Child<TreeTrait>],
     ) -> FindResult {
         for (i, cache) in child_caches.iter().enumerate().rev() {
-            if cache.cache.has_bit_index(self.target_bit_index) {
+            if cache.cache.anchor_set.end.contains(&self.target) {
                 return FindResult::new_found(i, cache.cache.len);
             }
             self.visited_len += cache.cache.len;
@@ -1166,7 +1435,7 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
         elements: &[<TreeTrait as BTreeTrait>::Elem],
     ) -> FindResult {
         for (i, cache) in elements.iter().enumerate().rev() {
-            if cache.has_bit_index(self.target_bit_index) {
+            if cache.anchor_set.end.contains(&self.target) {
                 return FindResult::new_found(i, cache.len);
             }
             self.visited_len += cache.len;

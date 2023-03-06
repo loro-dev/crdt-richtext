@@ -103,7 +103,7 @@ impl DumbRangeMap {
     }
 
     fn check(&self) {
-        assert_eq!(self.len, self.arr.iter().map(|x| x.len).sum());
+        assert_eq!(self.len, self.arr.iter().map(|x| x.len).sum::<usize>());
 
         for i in 0..self.arr.len() {
             if self.arr[i].len == 0 {
