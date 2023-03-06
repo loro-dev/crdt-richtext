@@ -97,6 +97,7 @@ fn real(c: &mut Criterion) {
     });
 }
 
+#[cfg(feature = "test")]
 fn fuzz(c: &mut Criterion) {
     use arbitrary::Unstructured;
     use crdt_range::test_utils::{fuzzing, Action};

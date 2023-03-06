@@ -73,6 +73,82 @@ impl AnchorSet {
         }
     }
 
+    const NEW_ELEM_THRESHOLD: i32 = i32::MAX / 2;
+
+    fn process_diff(&mut self, child: &AnchorSet) {
+        // if the child has an element that is not in the parent, then it is a new element,
+        // it will have ann + Self::NEW_ELEM_THRESHOLD
+
+        // if the child has an element that is in the parent,
+        // we will mark it as -ann
+
+        // if the parent has an element that is not in the children,
+        // then it should be between 1~Self::NEW_ELEM_THRESHOLD
+        for &ann in child.start.iter() {
+            if self.start.contains(&ann) {
+                self.start.insert(-ann);
+            } else {
+                self.start.insert(ann + Self::NEW_ELEM_THRESHOLD);
+            }
+        }
+        for &ann in child.end.iter() {
+            if self.end.contains(&ann) {
+                self.end.insert(-ann);
+            } else {
+                self.end.insert(ann + Self::NEW_ELEM_THRESHOLD);
+            }
+        }
+    }
+
+    fn finish_diff_calc(&mut self) -> CacheDiff {
+        // if the child has an element that is not in the parent, then it is a new element,
+        // it will have ann + Self::NEW_ELEM_THRESHOLD
+
+        // if the child has an element that is in the parent,
+        // we will mark it as -ann
+
+        // if the parent has an element that is not in the children,
+        // then it should be between 1~Self::NEW_ELEM_THRESHOLD
+        let mut ans = CacheDiff::default();
+        for ann in self.start.iter() {
+            if *ann > Self::NEW_ELEM_THRESHOLD {
+                // this is a new element
+                ans.start.insert(*ann - Self::NEW_ELEM_THRESHOLD);
+            } else if *ann > 0 && !self.start.contains(&-*ann) {
+                // this is a deleted element
+                ans.start.insert(-*ann);
+            }
+        }
+        for ann in ans.start.iter() {
+            if *ann < 0 {
+                self.start.remove(&-*ann);
+            } else {
+                self.start.insert(*ann);
+            }
+        }
+        for ann in self.end.iter() {
+            if *ann > Self::NEW_ELEM_THRESHOLD {
+                // this is a new element
+                ans.end.insert(*ann - Self::NEW_ELEM_THRESHOLD);
+            } else if *ann > 0 && !self.end.contains(&-*ann) {
+                // this is a deleted element
+                ans.end.insert(-*ann);
+            }
+        }
+        for ann in ans.end.iter() {
+            if *ann < 0 {
+                self.end.remove(&-*ann);
+            } else {
+                self.end.insert(*ann);
+            }
+        }
+
+        self.start
+            .retain(|x| *x > 0 && *x < Self::NEW_ELEM_THRESHOLD);
+        self.end.retain(|x| *x > 0 && *x < Self::NEW_ELEM_THRESHOLD);
+        ans
+    }
+
     fn clear(&mut self) {
         self.start.clear();
         self.end.clear();
@@ -114,6 +190,10 @@ impl Elem {
     }
 }
 
+/// The diffing value between two caches.
+///
+/// It use negative [AnnIdx] to represent subtraction,
+/// positive [AnnIdx] to represent addition
 #[derive(Default, Debug)]
 struct CacheDiff {
     start: FxHashSet<AnnIdx>,
@@ -1093,18 +1173,15 @@ impl BTreeTrait for TreeTrait {
     }
 
     fn calc_cache_leaf(cache: &mut Self::Cache, caches: &[Self::Elem]) -> CacheDiff {
-        let mut diff = CacheDiff::default();
         let mut len = 0;
-        let mut new_set = AnchorSet::default();
-        for cache in caches.iter() {
-            len += cache.len;
-            new_set.union_(&cache.anchor_set);
+        for child in caches.iter() {
+            len += child.len;
+            cache.anchor_set.process_diff(&child.anchor_set);
         }
 
-        new_set.difference(&cache.anchor_set, &mut diff);
+        let mut diff = cache.anchor_set.finish_diff_calc();
         diff.len_diff = len as isize - cache.len as isize;
         cache.len = len;
-        cache.anchor_set = new_set;
         diff
     }
 
@@ -1603,7 +1680,10 @@ impl Mergeable for Span {
 #[cfg(test)]
 #[cfg(feature = "test")]
 mod tree_impl_tests {
-    use std::collections::{BTreeSet, HashMap};
+    use std::{
+        collections::{BTreeSet, HashMap},
+        mem::size_of,
+    };
 
     use crate::{range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
 

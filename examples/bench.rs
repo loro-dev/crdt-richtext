@@ -1,6 +1,6 @@
 use crdt_range::{Anchor, AnchorRange, AnchorType, Annotation, OpID, RangeMergeRule};
-// #[global_allocator]
-// static ALLOC: dhat::Alloc = dhat::Alloc;
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use crdt_range::{RangeMap, TreeRangeMap};
 use rand::{Rng, SeedableRng};
@@ -28,7 +28,7 @@ pub fn main() {
     for _ in 0..1 {
         let mut gen = rand::rngs::StdRng::seed_from_u64(0);
         let mut map = TreeRangeMap::new();
-        // let profiler = dhat::Profiler::builder().trim_backtraces(None).build();
+        let profiler = dhat::Profiler::builder().trim_backtraces(None).build();
         map.insert_directly(0, 10000);
         for i in 0..10_000 {
             let start = gen.gen_range(0..10000);
@@ -45,7 +45,7 @@ pub fn main() {
             let end = gen.gen_range(start..map.len());
             map.delete(start, (end - start).min(20));
         }
-        // drop(profiler);
+        drop(profiler);
         // dbg!(&map);
     }
 }
