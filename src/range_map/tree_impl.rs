@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{range_map::AnnPosRelativeToInsert, test_utils::AnnotationType, Annotation, OpID};
+use crate::{range_map::AnnPosRelativeToInsert, Annotation, OpID};
 use fxhash::{FxHashMap, FxHashSet};
 
 use super::{RangeMap, Span};
@@ -123,7 +123,9 @@ struct CacheDiff {
 
 impl TreeRangeMap {
     fn check(&self) {
-        assert_eq!(&self.expected_root_cache, self.tree.root_cache());
+        if cfg!(debug_assertions) {
+            assert_eq!(&self.expected_root_cache, self.tree.root_cache());
+        }
         // self.check_isolated_ann()
     }
 
@@ -1110,7 +1112,7 @@ impl BTreeTrait for TreeTrait {
         elements: &mut HeapVec<Self::Elem>,
         mut index: usize,
         mut offset: usize,
-        elem: Self::Elem,
+        mut elem: Self::Elem,
     ) {
         while index < elements.len() && elements[index].len == 0 {
             // always inserting after zero-len element.
@@ -1138,10 +1140,11 @@ impl BTreeTrait for TreeTrait {
             return;
         }
 
-        assert!(index < elements.len());
-        if offset == 0 {
+        if elements[index].anchor_set.is_empty() && elem.anchor_set.is_empty() {
+            elements[index].len += elem.len;
+        } else if offset == 0 {
             let target = elements.get_mut(index).unwrap();
-            if elem.can_merge(&target) {
+            if elem.can_merge(target) {
                 target.merge_left(&elem);
             } else {
                 elements.insert(index, elem);
@@ -1159,7 +1162,14 @@ impl BTreeTrait for TreeTrait {
             let left = elements.get_mut(index).unwrap();
             if left.can_merge(&elem) {
                 left.merge_right(&elem);
-                elements.insert(index + 1, right);
+                if left.can_merge(&right) {
+                    left.merge_right(&right);
+                } else {
+                    elements.insert(index + 1, right);
+                }
+            } else if elem.can_merge(&right) {
+                elem.merge_right(&right);
+                elements.insert(index + 1, elem);
             } else {
                 elements.splice(index + 1..index + 1, [elem, right]);
             }

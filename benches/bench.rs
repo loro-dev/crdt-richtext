@@ -76,7 +76,7 @@ fn real(c: &mut Criterion) {
         drop(guard);
     });
 
-    b.bench_function("random inserts 1000", |b| {
+    b.bench_function("random inserts 10K", |b| {
         let guard = PProfGuard::new("target/insert_flamegraph.svg");
         b.iter(|| {
             let mut gen = rand::rngs::StdRng::seed_from_u64(0);
@@ -87,7 +87,7 @@ fn real(c: &mut Criterion) {
                 let end = gen.gen_range(start..10000);
                 map.annotate(start, end - start, a(i));
             }
-            for _ in 0..1000 {
+            for _ in 0..10_000 {
                 let start = gen.gen_range(0..10000);
                 let end = gen.gen_range(start..10000);
                 map.insert_directly(start, end - start);
