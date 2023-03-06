@@ -185,7 +185,7 @@ impl<T: RangeBounds<OpID>> From<T> for AnchorRange {
 }
 
 impl OpID {
-    pub fn new(client: ClientID, counter: Counter) -> Self {
+    pub const fn new(client: ClientID, counter: Counter) -> Self {
         Self { client, counter }
     }
 }

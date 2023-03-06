@@ -1,5 +1,5 @@
 use generic_btree::{
-    rle::{self, HasLength, Mergeable, Sliceable},
+    rle::{HasLength, Mergeable, Sliceable},
     BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec, StackVec,
 };
 use std::{
@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{range_map::AnnPosRelativeToInsert, Annotation, OpID};
+use crate::{range_map::AnnPosRelativeToInsert, test_utils::AnnotationType, Annotation, OpID};
 use fxhash::{FxHashMap, FxHashSet};
 
 use super::{RangeMap, Span};
@@ -22,7 +22,6 @@ pub struct TreeRangeMap {
     id_to_idx: FxHashMap<OpID, AnnIdx>,
     idx_to_ann: Vec<Arc<Annotation>>,
     expected_root_cache: Elem,
-    len: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -47,13 +46,13 @@ impl AnchorSet {
             output.start.insert(*ann);
         }
         for ann in self.end.difference(&old.end) {
-            output.start.insert(*ann);
+            output.end.insert(*ann);
         }
         for ann in old.start.difference(&self.start) {
             output.start.insert(-*ann);
         }
         for ann in old.end.difference(&self.end) {
-            output.start.insert(-*ann);
+            output.end.insert(-*ann);
         }
     }
 
@@ -115,7 +114,7 @@ impl Elem {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct CacheDiff {
     start: FxHashSet<AnnIdx>,
     end: FxHashSet<AnnIdx>,
@@ -124,11 +123,7 @@ struct CacheDiff {
 
 impl TreeRangeMap {
     fn check(&self) {
-        assert_eq!(self.len, self.tree.root_cache().len);
-        // assert!(self
-        //     .expected_root_cache
-        //     .iter_ones()
-        //     .eq(self.tree.root_cache().ann.iter_ones()));
+        assert_eq!(&self.expected_root_cache, self.tree.root_cache());
         // self.check_isolated_ann()
     }
 
@@ -483,42 +478,6 @@ impl TreeRangeMap {
             .collect()
     }
 
-    fn remove_start(&mut self, start: &QueryResult, idx: AnnIdx) -> bool {
-        let elem_index = start.elem_index;
-        let mut removed = false;
-        self.tree.update_leaf(start.leaf, |elements| {
-            removed = elements[elem_index].anchor_set.start.remove(&idx);
-            removed
-        });
-        removed
-    }
-
-    fn remove_end(&mut self, end: &QueryResult, idx: AnnIdx) -> bool {
-        let elem_index = end.elem_index;
-        let mut removed = false;
-        self.tree.update_leaf(end.leaf, |elements| {
-            removed = elements[elem_index].anchor_set.end.remove(&idx);
-            removed
-        });
-        removed
-    }
-
-    fn set_start(&mut self, start: &QueryResult, idx: AnnIdx) {
-        let elem_index = start.elem_index;
-        let offset = start.offset;
-        self.tree.update_leaf(start.leaf, |elements| {
-            set_start(elements, elem_index, offset, idx)
-        })
-    }
-
-    fn set_end(&mut self, end: &QueryResult, idx: AnnIdx) {
-        let elem_index = end.elem_index;
-        let offset = end.offset;
-        self.tree.update_leaf(end.leaf, |elements| {
-            set_end(elements, elem_index, offset, idx)
-        })
-    }
-
     fn set_anchor_set(&mut self, pos: usize, anchor_set: AnchorSet) {
         if anchor_set.is_empty() {
             return;
@@ -645,18 +604,32 @@ fn set_start(elements: &mut Vec<Elem>, mut elem_index: usize, mut offset: usize,
 }
 
 impl TreeRangeMap {
+    const PLACEHOLDER: Annotation = Annotation {
+        id: OpID::new(9999, 999),
+        range_lamport: (88, OpID::new(888, 888)),
+        range: crate::AnchorRange {
+            start: crate::Anchor {
+                id: None,
+                type_: crate::AnchorType::After,
+            },
+            end: crate::Anchor {
+                id: None,
+                type_: crate::AnchorType::After,
+            },
+        },
+        merge_method: crate::RangeMergeRule::Delete,
+        type_: String::new(),
+        meta: None,
+    };
     pub fn new() -> Self {
-        // make 0 unavailable
-        let bit_to_id = vec![OpID {
-            client: 44444444444,
-            counter: 444444,
-        }];
+        // Need to make 0 idx unavailable, so insert a placeholder to take the 0 idx.
+        let idx_to_ann = vec![Arc::new(Self::PLACEHOLDER)];
+
         Self {
             tree: BTree::new(),
             id_to_idx: FxHashMap::default(),
-            idx_to_ann: Vec::new(),
+            idx_to_ann,
             expected_root_cache: Default::default(),
-            len: 0,
         }
     }
 
@@ -665,9 +638,9 @@ impl TreeRangeMap {
         if let Some(idx) = self.id_to_idx.get(&id) {
             *idx
         } else {
-            let idx = self.id_to_idx.len() as AnnIdx;
+            let idx = self.idx_to_ann.len() as AnnIdx;
             self.id_to_idx.insert(id, idx);
-            self.idx_to_ann.push(ann.clone());
+            self.idx_to_ann.push(ann);
             self.expected_root_cache.anchor_set.start.insert(idx);
             self.expected_root_cache.anchor_set.end.insert(idx);
             idx
@@ -747,8 +720,30 @@ impl TreeRangeMap {
         if is_insert {
             self.insert_ann_range(range, index);
         } else {
-            assert!(self.remove_end(range.end, index));
-            assert!(self.remove_start(range.start, index));
+            self.tree.update2_leaf(
+                range.start.leaf,
+                range.end.leaf,
+                |elements: &mut Vec<Elem>, target| match target {
+                    Some(target) => {
+                        if target == range.start.leaf {
+                            let e = &mut elements[range.start.elem_index];
+                            assert!(e.anchor_set.start.remove(&index));
+                            true
+                        } else {
+                            let e = &mut elements[range.end.elem_index];
+                            assert!(e.anchor_set.end.remove(&index));
+                            true
+                        }
+                    }
+                    None => {
+                        let e = &mut elements[range.start.elem_index];
+                        assert!(e.anchor_set.start.remove(&index));
+                        let e = &mut elements[range.end.elem_index];
+                        assert!(e.anchor_set.end.remove(&index));
+                        true
+                    }
+                },
+            );
         }
     }
 }
@@ -854,6 +849,7 @@ impl Mergeable for Elem {
 }
 
 impl RangeMap for TreeRangeMap {
+    #[inline(always)]
     fn init() -> Self {
         Self::new()
     }
@@ -865,7 +861,7 @@ impl RangeMap for TreeRangeMap {
     {
         debug_log::group!("TreeImpl Insert");
         self.check();
-        self.len += len;
+        self.expected_root_cache.len += len;
         let new_elem = Elem::new(len);
 
         self.insert_elem(pos, new_elem, f);
@@ -876,7 +872,7 @@ impl RangeMap for TreeRangeMap {
 
     fn delete(&mut self, pos: usize, len: usize) {
         self.check();
-        self.len -= len;
+        self.expected_root_cache.len -= len;
         assert!(pos + len <= self.len());
         let mut anchor_set = AnchorSet::default();
 
@@ -893,12 +889,10 @@ impl RangeMap for TreeRangeMap {
 
     fn annotate(&mut self, pos: usize, len: usize, annotation: Annotation) {
         self.check();
-        debug_assert_eq!(self.len(), self.len);
         let range = self.tree.range::<IndexFinder>(pos..pos + len);
         let ann = Arc::new(annotation);
         let idx = self.try_add_ann(ann);
         self.insert_ann_range(&range.start..&range.end, idx);
-        debug_assert_eq!(self.len(), self.len);
         self.check();
     }
 
@@ -963,6 +957,15 @@ impl RangeMap for TreeRangeMap {
 
     fn delete_annotation(&mut self, id: OpID) {
         self.check();
+        self.expected_root_cache
+            .anchor_set
+            .start
+            .remove(self.id_to_idx.get(&id).unwrap());
+        self.expected_root_cache
+            .anchor_set
+            .end
+            .remove(self.id_to_idx.get(&id).unwrap());
+
         let index = self.get_ann_idx(id).unwrap();
         let (range, _) = self.get_annotation_range(id).unwrap();
         self.insert_or_delete_ann(range.start()..range.end(), index, false);
