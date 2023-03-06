@@ -12,7 +12,7 @@ use std::{
 use crate::{range_map::AnnPosRelativeToInsert, Annotation, OpID};
 use fxhash::{FxHashMap, FxHashSet};
 
-use super::{RangeMap, Span};
+use super::{small_set::SmallSetI32, RangeMap, Span};
 
 type AnnIdx = i32;
 
@@ -58,17 +58,17 @@ impl AnchorSet {
 
     fn apply_diff(&mut self, diff: &CacheDiff) {
         for ann in diff.start.iter() {
-            if *ann >= 0 {
-                self.start.insert(*ann);
+            if ann >= 0 {
+                self.start.insert(ann);
             } else {
-                self.start.remove(&(-*ann));
+                self.start.remove(&(-ann));
             }
         }
         for ann in diff.end.iter() {
-            if *ann >= 0 {
-                self.end.insert(*ann);
+            if ann >= 0 {
+                self.end.insert(ann);
             } else {
-                self.end.remove(&(-*ann));
+                self.end.remove(&(-ann));
             }
         }
     }
@@ -120,10 +120,10 @@ impl AnchorSet {
             }
         }
         for ann in ans.start.iter() {
-            if *ann < 0 {
-                self.start.remove(&-*ann);
+            if ann < 0 {
+                self.start.remove(&-ann);
             } else {
-                self.start.insert(*ann);
+                self.start.insert(ann);
             }
         }
         for ann in self.end.iter() {
@@ -136,10 +136,10 @@ impl AnchorSet {
             }
         }
         for ann in ans.end.iter() {
-            if *ann < 0 {
-                self.end.remove(&-*ann);
+            if ann < 0 {
+                self.end.remove(&-ann);
             } else {
-                self.end.insert(*ann);
+                self.end.insert(ann);
             }
         }
 
@@ -196,8 +196,8 @@ impl Elem {
 /// positive [AnnIdx] to represent addition
 #[derive(Default, Debug)]
 struct CacheDiff {
-    start: FxHashSet<AnnIdx>,
-    end: FxHashSet<AnnIdx>,
+    start: SmallSetI32,
+    end: SmallSetI32,
     len_diff: isize,
 }
 
@@ -1148,26 +1148,20 @@ impl BTreeTrait for TreeTrait {
         cache: &mut Self::Cache,
         caches: &[generic_btree::Child<Self>],
         diff: Option<CacheDiff>,
-    ) -> CacheDiff {
+    ) -> Option<CacheDiff> {
         match diff {
             Some(diff) => {
                 cache.apply_diff(&diff);
-                diff
+                Some(diff)
             }
             None => {
-                let mut diff = CacheDiff::default();
-                let mut len = 0;
-                let mut new_set = AnchorSet::default();
+                cache.len = 0;
+                cache.anchor_set.clear();
                 for child in caches.iter() {
-                    len += child.cache.len;
-                    new_set.union_(&child.cache.anchor_set);
+                    cache.len += child.cache.len;
+                    cache.anchor_set.union_(&child.cache.anchor_set);
                 }
-
-                new_set.difference(&cache.anchor_set, &mut diff);
-                diff.len_diff = len as isize - cache.len as isize;
-                cache.len = len;
-                cache.anchor_set = new_set;
-                diff
+                None
             }
         }
     }
@@ -1291,16 +1285,16 @@ impl BTreeTrait for TreeTrait {
     type CacheDiff = CacheDiff;
 
     fn merge_cache_diff(diff1: &mut Self::CacheDiff, diff2: &Self::CacheDiff) {
-        for &ann in diff2.start.iter() {
-            if diff1.start.contains(&-ann) {
-                diff1.start.remove(&-ann);
+        for ann in diff2.start.iter() {
+            if diff1.start.contains(-ann) {
+                diff1.start.remove(-ann);
             } else {
                 diff1.start.insert(ann);
             }
         }
-        for &ann in diff2.end.iter() {
-            if diff1.end.contains(&-ann) {
-                diff1.end.remove(&-ann);
+        for ann in diff2.end.iter() {
+            if diff1.end.contains(-ann) {
+                diff1.end.remove(-ann);
             } else {
                 diff1.end.insert(ann);
             }
@@ -1680,10 +1674,7 @@ impl Mergeable for Span {
 #[cfg(test)]
 #[cfg(feature = "test")]
 mod tree_impl_tests {
-    use std::{
-        collections::{BTreeSet, HashMap},
-        mem::size_of,
-    };
+    use std::collections::{BTreeSet, HashMap};
 
     use crate::{range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
 
