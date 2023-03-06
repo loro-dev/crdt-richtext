@@ -745,8 +745,7 @@ impl TreeRangeMap {
 
     fn insert_or_delete_ann(&mut self, range: Range<&QueryResult>, index: AnnIdx, is_insert: bool) {
         if is_insert {
-            self.set_end(range.end, index);
-            self.set_start(range.start, index);
+            self.insert_ann_range(range, index);
         } else {
             assert!(self.remove_end(range.end, index));
             assert!(self.remove_start(range.start, index));
@@ -818,7 +817,7 @@ impl Sliceable for Elem {
         if start != 0 {
             self.anchor_set.start.clear();
         }
-        if end != len {
+        if end != self.len {
             self.anchor_set.end.clear();
         }
         self.len = len;
@@ -1118,7 +1117,51 @@ impl BTreeTrait for TreeTrait {
             index += 1;
         }
 
-        rle::insert_with_split(elements, index, offset, elem)
+        let index = index;
+        let offset = offset;
+        if elements.is_empty() {
+            elements.push(elem);
+            return;
+        }
+
+        if index == elements.len() {
+            debug_assert_eq!(offset, 0);
+            let last = elements.last_mut().unwrap();
+            if last.can_merge(&elem) {
+                last.merge_right(&elem);
+            } else {
+                elements.push(elem);
+            }
+
+            return;
+        }
+
+        assert!(index < elements.len());
+        if offset == 0 {
+            let target = elements.get_mut(index).unwrap();
+            if elem.can_merge(&target) {
+                target.merge_left(&elem);
+            } else {
+                elements.insert(index, elem);
+            }
+        } else if offset == elements[index].rle_len() {
+            let target = elements.get_mut(index).unwrap();
+            if target.can_merge(&elem) {
+                target.merge_right(&elem);
+            } else {
+                elements.insert(index + 1, elem);
+            }
+        } else {
+            let right = elements[index].slice(offset..);
+            elements[index].slice_(..offset);
+            let left = elements.get_mut(index).unwrap();
+            if left.can_merge(&elem) {
+                left.merge_right(&elem);
+                elements.insert(index + 1, right);
+            } else {
+                elements.splice(index + 1..index + 1, [elem, right]);
+            }
+        }
     }
 
     fn insert_batch(
@@ -1889,10 +1932,10 @@ mod tree_impl_tests {
             let mut tree = TreeRangeMap::new();
             tree.insert(0, 100, |_| AnnPosRelativeToInsert::After);
             tree.annotate(10, 10, a(0));
-            tree.insert(20, 1, |_| AnnPosRelativeToInsert::After);
+            tree.insert(20, 1, |_| AnnPosRelativeToInsert::Before);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..20);
 
-            tree.insert(19, 1, |_| AnnPosRelativeToInsert::After);
+            tree.insert(19, 1, |_| unreachable!());
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..21);
 
             tree.insert(10, 1, |_| AnnPosRelativeToInsert::After);
@@ -1906,7 +1949,7 @@ mod tree_impl_tests {
             tree.annotate(10, 10, a(0));
 
             // not included in annotated range
-            tree.insert(20, 1, |_| AnnPosRelativeToInsert::After);
+            tree.insert(20, 1, |_| AnnPosRelativeToInsert::Before);
             assert_eq!(tree.get_annotation_pos(id(0)).unwrap().1, 10..20);
 
             // included in annotated range
