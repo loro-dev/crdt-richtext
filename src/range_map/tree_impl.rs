@@ -336,11 +336,7 @@ impl TreeRangeMap {
             let trim_start = spans[0].elem.len != 0;
             drop(middles);
             drop(spans);
-            self.set_middle_empty_spans_annotations(
-                neighbor_range.clone(),
-                middle_annotations,
-                trim_start,
-            );
+            self.set_middle_empty_spans_annotations(neighbor_range, middle_annotations, trim_start);
         } else {
             drop(middles);
             drop(spans);
@@ -383,27 +379,30 @@ impl TreeRangeMap {
             self.tree.insert_by_query_result(path, new_elem);
         }
         if middle_len > 1 {
-            self.purge_redundant_empty_spans(neighbor_range)
+            self.purge_redundant_empty_spans(pos)
         }
     }
 
-    fn purge_redundant_empty_spans(&mut self, neighbor_range: Range<QueryResult>) {
-        self.tree
-            .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
-                let start = slice.start.unwrap_or((0, 0));
-                let end = slice.end.unwrap_or((slice.elements.len(), 0));
-                if slice.elements[start.0..=end.0]
-                    .iter()
-                    .any(|x| x.len == 0 && x.anchor_set.is_empty())
-                {
-                    slice
-                        .elements
-                        .retain(|x| x.len != 0 || !x.anchor_set.is_empty());
-                    true
-                } else {
-                    false
-                }
-            });
+    fn purge_redundant_empty_spans(&mut self, _start_from: usize) {
+        // TODO: purge
+        // self.tree
+        //     .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
+        //         let mut start = slice.start.unwrap_or((0, 0));
+        //         let mut end = slice.end.unwrap_or((slice.elements.len() - 1, 0));
+        //         start.0 = start.0.min(slice.elements.len() - 1);
+        //         end.0 = end.0.min(slice.elements.len() - 1);
+        //         if slice.elements[start.0..=end.0]
+        //             .iter()
+        //             .any(|x| x.len == 0 && x.anchor_set.is_empty())
+        //         {
+        //             slice
+        //                 .elements
+        //                 .retain(|x| x.len != 0 || !x.anchor_set.is_empty());
+        //             true
+        //         } else {
+        //             false
+        //         }
+        //     });
     }
 
     /// Set the annotations of the middle empty spans. This method will only keep one empty span
@@ -1206,10 +1205,18 @@ impl BTreeTrait for TreeTrait {
 
     fn merge_cache_diff(diff1: &mut Self::CacheDiff, diff2: &Self::CacheDiff) {
         for &ann in diff2.start.iter() {
-            diff1.start.insert(ann);
+            if diff1.start.contains(&-ann) {
+                diff1.start.remove(&-ann);
+            } else {
+                diff1.start.insert(ann);
+            }
         }
         for &ann in diff2.end.iter() {
-            diff1.end.insert(ann);
+            if diff1.end.contains(&-ann) {
+                diff1.end.remove(&-ann);
+            } else {
+                diff1.end.insert(ann);
+            }
         }
     }
 }
