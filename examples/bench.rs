@@ -4,6 +4,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use crdt_range::{RangeMap, TreeRangeMap};
 use rand::{Rng, SeedableRng};
+use string_cache::DefaultAtom;
 fn a(n: u64) -> Annotation {
     Annotation {
         id: OpID::new(n, 0),
@@ -19,7 +20,7 @@ fn a(n: u64) -> Annotation {
             },
         },
         merge_method: RangeMergeRule::Merge,
-        type_: String::new(),
+        type_: DefaultAtom::from(""),
         meta: None,
     }
 }

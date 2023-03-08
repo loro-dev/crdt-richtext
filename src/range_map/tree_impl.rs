@@ -5,11 +5,12 @@ use generic_btree::{
 use std::{
     collections::BTreeSet,
     mem::take,
+    num::NonZeroU64,
     ops::{Range, RangeInclusive},
     sync::Arc,
 };
 
-use crate::{range_map::AnnPosRelativeToInsert, Annotation, OpID};
+use crate::{range_map::AnnPosRelativeToInsert, Annotation, Counter, InternalString, OpID};
 use fxhash::{FxHashMap, FxHashSet};
 
 use super::{small_set::SmallSetI32, RangeMap, Span};
@@ -25,23 +26,23 @@ pub struct TreeRangeMap {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-struct AnchorSet {
-    start: FxHashSet<AnnIdx>,
+pub struct AnchorSet {
+    pub(crate) start: FxHashSet<AnnIdx>,
     /// this is inclusive end. The
-    end: FxHashSet<AnnIdx>,
+    pub(crate) end: FxHashSet<AnnIdx>,
 }
 
 impl AnchorSet {
-    fn union_(&mut self, other: &Self) {
+    pub fn union_(&mut self, other: &Self) {
         self.start.extend(other.start.iter());
         self.end.extend(other.end.iter());
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.start.is_empty() && self.end.is_empty()
     }
 
-    fn difference(&self, old: &AnchorSet, output: &mut CacheDiff) {
+    pub fn difference(&self, old: &AnchorSet, output: &mut CacheDiff) {
         for ann in self.start.difference(&old.start) {
             output.start.insert(*ann);
         }
@@ -56,7 +57,7 @@ impl AnchorSet {
         }
     }
 
-    fn apply_diff(&mut self, diff: &CacheDiff) {
+    pub fn apply_diff(&mut self, diff: &CacheDiff) {
         for ann in diff.start.iter() {
             if ann >= 0 {
                 self.start.insert(ann);
@@ -73,9 +74,12 @@ impl AnchorSet {
         }
     }
 
-    const NEW_ELEM_THRESHOLD: i32 = i32::MAX / 2;
+    pub const NEW_ELEM_THRESHOLD: i32 = i32::MAX / 2;
 
-    fn process_diff(&mut self, child: &AnchorSet) {
+    pub fn process_diff(&mut self, child: &AnchorSet) {
+        if child.is_empty() {
+            return;
+        }
         // if the child has an element that is not in the parent, then it is a new element,
         // it will have ann + Self::NEW_ELEM_THRESHOLD
 
@@ -100,7 +104,10 @@ impl AnchorSet {
         }
     }
 
-    fn finish_diff_calc(&mut self) -> CacheDiff {
+    pub fn finish_diff_calc(&mut self) -> CacheDiff {
+        if self.is_empty() {
+            return Default::default();
+        }
         // if the child has an element that is not in the parent, then it is a new element,
         // it will have ann + Self::NEW_ELEM_THRESHOLD
 
@@ -149,7 +156,7 @@ impl AnchorSet {
         ans
     }
 
-    fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.start.clear();
         self.end.clear();
     }
@@ -195,10 +202,10 @@ impl Elem {
 /// It use negative [AnnIdx] to represent subtraction,
 /// positive [AnnIdx] to represent addition
 #[derive(Default, Debug)]
-struct CacheDiff {
-    start: SmallSetI32,
-    end: SmallSetI32,
-    len_diff: isize,
+pub struct CacheDiff {
+    pub start: SmallSetI32,
+    pub end: SmallSetI32,
+    pub len_diff: isize,
 }
 
 impl TreeRangeMap {
@@ -685,26 +692,26 @@ fn set_start(elements: &mut Vec<Elem>, mut elem_index: usize, mut offset: usize,
 }
 
 impl TreeRangeMap {
-    const PLACEHOLDER: Annotation = Annotation {
-        id: OpID::new(9999, 999),
-        range_lamport: (88, OpID::new(888, 888)),
-        range: crate::AnchorRange {
-            start: crate::Anchor {
-                id: None,
-                type_: crate::AnchorType::After,
-            },
-            end: crate::Anchor {
-                id: None,
-                type_: crate::AnchorType::After,
-            },
-        },
-        merge_method: crate::RangeMergeRule::Delete,
-        type_: String::new(),
-        meta: None,
-    };
     pub fn new() -> Self {
+        let placeholder: Annotation = Annotation {
+            id: OpID::new(u64::MAX, Counter::MAX),
+            range_lamport: (88, OpID::new(888, 888)),
+            range: crate::AnchorRange {
+                start: crate::Anchor {
+                    id: None,
+                    type_: crate::AnchorType::After,
+                },
+                end: crate::Anchor {
+                    id: None,
+                    type_: crate::AnchorType::After,
+                },
+            },
+            merge_method: crate::RangeMergeRule::Delete,
+            type_: InternalString::from(""),
+            meta: None,
+        };
         // Need to make 0 idx unavailable, so insert a placeholder to take the 0 idx.
-        let idx_to_ann = vec![Arc::new(Self::PLACEHOLDER)];
+        let idx_to_ann = vec![Arc::new(placeholder)];
 
         Self {
             tree: BTree::new(),
@@ -1139,10 +1146,6 @@ impl BTreeTrait for TreeTrait {
     type Cache = Elem;
 
     const MAX_LEN: usize = 8;
-
-    fn element_to_cache(element: &Self::Elem) -> Self::Cache {
-        element.clone()
-    }
 
     fn calc_cache_internal(
         cache: &mut Self::Cache,
@@ -1701,10 +1704,7 @@ mod tree_impl_tests {
     }
 
     fn id(k: u64) -> OpID {
-        OpID {
-            client: k,
-            counter: 0,
-        }
+        OpID::new(k, 0)
     }
 
     fn a(n: u64) -> Annotation {
@@ -1722,7 +1722,7 @@ mod tree_impl_tests {
                 },
             },
             merge_method: crate::RangeMergeRule::Merge,
-            type_: String::new(),
+            type_: InternalString::from(""),
             meta: None,
         }
     }

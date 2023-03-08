@@ -560,13 +560,10 @@ impl RangeMap for DumbRangeMap {
 
 #[cfg(test)]
 mod test {
-    use crate::{Anchor, AnchorType};
+    use crate::{Anchor, AnchorType, InternalString};
 
     fn id(k: u64) -> OpID {
-        OpID {
-            client: k,
-            counter: 0,
-        }
+        OpID::new(k, 0)
     }
 
     fn a(n: u64) -> Annotation {
@@ -584,7 +581,7 @@ mod test {
                 },
             },
             merge_method: crate::RangeMergeRule::Merge,
-            type_: String::new(),
+            type_: InternalString::from(""),
             meta: None,
         }
     }
@@ -594,7 +591,10 @@ mod test {
             .iter()
             .map(|Span { annotations, len }| {
                 (
-                    annotations.iter().map(|x| x.id.client).collect::<Vec<_>>(),
+                    annotations
+                        .iter()
+                        .map(|x| x.id.client.get())
+                        .collect::<Vec<_>>(),
                     *len,
                 )
             })

@@ -13,7 +13,7 @@ use fxhash::FxHashSet;
 #[derive(Debug, PartialEq, Eq)]
 pub struct SimpleSpan {
     pub len: usize,
-    pub annotations: HashSet<String>,
+    pub annotations: HashSet<InternalString>,
 }
 
 impl From<&Span> for SimpleSpan {
@@ -79,7 +79,7 @@ pub enum Action {
 impl From<ListOpId> for OpID {
     fn from(value: ListOpId) -> Self {
         OpID {
-            client: value.client_id as ClientID,
+            client: ClientID::new(value.client_id as u64).unwrap(),
             counter: value.clock as Counter,
         }
     }
@@ -460,7 +460,7 @@ impl Actor {
             range_lamport: (lamport, id),
             range: AnchorRange { start, end },
             merge_method,
-            type_: type_.to_string(),
+            type_: type_.into(),
             meta: None,
         };
         debug_log::debug_dbg!(&ann);
@@ -501,14 +501,14 @@ impl Actor {
 
     fn next_id(&self) -> OpID {
         OpID {
-            client: self.list.id as ClientID,
+            client: ClientID::new(self.list.id as u64).unwrap(),
             counter: self.list.max_clock as Counter,
         }
     }
 
     fn _use_next_id(&mut self) -> OpID {
         let id = OpID {
-            client: self.list.id as ClientID,
+            client: ClientID::new(self.list.id as u64).unwrap(),
             counter: self.list.max_clock as Counter,
         };
         self.list.max_clock += 1;
@@ -745,7 +745,7 @@ pub fn make_spans(spans: &[(Vec<&str>, usize)]) -> Vec<SimpleSpan> {
     spans
         .iter()
         .map(|(annotations, len)| SimpleSpan {
-            annotations: annotations.iter().map(|x| x.to_string()).collect(),
+            annotations: annotations.iter().map(|x| (*x).into()).collect(),
             len: *len,
         })
         .collect()

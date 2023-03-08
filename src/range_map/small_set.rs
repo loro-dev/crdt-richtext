@@ -2,7 +2,7 @@ use fxhash::FxHashSet;
 const STACK_LEN: usize = 4;
 
 #[derive(Debug, Clone)]
-pub(crate) enum SmallSetI32 {
+pub enum SmallSetI32 {
     Stack([i32; STACK_LEN]),
     Heap(FxHashSet<i32>),
 }
