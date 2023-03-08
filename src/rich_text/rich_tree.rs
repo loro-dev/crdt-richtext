@@ -104,7 +104,7 @@ impl Elem {
         &mut self,
         start: usize,
         end: usize,
-        f: impl FnOnce(&mut Elem),
+        f: &mut impl FnMut(&mut Elem),
     ) -> SmallVec<[Elem; 2]> {
         let mut ans = SmallVec::new();
         if start == end {

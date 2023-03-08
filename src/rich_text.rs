@@ -7,13 +7,13 @@ use std::{
 use append_only_bytes::AppendOnlyBytes;
 
 use generic_btree::{rle::HasLength, BTree};
+use smallvec::SmallVec;
 
-use crate::{ClientID, Counter, Lamport, OpID, Style};
+use crate::{rich_text::op::OpContent, ClientID, Counter, Lamport, OpID, Style};
 
 use self::{
-    op::Op,
+    op::{Op, OpStore},
     rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, Elem},
-    vv::VersionVector,
 };
 
 mod id_map;
@@ -29,28 +29,29 @@ pub struct RichText {
     client_id: ClientID,
     bytes: AppendOnlyBytes,
     content: BTree<RichTreeTrait>,
-    vv: VersionVector,
-    max_lamport: Lamport,
+    store: OpStore,
+    next_lamport: Lamport,
 }
 
 impl RichText {
     pub fn new(client_id: u64) -> Self {
+        let client_id = NonZeroU64::new(client_id).unwrap();
         RichText {
-            client_id: NonZeroU64::new(client_id).unwrap(),
+            client_id,
             bytes: AppendOnlyBytes::new(),
             content: BTree::new(),
-            vv: Default::default(),
-            max_lamport: 0,
+            store: OpStore::new(client_id),
+            next_lamport: 0,
         }
     }
 
-    fn next_id(&mut self) -> OpID {
-        self.vv.use_next(self.client_id)
+    fn next_id(&self) -> OpID {
+        self.store.next_id()
     }
 
-    fn next_lamport(&mut self) -> Lamport {
-        let temp = self.max_lamport;
-        self.max_lamport += 1;
+    fn next_lamport(&mut self, len: usize) -> Lamport {
+        let temp = self.next_lamport;
+        self.next_lamport += len as Lamport;
         temp
     }
 
@@ -72,7 +73,7 @@ impl RichText {
         self.bytes.push_str(string);
         let slice = self.bytes.slice(start..);
         let id = self.next_id();
-        let lamport = self.next_lamport();
+        let lamport = self.next_lamport(slice.len());
         if index == 0 {
             self.content.prepend(Elem::new(id, None, lamport, slice));
             return;
@@ -111,21 +112,24 @@ impl RichText {
             }
         }
 
+        let mut left = None;
+        let op_slice = slice.clone();
         self.content.update_leaf(path.leaf, |elements| {
             if path.elem_index >= elements.len() {
                 // insert at the end
-                let mut left = None;
                 if let Some(last) = elements.last_mut() {
+                    left = Some(last.id_last());
                     if can_merge_new_slice(last, id, lamport, &slice) {
                         // can merge directly
                         last.merge_slice(&slice);
                         return true;
                     }
-                    left = Some(last.id_last());
+                    elements.push(Elem::new(id, left, lamport, slice));
+                    return true;
+                } else {
+                    // Elements cannot be empty
+                    unreachable!();
                 }
-
-                elements.push(Elem::new(id, left, lamport, slice));
-                return true;
             }
 
             let mut offset = path.offset;
@@ -138,6 +142,7 @@ impl RichText {
             }
 
             if offset == elements[index].rle_len() {
+                left = Some(elements[index].id_last());
                 if can_merge_new_slice(&elements[index], id, lamport, &slice) {
                     // can merge directly
                     elements[index].merge_slice(&slice);
@@ -153,6 +158,7 @@ impl RichText {
 
             // need to split element
             let right = elements[index].split(offset);
+            left = Some(elements[index].id_last());
             elements.splice(
                 index + 1..index + 1,
                 [
@@ -163,6 +169,9 @@ impl RichText {
 
             true
         });
+
+        self.store
+            .insert_local(OpContent::new_insert(left, op_slice));
     }
 
     pub fn delete(&mut self, range: impl RangeBounds<usize>) {
@@ -182,7 +191,12 @@ impl RichText {
 
         let start_result = self.content.query::<IndexFinder>(&start);
         let end_result = self.content.query::<IndexFinder>(&end);
+        let mut deleted = SmallVec::<[(OpID, usize); 4]>::new();
         // deletions don't remove things from the tree, they just mark them as dead
+        let mut delete_fn = |elem: &mut Elem| {
+            elem.delete();
+            deleted.push((elem.start_id, elem.rle_len()));
+        };
         self.content
             .update(&start_result..&end_result, &mut |slice| {
                 match (slice.start, slice.end) {
@@ -199,7 +213,7 @@ impl RichText {
                             return false;
                         }
 
-                        let additions = elem.update(start_offset, end_offset, Elem::delete);
+                        let additions = elem.update(start_offset, end_offset, &mut delete_fn);
                         if !additions.is_empty() {
                             slice
                                 .elements
@@ -217,7 +231,7 @@ impl RichText {
                         } else {
                             let elem = &mut slice.elements[end_idx];
                             if !elem.is_dead() {
-                                let additions = elem.update(0, end_offset, Elem::delete);
+                                let additions = elem.update(0, end_offset, &mut delete_fn);
                                 if !additions.is_empty() {
                                     slice.elements.splice(end_idx + 1..end_idx + 1, additions);
                                 }
@@ -236,7 +250,7 @@ impl RichText {
                             let elem = &mut slice.elements[start_idx];
                             if !elem.is_dead() {
                                 let additions =
-                                    elem.update(start_offset, elem.rle_len(), Elem::delete);
+                                    elem.update(start_offset, elem.rle_len(), &mut delete_fn);
                                 if !additions.is_empty() {
                                     end += additions.len();
                                     slice
@@ -251,19 +265,33 @@ impl RichText {
                 };
 
                 for elem in slice.elements[start..end].iter_mut() {
-                    elem.delete();
+                    delete_fn(elem);
                 }
 
                 true
             });
+
+        for (start, len) in deleted {
+            self.store
+                .insert_local(OpContent::new_delete(start, len as i32));
+        }
     }
 
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, style: Style) {
-        todo!()
-    }
+        let start = match range.start_bound() {
+            Bound::Included(start) => *start,
+            Bound::Excluded(start) => *start + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(end) => *end + 1,
+            Bound::Excluded(end) => *end,
+            Bound::Unbounded => self.len(),
+        };
 
-    pub fn apply(&mut self, ops: &[Op]) {
-        todo!()
+        if start == end {
+            return;
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Elem> {
@@ -285,6 +313,9 @@ impl RichText {
     pub fn utf16_len(&self) -> usize {
         self.content.root_cache().utf16_len
     }
+
+    /// Merge data from other data into self
+    pub fn merge(&mut self, other: &Self) {}
 }
 
 impl Display for RichText {

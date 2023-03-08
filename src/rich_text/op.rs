@@ -1,3 +1,4 @@
+use append_only_bytes::BytesSlice;
 use fxhash::FxHashMap;
 use generic_btree::rle::{HasLength, Mergeable, Sliceable};
 
@@ -7,9 +8,24 @@ use super::vv::VersionVector;
 
 #[derive(Debug, Clone)]
 pub struct Op {
-    id: OpID,
-    lamport: Lamport,
-    content: OpContent,
+    pub id: OpID,
+    pub lamport: Lamport,
+    pub content: OpContent,
+}
+
+impl OpContent {
+    pub fn new_insert(left: Option<OpID>, slice: BytesSlice) -> Self {
+        OpContent::Text(TextInsertOp { text: slice, left })
+    }
+
+    pub fn new_delete(mut start: OpID, mut len: i32) -> Self {
+        if len > 0 {
+            // prefer negative del
+            start = start.inc_i32(len - 1);
+            len = -len;
+        }
+        OpContent::Del(DeleteOp { start, len })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -21,7 +37,7 @@ pub enum OpContent {
 
 #[derive(Debug, Clone)]
 pub struct TextInsertOp {
-    text: String,
+    text: BytesSlice,
     left: Option<OpID>,
 }
 
@@ -66,8 +82,9 @@ impl Mergeable for Op {
             && self.id.counter + self.rle_len() as Counter == rhs.id.counter
             && self.lamport + self.rle_len() as Counter == rhs.lamport
             && match (&self.content, &rhs.content) {
-                (OpContent::Text(_), OpContent::Text(ins)) => {
+                (OpContent::Text(left), OpContent::Text(ins)) => {
                     ins.left == Some(self.id.inc(self.rle_len() as Counter - 1))
+                        && left.text.can_merge(&ins.text)
                 }
                 (OpContent::Del(a), OpContent::Del(b)) => {
                     if a.start.client != b.start.client {
@@ -84,7 +101,7 @@ impl Mergeable for Op {
     fn merge_right(&mut self, rhs: &Self) {
         match (&mut self.content, &rhs.content) {
             (OpContent::Text(ins), OpContent::Text(ins2)) => {
-                ins.text.push_str(&ins2.text);
+                ins.text.try_merge(&ins2.text).unwrap();
             }
             (OpContent::Del(del), OpContent::Del(del2)) => {
                 del.len += del2.len;
@@ -121,7 +138,7 @@ impl Sliceable for Op {
                 id: self.id.inc(start as Counter),
                 lamport: self.lamport + (start as Lamport),
                 content: OpContent::Text(TextInsertOp {
-                    text: text.text[start..end].to_string(),
+                    text: text.text.slice_clone(start..end),
                     left: text.left,
                 }),
             },
@@ -137,9 +154,29 @@ impl Sliceable for Op {
 #[derive(Debug)]
 pub struct OpStore {
     map: FxHashMap<ClientID, Vec<Op>>,
+    client: ClientID,
+    next_lamport: Lamport,
 }
 
 impl OpStore {
+    pub fn new(client: ClientID) -> Self {
+        Self {
+            map: Default::default(),
+            client,
+            next_lamport: 0,
+        }
+    }
+
+    pub fn insert_local(&mut self, content: OpContent) {
+        let op = Op {
+            id: self.next_id(),
+            lamport: self.next_lamport,
+            content,
+        };
+        self.next_lamport += op.rle_len() as Lamport;
+        self.insert(op);
+    }
+
     pub fn insert(&mut self, op: Op) {
         let vec = self.map.entry(op.id.client).or_default();
         if let Some(last) = vec.last_mut() {
@@ -147,6 +184,9 @@ impl OpStore {
                 last.merge_right(&op);
                 return;
             }
+        }
+        if op.lamport + op.rle_len() as Lamport >= self.next_lamport {
+            self.next_lamport = op.lamport + op.rle_len() as Lamport + 1;
         }
         vec.push(op);
     }
@@ -188,5 +228,16 @@ impl OpStore {
         }
 
         ans
+    }
+
+    pub fn next_id(&self) -> OpID {
+        OpID {
+            client: self.client,
+            counter: self
+                .map
+                .get(&self.client)
+                .and_then(|v| v.last().map(|x| x.id.counter + x.rle_len() as Counter))
+                .unwrap_or(0),
+        }
     }
 }
