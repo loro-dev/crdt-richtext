@@ -1,4 +1,8 @@
-use std::{fmt::Display, num::NonZeroU64, ops::RangeBounds};
+use std::{
+    fmt::Display,
+    num::NonZeroU64,
+    ops::{Bound, RangeBounds},
+};
 
 use append_only_bytes::AppendOnlyBytes;
 
@@ -114,7 +118,7 @@ impl RichText {
                 if let Some(last) = elements.last_mut() {
                     if can_merge_new_slice(last, id, lamport, &slice) {
                         // can merge directly
-                        last.string.try_merge(&slice).unwrap();
+                        last.merge_slice(&slice);
                         return true;
                     }
                     left = Some(last.id_last());
@@ -136,7 +140,7 @@ impl RichText {
             if offset == elements[index].rle_len() {
                 if can_merge_new_slice(&elements[index], id, lamport, &slice) {
                     // can merge directly
-                    elements[index].string.try_merge(&slice).unwrap();
+                    elements[index].merge_slice(&slice);
                     return true;
                 }
 
@@ -162,7 +166,96 @@ impl RichText {
     }
 
     pub fn delete(&mut self, range: impl RangeBounds<usize>) {
-        todo!()
+        let start = match range.start_bound() {
+            Bound::Included(start) => *start,
+            Bound::Excluded(start) => *start + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(end) => *end + 1,
+            Bound::Excluded(end) => *end,
+            Bound::Unbounded => self.len(),
+        };
+        if start == end {
+            return;
+        }
+
+        let start_result = self.content.query::<IndexFinder>(&start);
+        let end_result = self.content.query::<IndexFinder>(&end);
+        // deletions don't remove things from the tree, they just mark them as dead
+        self.content
+            .update(&start_result..&end_result, &mut |slice| {
+                match (slice.start, slice.end) {
+                    (Some((start_idx, start_offset)), Some((end_idx, end_offset)))
+                        if start_idx == end_idx =>
+                    {
+                        // delete within one element
+                        if start_idx >= slice.elements.len() {
+                            return false;
+                        }
+
+                        let elem = &mut slice.elements[start_idx];
+                        if elem.is_dead() {
+                            return false;
+                        }
+
+                        let additions = elem.update(start_offset, end_offset, Elem::delete);
+                        if !additions.is_empty() {
+                            slice
+                                .elements
+                                .splice(start_idx + 1..start_idx + 1, additions);
+                        }
+                        return true;
+                    }
+                    _ => {}
+                }
+
+                let mut end = match slice.end {
+                    Some((end_idx, end_offset)) => {
+                        if end_offset == 0 {
+                            end_idx
+                        } else {
+                            let elem = &mut slice.elements[end_idx];
+                            if !elem.is_dead() {
+                                let additions = elem.update(0, end_offset, Elem::delete);
+                                if !additions.is_empty() {
+                                    slice.elements.splice(end_idx + 1..end_idx + 1, additions);
+                                }
+                            }
+                            end_idx + 1
+                        }
+                    }
+                    None => slice.elements.len(),
+                };
+
+                let start = match slice.start {
+                    Some((start_idx, start_offset)) => {
+                        if start_offset == 0 {
+                            start_idx
+                        } else {
+                            let elem = &mut slice.elements[start_idx];
+                            if !elem.is_dead() {
+                                let additions =
+                                    elem.update(start_offset, elem.rle_len(), Elem::delete);
+                                if !additions.is_empty() {
+                                    end += additions.len();
+                                    slice
+                                        .elements
+                                        .splice(start_idx + 1..start_idx + 1, additions);
+                                }
+                            }
+                            start_idx + 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                for elem in slice.elements[start..end].iter_mut() {
+                    elem.delete();
+                }
+
+                true
+            });
     }
 
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, style: Style) {
@@ -185,6 +278,10 @@ impl RichText {
         self.content.root_cache().len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn utf16_len(&self) -> usize {
         self.content.root_cache().utf16_len
     }
@@ -193,6 +290,10 @@ impl RichText {
 impl Display for RichText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for span in self.content.iter() {
+            if span.is_dead() {
+                continue;
+            }
+
             f.write_str(std::str::from_utf8(&span.string).unwrap())?;
         }
 

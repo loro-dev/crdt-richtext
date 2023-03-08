@@ -18,6 +18,7 @@ generic-btree = { version = "0.1.0", path = "../generic-btree" }
 bitvec = "1.0.1"
 append-only-bytes = "0.1.5"
 string_cache = "0.8.6"
+smallvec = "1.10.0"
 
 [dev-dependencies]
 rand = { version = "0.8.5" }

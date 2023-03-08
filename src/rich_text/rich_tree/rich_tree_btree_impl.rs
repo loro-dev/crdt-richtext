@@ -27,9 +27,11 @@ impl BTreeTrait for RichTreeTrait {
             }
             None => {
                 cache.len = 0;
+                cache.utf16_len = 0;
                 cache.anchor_set.clear();
                 for child in caches.iter() {
                     cache.len += child.cache.len;
+                    cache.utf16_len += child.cache.utf16_len;
                     cache.anchor_set.union_(&child.cache.anchor_set);
                 }
                 None
@@ -41,8 +43,10 @@ impl BTreeTrait for RichTreeTrait {
         let mut len = 0;
         let mut utf16_len = 0;
         for child in caches.iter() {
-            len += child.string.len();
-            utf16_len += child.utf16_len;
+            if !child.is_dead() {
+                len += child.string.len();
+                utf16_len += child.utf16_len;
+            }
             cache.anchor_set.process_diff(&child.anchor_set);
         }
 

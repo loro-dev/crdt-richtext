@@ -6,6 +6,7 @@ use append_only_bytes::BytesSlice;
 use core::fmt;
 use fxhash::FxHashSet;
 use generic_btree::rle::{HasLength, Mergeable, Sliceable};
+use smallvec::SmallVec;
 use std::{mem::take, str::Chars};
 
 use self::{rich_tree_btree_impl::RichTreeTrait, utf16::get_utf16_len};
@@ -35,7 +36,7 @@ impl Elem {
             lamport,
             utf16_len: get_utf16_len(&string),
             string,
-            status: Status::Alive,
+            status: Status::ALIVE,
             anchor_set: AnchorSet::default(),
         }
     }
@@ -91,6 +92,54 @@ impl Elem {
         self.utf16_len -= utf16_len;
         self.string = self.string.slice_clone(..offset);
         right
+    }
+
+    pub fn delete(&mut self) {
+        if !self.is_dead() {
+            self.status.deleted_times += 1;
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        start: usize,
+        end: usize,
+        f: impl FnOnce(&mut Elem),
+    ) -> SmallVec<[Elem; 2]> {
+        let mut ans = SmallVec::new();
+        if start == end {
+            return ans;
+        }
+
+        assert!(end > start);
+        if start == 0 && end == self.atom_len() {
+            f(self);
+            return ans;
+        }
+        if start == 0 {
+            let right = self.split(end);
+            f(self);
+            ans.push(right);
+            return ans;
+        }
+        if end == self.atom_len() {
+            let mut right = self.split(start);
+            f(&mut right);
+            ans.push(right);
+            return ans;
+        }
+
+        let mut middle = self.split(start);
+        let right = middle.split(end - start);
+        f(&mut middle);
+        ans.push(middle);
+        ans.push(right);
+        ans
+    }
+
+    pub fn merge_slice(&mut self, s: &BytesSlice) {
+        self.string.try_merge(s).unwrap();
+        self.utf16_len += get_utf16_len(s);
     }
 }
 
@@ -212,7 +261,7 @@ pub struct Status {
 }
 
 impl Status {
-    pub const Alive: Status = Status {
+    pub const ALIVE: Status = Status {
         future: false,
         deleted_times: 0,
     };
@@ -223,6 +272,7 @@ impl Status {
         }
     }
 
+    #[inline(always)]
     fn is_dead(&self) -> bool {
         self.future || self.deleted_times > 0
     }
