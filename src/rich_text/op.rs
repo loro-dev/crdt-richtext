@@ -65,8 +65,17 @@ impl DeleteOp {
         }
     }
 
-    fn next_id(&self) -> OpID {
+    pub fn next_id(&self) -> OpID {
         self.start.inc_i32(self.len)
+    }
+
+    pub fn positive_(&mut self) {
+        if self.len > 0 {
+            return;
+        }
+
+        self.start = self.start.inc_i32(self.len + 1);
+        self.len = -self.len;
     }
 }
 

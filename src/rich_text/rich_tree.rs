@@ -94,7 +94,7 @@ impl Elem {
         right
     }
 
-    pub fn delete(&mut self) -> bool {
+    pub fn local_delete(&mut self) -> bool {
         if !self.is_dead() {
             self.status.deleted_times += 1;
             true
@@ -103,6 +103,11 @@ impl Elem {
         }
     }
 
+    pub fn apply_remote_delete(&mut self) {
+        self.status.deleted_times += 1;
+    }
+
+    #[must_use]
     pub fn update(
         &mut self,
         start: usize,

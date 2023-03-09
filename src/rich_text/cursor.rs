@@ -72,14 +72,14 @@ impl CursorMap {
         );
     }
 
-    pub fn get_insert(&self, id: OpID) -> Option<ArenaIndex> {
+    pub fn get_insert(&self, id: OpID) -> Option<(ArenaIndex, usize)> {
         let map = self.map.try_lock().unwrap();
         if let Some(start) = map.get(id) {
             if start.start_counter <= id.counter
                 && start.start_counter + start.len as Counter > id.counter
             {
                 if let Cursor::Insert(leaf) = start.value {
-                    return Some(leaf);
+                    return Some((leaf, start.len));
                 } else {
                     unreachable!()
                 }

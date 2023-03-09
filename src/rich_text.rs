@@ -219,7 +219,7 @@ impl RichText {
         let mut deleted = SmallVec::<[(OpID, usize); 4]>::new();
         // deletions don't remove things from the tree, they just mark them as dead
         let mut delete_fn = |elem: &mut Elem| {
-            if elem.delete() {
+            if elem.local_delete() {
                 deleted.push((elem.id, elem.rle_len()));
             }
         };
@@ -363,7 +363,7 @@ impl RichText {
             match op.content {
                 OpContent::Ann(_) => todo!(),
                 OpContent::Text(text) => {
-                    let scan_start = self.find_the_next_of(text.left);
+                    let scan_start = self.find_next_cursor_of(text.left);
                     if scan_start.is_none() {
                         // insert to the last
                         self.content
@@ -400,7 +400,12 @@ impl RichText {
                             .push(Elem::new(op.id, text.left, op.lamport, text.text));
                     }
                 }
-                OpContent::Del(_) => todo!(),
+                OpContent::Del(mut del) => {
+                    del.positive_();
+                    self.update_elem_in_id_range(del.start, del.len as usize, |elem| {
+                        elem.apply_remote_delete()
+                    })
+                }
             }
         }
 
@@ -421,10 +426,33 @@ impl RichText {
         }
     }
 
-    fn find_the_next_of(&self, id: Option<OpID>) -> Option<QueryResult> {
+    fn update_elem_in_id_range(
+        &mut self,
+        mut id: OpID,
+        mut len: usize,
+        mut f: impl FnMut(&mut Elem),
+    ) {
+        while len > 0 {
+            let (insert_leaf, mut cur_len) = self.cursor_map.get_insert(id).unwrap();
+            cur_len = cur_len.min(len);
+            self.content.update_leaf(insert_leaf, |elements| {
+                let index = elements.iter().position(|x| x.contains_id(id)).unwrap();
+                let offset = (id.counter - elements[index].id.counter) as usize;
+                let new = elements[index].update(offset, offset + cur_len, &mut f);
+                if !new.is_empty() {
+                    elements.splice(index..index, new);
+                }
+                true
+            });
+            len -= cur_len;
+            id = id.inc(cur_len as Counter);
+        }
+    }
+
+    fn find_next_cursor_of(&self, id: Option<OpID>) -> Option<QueryResult> {
         match id {
             Some(id) => {
-                let mut insert_leaf = self
+                let (mut insert_leaf, _) = self
                     .cursor_map
                     .get_insert(id)
                     .expect("Cannot find target id");
