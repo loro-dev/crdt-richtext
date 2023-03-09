@@ -46,9 +46,21 @@ impl OpID {
     }
 
     pub fn inc_i32(&self, inc: i32) -> Self {
-        Self {
-            client: self.client,
-            counter: self.counter + inc as Counter,
+        if inc > 0 {
+            Self {
+                client: self.client,
+                counter: self.counter + inc as Counter,
+            }
+        } else {
+            let (mut counter, overflow) = self.counter.overflowing_sub((-inc) as Counter);
+            if overflow {
+                counter = Counter::MAX;
+            }
+
+            Self {
+                client: self.client,
+                counter,
+            }
         }
     }
 }

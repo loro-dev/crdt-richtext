@@ -1,25 +1,31 @@
 use std::{
+    cell::RefCell,
     fmt::Display,
     num::NonZeroU64,
     ops::{Bound, RangeBounds},
+    rc::Rc,
 };
 
 use append_only_bytes::AppendOnlyBytes;
 
-use generic_btree::{rle::HasLength, BTree};
+use generic_btree::{
+    rle::{HasLength, Sliceable},
+    BTree, MoveEvent, QueryResult,
+};
 use smallvec::SmallVec;
 
 use crate::{rich_text::op::OpContent, ClientID, Counter, Lamport, OpID, Style};
 
 use self::{
+    cursor::CursorMap,
     op::{Op, OpStore},
     rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, Elem},
 };
 
+mod cursor;
 mod id_map;
 mod iter;
 mod op;
-mod rga;
 mod rich_tree;
 #[cfg(test)]
 mod test;
@@ -29,18 +35,26 @@ pub struct RichText {
     client_id: ClientID,
     bytes: AppendOnlyBytes,
     content: BTree<RichTreeTrait>,
+    cursor_map: CursorMap,
     store: OpStore,
     next_lamport: Lamport,
+    pending_ops: Vec<Op>,
 }
 
 impl RichText {
     pub fn new(client_id: u64) -> Self {
         let client_id = NonZeroU64::new(client_id).unwrap();
+        let cursor_map: CursorMap = Default::default();
+        let update_fn = cursor_map.gen_update_fn();
+        let mut content: BTree<RichTreeTrait> = BTree::new();
+        content.set_listener(Some(update_fn));
         RichText {
             client_id,
             bytes: AppendOnlyBytes::new(),
-            content: BTree::new(),
+            content,
+            cursor_map,
             store: OpStore::new(client_id),
+            pending_ops: Default::default(),
             next_lamport: 0,
         }
     }
@@ -62,8 +76,8 @@ impl RichText {
             lamport: u32,
             slice: &append_only_bytes::BytesSlice,
         ) -> bool {
-            elem.start_id.client == id.client
-                && elem.start_id.counter + elem.atom_len() as Counter == id.counter
+            elem.id.client == id.client
+                && elem.id.counter + elem.atom_len() as Counter == id.counter
                 && elem.lamport + elem.atom_len() as Lamport == lamport
                 && !elem.is_dead()
                 && elem.string.can_merge(slice)
@@ -75,6 +89,8 @@ impl RichText {
         let id = self.next_id();
         let lamport = self.next_lamport(slice.len());
         if index == 0 {
+            self.store
+                .insert_local(OpContent::new_insert(None, slice.clone()));
             self.content.prepend(Elem::new(id, None, lamport, slice));
             return;
         }
@@ -122,9 +138,13 @@ impl RichText {
                     if can_merge_new_slice(last, id, lamport, &slice) {
                         // can merge directly
                         last.merge_slice(&slice);
+                        self.cursor_map.update(MoveEvent::new_move(path.leaf, last));
                         return true;
                     }
-                    elements.push(Elem::new(id, left, lamport, slice));
+                    let elem = Elem::new(id, left, lamport, slice);
+                    self.cursor_map
+                        .update(MoveEvent::new_move(path.leaf, &elem));
+                    elements.push(elem);
                     return true;
                 } else {
                     // Elements cannot be empty
@@ -146,6 +166,8 @@ impl RichText {
                 if can_merge_new_slice(&elements[index], id, lamport, &slice) {
                     // can merge directly
                     elements[index].merge_slice(&slice);
+                    self.cursor_map
+                        .update(MoveEvent::new_move(path.leaf, &elements[index]));
                     return true;
                 }
 
@@ -153,6 +175,8 @@ impl RichText {
                     index + 1,
                     Elem::new(id, Some(elements[index].id_last()), lamport, slice),
                 );
+                self.cursor_map
+                    .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
                 return true;
             }
 
@@ -166,7 +190,8 @@ impl RichText {
                     right,
                 ],
             );
-
+            self.cursor_map
+                .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
             true
         });
 
@@ -194,8 +219,9 @@ impl RichText {
         let mut deleted = SmallVec::<[(OpID, usize); 4]>::new();
         // deletions don't remove things from the tree, they just mark them as dead
         let mut delete_fn = |elem: &mut Elem| {
-            elem.delete();
-            deleted.push((elem.start_id, elem.rle_len()));
+            if elem.delete() {
+                deleted.push((elem.id, elem.rle_len()));
+            }
         };
         self.content
             .update(&start_result..&end_result, &mut |slice| {
@@ -272,8 +298,10 @@ impl RichText {
             });
 
         for (start, len) in deleted {
-            self.store
+            let op = self
+                .store
                 .insert_local(OpContent::new_delete(start, len as i32));
+            self.cursor_map.register_del(op);
         }
     }
 
@@ -292,6 +320,8 @@ impl RichText {
         if start == end {
             return;
         }
+
+        todo!();
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Elem> {
@@ -314,8 +344,126 @@ impl RichText {
         self.content.root_cache().utf16_len
     }
 
+    pub fn apply(&mut self, mut op: Op) {
+        let op = match self.store.can_apply(&op) {
+            op::CanApply::Yes => op,
+            op::CanApply::Trim(len) => {
+                op.slice_(len as usize..);
+                op
+            }
+            op::CanApply::Pending => {
+                self.pending_ops.push(op);
+                return;
+            }
+            op::CanApply::Seen => return,
+        };
+
+        let op_clone = op.clone();
+        'apply: {
+            match op.content {
+                OpContent::Ann(_) => todo!(),
+                OpContent::Text(text) => {
+                    let scan_start = self.find_the_next_of(text.left);
+                    if scan_start.is_none() {
+                        // insert to the last
+                        self.content
+                            .push(Elem::new(op.id, text.left, op.lamport, text.text));
+                        break 'apply;
+                    }
+                    let iterator = match scan_start {
+                        Some(start) => self.content.iter_range(start..),
+                        None => self.content.iter_range(self.content.first_full_path()..),
+                    };
+
+                    let mut before = None;
+                    // RGA algorithm
+                    let ord = (op.lamport, op.id.client);
+                    for elem_slice in iterator {
+                        let offset = elem_slice.start.unwrap_or(0);
+                        let elem_ord = (
+                            elem_slice.elem.lamport + offset as Lamport,
+                            elem_slice.elem.id.client,
+                        );
+                        if elem_ord < ord {
+                            before = Some(*elem_slice.path());
+                            break;
+                        }
+                    }
+
+                    if let Some(before) = before {
+                        self.content.insert_by_query_result(
+                            before,
+                            Elem::new(op.id, text.left, op.lamport, text.text),
+                        );
+                    } else {
+                        self.content
+                            .push(Elem::new(op.id, text.left, op.lamport, text.text));
+                    }
+                }
+                OpContent::Del(_) => todo!(),
+            }
+        }
+
+        self.store.insert(op_clone);
+    }
+
     /// Merge data from other data into self
-    pub fn merge(&mut self, other: &Self) {}
+    pub fn merge(&mut self, other: &Self) {
+        let vv = self.store.vv();
+        let exported = other.store.export(&vv);
+        let mut all_ops = Vec::new();
+        for (_, mut ops) in exported {
+            all_ops.append(&mut ops);
+        }
+        all_ops.sort_by_key(|x| x.lamport);
+        for op in all_ops {
+            self.apply(op);
+        }
+    }
+
+    fn find_the_next_of(&self, id: Option<OpID>) -> Option<QueryResult> {
+        match id {
+            Some(id) => {
+                let mut insert_leaf = self
+                    .cursor_map
+                    .get_insert(id)
+                    .expect("Cannot find target id");
+                let mut node = self.content.get_node(insert_leaf);
+                let mut elem_index = 0;
+                let elements = &node.elements();
+                while !elements[elem_index].contains_id(id) {
+                    // if range out of bound, then cursor_map is off
+                    elem_index += 1;
+                }
+
+                // +1 the find the next
+                let mut offset = (id.counter - elements[elem_index].id.counter + 1) as usize;
+                while offset >= elements[elem_index].atom_len() {
+                    offset -= elements[elem_index].atom_len();
+                    elem_index += 1;
+                    if elem_index >= node.elements().len() {
+                        elem_index = 0;
+                        let Some(next_leaf) = self.content.next_same_level_node(insert_leaf) else { return None };
+                        insert_leaf = next_leaf;
+                        node = self.content.get_node(insert_leaf);
+                    }
+                }
+
+                Some(QueryResult {
+                    leaf: insert_leaf,
+                    elem_index,
+                    offset,
+                    found: true,
+                })
+            }
+            None => Some(QueryResult {
+                leaf: self.content.first_leaf(),
+                elem_index: 0,
+                offset: 0,
+                found: true,
+            }),
+        }
+    }
 }
 
 impl Display for RichText {

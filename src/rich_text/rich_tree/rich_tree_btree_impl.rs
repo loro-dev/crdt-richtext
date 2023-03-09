@@ -1,5 +1,5 @@
 use super::*;
-use generic_btree::BTreeTrait;
+use generic_btree::{rle, BTreeTrait};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RichTreeTrait;
@@ -82,7 +82,12 @@ impl BTreeTrait for RichTreeTrait {
         diff1.utf16_len_diff += diff2.utf16_len_diff;
     }
 
-    fn insert(_: &mut generic_btree::HeapVec<Self::Elem>, _: usize, _: usize, _: Self::Elem) {
-        unreachable!()
+    fn insert(
+        elements: &mut generic_btree::HeapVec<Self::Elem>,
+        index: usize,
+        offset: usize,
+        elem: Self::Elem,
+    ) {
+        rle::insert_with_split(elements, index, offset, elem)
     }
 }

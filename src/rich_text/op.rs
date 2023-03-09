@@ -37,15 +37,15 @@ pub enum OpContent {
 
 #[derive(Debug, Clone)]
 pub struct TextInsertOp {
-    text: BytesSlice,
-    left: Option<OpID>,
+    pub text: BytesSlice,
+    pub left: Option<OpID>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DeleteOp {
-    start: OpID,
+    pub start: OpID,
     // can be negative, so we can merge backward
-    len: i32,
+    pub len: i32,
 }
 
 impl DeleteOp {
@@ -63,6 +63,10 @@ impl DeleteOp {
                 len: -(len as i32),
             }
         }
+    }
+
+    fn next_id(&self) -> OpID {
+        self.start.inc_i32(self.len)
     }
 }
 
@@ -90,7 +94,7 @@ impl Mergeable for Op {
                     if a.start.client != b.start.client {
                         false
                     } else {
-                        a.start.counter + a.len as Counter == b.start.counter
+                        a.next_id().counter == b.start.counter
                         // TODO: +1/-1
                     }
                 }
@@ -127,7 +131,6 @@ impl Sliceable for Op {
             std::ops::Bound::Excluded(i) => *i,
             std::ops::Bound::Unbounded => self.rle_len(),
         };
-        let len = end - start;
         match &self.content {
             OpContent::Ann(a) => Op {
                 id: self.id.inc(start as Counter),
@@ -139,7 +142,11 @@ impl Sliceable for Op {
                 lamport: self.lamport + (start as Lamport),
                 content: OpContent::Text(TextInsertOp {
                     text: text.text.slice_clone(start..end),
-                    left: text.left,
+                    left: if start == 0 {
+                        text.left
+                    } else {
+                        Some(self.id.inc(start as Counter - 1))
+                    },
                 }),
             },
             OpContent::Del(del) => Op {
@@ -167,34 +174,41 @@ impl OpStore {
         }
     }
 
-    pub fn insert_local(&mut self, content: OpContent) {
+    pub fn insert_local(&mut self, content: OpContent) -> &Op {
         let op = Op {
             id: self.next_id(),
             lamport: self.next_lamport,
             content,
         };
         self.next_lamport += op.rle_len() as Lamport;
-        self.insert(op);
+        self.insert(op)
     }
 
-    pub fn insert(&mut self, op: Op) {
+    pub fn insert(&mut self, op: Op) -> &Op {
         let vec = self.map.entry(op.id.client).or_default();
+        let mut done = false;
         if let Some(last) = vec.last_mut() {
             if last.can_merge(&op) {
                 last.merge_right(&op);
-                return;
+                done = true;
             }
         }
-        if op.lamport + op.rle_len() as Lamport >= self.next_lamport {
-            self.next_lamport = op.lamport + op.rle_len() as Lamport + 1;
+
+        if done {
+            vec.last().as_ref().unwrap()
+        } else {
+            if op.lamport + op.rle_len() as Lamport >= self.next_lamport {
+                self.next_lamport = op.lamport + op.rle_len() as Lamport;
+            }
+            vec.push(op);
+            vec.last().as_ref().unwrap()
         }
-        vec.push(op);
     }
 
     pub fn export(&self, other_vv: &VersionVector) -> FxHashMap<ClientID, Vec<Op>> {
         let mut ans: FxHashMap<ClientID, Vec<Op>> = FxHashMap::default();
-        for (client, counter) in other_vv.vv.iter() {
-            let vec = self.map.get(client).unwrap();
+        for (client, vec) in self.map.iter() {
+            let counter = other_vv.vv.get(client).unwrap_or(&0);
             let i = match vec.binary_search_by_key(counter, |op| op.id.counter) {
                 Ok(i) => i,
                 Err(i) => i.max(1) - 1,
@@ -204,8 +218,7 @@ impl OpStore {
             }
             let vec = if vec[i].id.counter < *counter {
                 let mut new_vec: Vec<Op> = Vec::with_capacity(vec.len() - i);
-                new_vec
-                    .push(new_vec[i].slice(*counter as usize - new_vec[i].id.counter as usize..));
+                new_vec.push(vec[i].slice(*counter as usize - vec[i].id.counter as usize..));
                 new_vec.extend_from_slice(&vec[i + 1..]);
                 new_vec
             } else {
@@ -240,4 +253,36 @@ impl OpStore {
                 .unwrap_or(0),
         }
     }
+
+    pub fn can_apply(&self, op: &Op) -> CanApply {
+        let Some(vec) = self.map.get(&op.id.client) else {
+            if op.id.counter == 0 {
+                return CanApply::Yes;
+            } else {
+                return CanApply::Pending;
+            }
+        };
+        let end = vec
+            .last()
+            .map(|x| x.id.counter + x.rle_len() as Counter)
+            .unwrap_or(0);
+        if end == op.id.counter {
+            return CanApply::Yes;
+        }
+        if end < op.id.counter {
+            return CanApply::Pending;
+        }
+        if end >= op.id.counter + op.rle_len() as Counter {
+            return CanApply::Seen;
+        }
+
+        CanApply::Trim(end - op.id.counter)
+    }
+}
+
+pub enum CanApply {
+    Yes,
+    Trim(Counter),
+    Pending,
+    Seen,
 }

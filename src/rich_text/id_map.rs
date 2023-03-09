@@ -1,20 +1,19 @@
 use std::{
-    cell::RefCell,
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use fxhash::FxHashMap;
 
 use crate::{ClientID, Counter, OpID};
 
+type Tree<T> = BTreeMap<Counter, Arc<Mutex<Entry<T>>>>;
 /// This structure helps to map a range of IDs to a value.
 ///
 /// It's the call site's responsibility to ensure there is no overlap in the range
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct IdMap<Value> {
-    map: FxHashMap<ClientID, BTreeMap<Counter, Arc<Mutex<Elem<Value>>>>>,
-    pending_changes: Mutex<Vec<Change<Value>>>,
+    pub(super) map: FxHashMap<ClientID, Tree<Value>>,
 }
 
 #[derive(Debug)]
@@ -24,17 +23,16 @@ struct Change<Value> {
 }
 
 #[derive(Debug)]
-pub(super) struct Elem<Value> {
-    len: usize,
-    start_counter: Counter,
-    value: Value,
+pub(super) struct Entry<Value> {
+    pub len: usize,
+    pub start_counter: Counter,
+    pub value: Value,
 }
 
-impl<Value: Clone> IdMap<Value> {
+impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
     pub fn new() -> Self {
         Self {
             map: Default::default(),
-            pending_changes: Default::default(),
         }
     }
 
@@ -46,13 +44,15 @@ impl<Value: Clone> IdMap<Value> {
         self.map.is_empty()
     }
 
-    pub fn get(&self, id: OpID) -> Option<&Arc<Mutex<Elem<Value>>>> {
+    pub fn get(&self, id: OpID) -> Option<MutexGuard<'_, Entry<Value>>> {
         let client_map = self.map.get(&id.client)?;
         client_map
             .range(..=id.counter)
             .next_back()
             .and_then(|(counter, v)| {
-                if counter + v.try_lock().unwrap().len as Counter >= id.counter {
+                let v = v.try_lock().unwrap();
+                debug_assert_eq!(v.start_counter, *counter);
+                if counter + v.len as Counter > id.counter {
                     Some(v)
                 } else {
                     None
@@ -60,10 +60,28 @@ impl<Value: Clone> IdMap<Value> {
             })
     }
 
+    pub fn get_last(&self, id: OpID) -> Option<MutexGuard<'_, Entry<Value>>> {
+        let client_map = self.map.get(&id.client)?;
+        client_map
+            .range(..=id.counter)
+            .next_back()
+            .map(|(counter, v)| {
+                let v = v.try_lock().unwrap();
+                debug_assert_eq!(v.start_counter, *counter);
+                v
+            })
+    }
+
     pub fn insert(&mut self, id: OpID, v: Value, len: usize) {
-        debug_assert!(self.get(id).is_none());
+        debug_assert!(
+            self.get(id).is_none(),
+            "{:?} {:?} {:#?}",
+            id,
+            &v,
+            self.get(id).unwrap()
+        );
         let client_map = self.map.entry(id.client).or_default();
-        let elem = Arc::new(Mutex::new(Elem {
+        let elem = Arc::new(Mutex::new(Entry {
             len,
             value: v,
             start_counter: id.counter,
@@ -72,8 +90,7 @@ impl<Value: Clone> IdMap<Value> {
     }
 
     pub fn remove(&mut self, id: OpID, len: usize) -> bool {
-        let Some(entry) = self.get(id) else { return false };
-        let mut g = entry.try_lock().unwrap();
+        let Some(mut g) = self.get(id) else { return false };
         if g.start_counter == id.counter && g.len == len {
             // remove entry directly
             drop(g);
@@ -93,7 +110,7 @@ impl<Value: Clone> IdMap<Value> {
         } else {
             // adjust length + split
             let start_counter = id.counter + len as Counter;
-            let new_elem = Arc::new(Mutex::new(Elem {
+            let new_elem = Arc::new(Mutex::new(Entry {
                 len: g.len - len - (id.counter - g.start_counter) as usize,
                 value: g.value.clone(),
                 start_counter,

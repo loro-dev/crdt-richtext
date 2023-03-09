@@ -33,3 +33,34 @@ fn insert_should_merge() {
     assert_eq!(text.utf16_len(), 10000);
     assert_eq!(text.len(), 10000);
 }
+
+#[test]
+fn merge_insert() {
+    let mut text = RichText::new(1);
+    text.insert(0, "123");
+    let mut b = RichText::new(2);
+    b.merge(&text);
+    assert_eq!(b.to_string().as_str(), "123");
+    text.insert(1, "k");
+    b.merge(&text);
+    assert_eq!(b.to_string().as_str(), "1k23");
+    text.insert(1, "y");
+    b.merge(&text);
+    assert_eq!(b.to_string().as_str(), "1yk23");
+
+    text.insert(5, "z");
+    b.merge(&text);
+    assert_eq!(b.to_string().as_str(), "1yk23z");
+
+    for i in 0..100 {
+        text.insert(i, i.to_string().as_str());
+        b.merge(&text);
+        assert_eq!(b.to_string(), text.to_string());
+    }
+
+    for i in (0..100).step_by(3) {
+        text.insert(i, i.to_string().as_str());
+        b.merge(&text);
+        assert_eq!(b.to_string(), text.to_string());
+    }
+}

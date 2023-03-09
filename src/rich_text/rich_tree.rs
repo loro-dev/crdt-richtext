@@ -19,7 +19,7 @@ type AnnIdx = i32;
 
 #[derive(Debug, Clone)]
 pub struct Elem {
-    pub start_id: OpID,
+    pub id: OpID,
     pub left: Option<OpID>,
     pub lamport: Lamport,
     pub string: BytesSlice,
@@ -31,7 +31,7 @@ pub struct Elem {
 impl Elem {
     pub fn new(id: OpID, left: Option<OpID>, lamport: Lamport, string: BytesSlice) -> Self {
         Elem {
-            start_id: id,
+            id,
             left,
             lamport,
             utf16_len: get_utf16_len(&string),
@@ -43,8 +43,8 @@ impl Elem {
 
     pub fn id_last(&self) -> OpID {
         OpID {
-            client: self.start_id.client,
-            counter: self.start_id.counter + self.atom_len() as Counter - 1,
+            client: self.id.client,
+            counter: self.id.counter + self.atom_len() as Counter - 1,
         }
     }
 
@@ -82,8 +82,8 @@ impl Elem {
                 start: Default::default(),
                 end: take(&mut self.anchor_set.end),
             },
-            start_id: self.start_id.inc(start as Counter),
-            left: Some(self.start_id.inc(start as Counter - 1)),
+            id: self.id.inc(start as Counter),
+            left: Some(self.id.inc(start as Counter - 1)),
             lamport: self.lamport + start as Lamport,
             string: s,
             utf16_len,
@@ -94,9 +94,12 @@ impl Elem {
         right
     }
 
-    pub fn delete(&mut self) {
+    pub fn delete(&mut self) -> bool {
         if !self.is_dead() {
             self.status.deleted_times += 1;
+            true
+        } else {
+            false
         }
     }
 
@@ -141,14 +144,20 @@ impl Elem {
         self.string.try_merge(s).unwrap();
         self.utf16_len += get_utf16_len(s);
     }
+
+    pub fn contains_id(&self, id: OpID) -> bool {
+        id.client == self.id.client
+            && self.id.counter <= id.counter
+            && self.id.counter + self.rle_len() as Counter > id.counter
+    }
 }
 
 impl Mergeable for Elem {
     fn can_merge(&self, rhs: &Self) -> bool {
-        self.start_id.client == rhs.start_id.client
-            && self.start_id.counter + self.atom_len() as Counter == rhs.start_id.counter
+        self.id.client == rhs.id.client
+            && self.id.counter + self.atom_len() as Counter == rhs.id.counter
             && self.lamport + self.atom_len() as Lamport == rhs.lamport
-            && rhs.left == Some(self.start_id)
+            && rhs.left == Some(self.id)
             && self.status == rhs.status
             && self.string.can_merge(&rhs.string)
             && self.anchor_set.end.is_empty()
@@ -162,7 +171,7 @@ impl Mergeable for Elem {
     }
 
     fn merge_left(&mut self, lhs: &Self) {
-        self.start_id = lhs.start_id;
+        self.id = lhs.id;
         self.left = lhs.left;
         self.lamport = lhs.lamport;
         let mut string = lhs.string.clone();
@@ -206,11 +215,11 @@ impl Sliceable for Elem {
                     Default::default()
                 },
             },
-            start_id: self.start_id.inc(start as Counter),
+            id: self.id.inc(start as Counter),
             left: if start == 0 {
                 self.left
             } else {
-                Some(self.start_id.inc(start as Counter - 1))
+                Some(self.id.inc(start as Counter - 1))
             },
             lamport: self.lamport + start as Lamport,
             string: s,
@@ -243,11 +252,11 @@ impl Sliceable for Elem {
         if end != self.atom_len() {
             self.anchor_set.end.clear();
         }
-        self.start_id = self.start_id.inc(start as Counter);
+        self.id = self.id.inc(start as Counter);
         self.left = if start == 0 {
             self.left
         } else {
-            Some(self.start_id.inc(start as Counter - 1))
+            Some(self.id.inc(start as Counter - 1))
         };
         self.lamport += start as Lamport;
         self.string = self.string.slice_clone(range);
