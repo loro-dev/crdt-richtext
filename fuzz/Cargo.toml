@@ -35,3 +35,9 @@ doc = false
 [profile.release]
 lto = true
 opt-level = 3
+
+[[bin]]
+name = "rich-text-apply"
+path = "fuzz_targets/rich-text-apply.rs"
+test = false
+doc = false

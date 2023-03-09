@@ -75,7 +75,7 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
     pub fn insert(&mut self, id: OpID, v: Value, len: usize) {
         debug_assert!(
             self.get(id).is_none(),
-            "{:?} {:?} {:#?}",
+            "Unexpected overlap {:?} {:?} {:#?}",
             id,
             &v,
             self.get(id).unwrap()

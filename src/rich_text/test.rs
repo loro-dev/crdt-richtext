@@ -159,4 +159,17 @@ mod apply {
         assert!(b.is_empty());
         assert_eq!(b.to_string().as_str(), "");
     }
+
+    #[test]
+    fn apply_basic() {
+        let mut a = RichText::new(1);
+        let mut b = RichText::new(2);
+        a.insert(0, "6");
+        b.merge(&a);
+        b.insert(0, "3");
+        a.insert(0, "2");
+        a.merge(&b);
+        b.merge(&a);
+        assert_eq!(a.to_string(), b.to_string());
+    }
 }

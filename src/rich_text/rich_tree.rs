@@ -155,6 +155,12 @@ impl Elem {
             && self.id.counter <= id.counter
             && self.id.counter + self.rle_len() as Counter > id.counter
     }
+
+    pub fn overlap(&self, id: OpID, len: usize) -> bool {
+        id.client == self.id.client
+            && self.id.counter < id.counter + len as Counter
+            && self.id.counter + self.rle_len() as Counter > id.counter as Counter
+    }
 }
 
 impl Mergeable for Elem {

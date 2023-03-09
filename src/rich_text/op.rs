@@ -194,6 +194,9 @@ impl OpStore {
     }
 
     pub fn insert(&mut self, op: Op) -> &Op {
+        if op.lamport + op.rle_len() as Lamport >= self.next_lamport {
+            self.next_lamport = op.lamport + op.rle_len() as Lamport;
+        }
         let vec = self.map.entry(op.id.client).or_default();
         let mut done = false;
         if let Some(last) = vec.last_mut() {
@@ -206,9 +209,6 @@ impl OpStore {
         if done {
             vec.last().as_ref().unwrap()
         } else {
-            if op.lamport + op.rle_len() as Lamport >= self.next_lamport {
-                self.next_lamport = op.lamport + op.rle_len() as Lamport;
-            }
             vec.push(op);
             vec.last().as_ref().unwrap()
         }
@@ -217,21 +217,30 @@ impl OpStore {
     pub fn export(&self, other_vv: &VersionVector) -> FxHashMap<ClientID, Vec<Op>> {
         let mut ans: FxHashMap<ClientID, Vec<Op>> = FxHashMap::default();
         for (client, vec) in self.map.iter() {
-            let counter = other_vv.vv.get(client).unwrap_or(&0);
-            let i = match vec.binary_search_by_key(counter, |op| op.id.counter) {
+            let target_counter = other_vv.vv.get(client).unwrap_or(&0);
+            if *target_counter
+                >= vec
+                    .last()
+                    .map(|x| x.id.counter + x.rle_len() as Counter)
+                    .unwrap_or(0)
+            {
+                continue;
+            }
+
+            let mut i = match vec.binary_search_by_key(target_counter, |op| op.id.counter) {
                 Ok(i) => i,
                 Err(i) => i.max(1) - 1,
             };
-            if i == vec.len() {
-                continue;
+            if *target_counter >= vec[i].id.counter + vec[i].rle_len() as Counter {
+                i += 1;
             }
-            let vec = if vec[i].id.counter < *counter {
+            let vec = if vec[i].id.counter < *target_counter {
                 let mut new_vec: Vec<Op> = Vec::with_capacity(vec.len() - i);
-                new_vec.push(vec[i].slice(*counter as usize - vec[i].id.counter as usize..));
+                new_vec.push(vec[i].slice(*target_counter as usize - vec[i].id.counter as usize..));
                 new_vec.extend_from_slice(&vec[i + 1..]);
                 new_vec
             } else {
-                assert!(vec[i].id.counter == *counter);
+                assert!(vec[i].id.counter == *target_counter);
                 vec[i..].to_vec()
             };
             ans.insert(*client, vec);
@@ -286,6 +295,11 @@ impl OpStore {
         }
 
         CanApply::Trim(end - op.id.counter)
+    }
+
+    #[inline(always)]
+    pub fn next_lamport(&self) -> u32 {
+        self.next_lamport
     }
 }
 

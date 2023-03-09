@@ -62,6 +62,9 @@ impl CursorMap {
                         return;
                     }
                 }
+            } else {
+                // TODO: should we check here?
+                return;
             }
         }
 
@@ -79,7 +82,10 @@ impl CursorMap {
                 && start.start_counter + start.len as Counter > id.counter
             {
                 if let Cursor::Insert(leaf) = start.value {
-                    return Some((leaf, start.len));
+                    return Some((
+                        leaf,
+                        start.len - (id.counter - start.start_counter) as usize,
+                    ));
                 } else {
                     unreachable!()
                 }

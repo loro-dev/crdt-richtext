@@ -29,6 +29,8 @@ mod op;
 mod rich_tree;
 #[cfg(test)]
 mod test;
+#[cfg(feature = "test")]
+pub mod test_utils;
 mod vv;
 
 pub struct RichText {
@@ -37,7 +39,6 @@ pub struct RichText {
     content: BTree<RichTreeTrait>,
     cursor_map: CursorMap,
     store: OpStore,
-    next_lamport: Lamport,
     pending_ops: Vec<Op>,
 }
 
@@ -55,18 +56,11 @@ impl RichText {
             cursor_map,
             store: OpStore::new(client_id),
             pending_ops: Default::default(),
-            next_lamport: 0,
         }
     }
 
     fn next_id(&self) -> OpID {
         self.store.next_id()
-    }
-
-    fn next_lamport(&mut self, len: usize) -> Lamport {
-        let temp = self.next_lamport;
-        self.next_lamport += len as Lamport;
-        temp
     }
 
     pub fn insert(&mut self, index: usize, string: &str) {
@@ -87,7 +81,7 @@ impl RichText {
         self.bytes.push_str(string);
         let slice = self.bytes.slice(start..);
         let id = self.next_id();
-        let lamport = self.next_lamport(slice.len());
+        let lamport = self.next_lamport();
         if index == 0 {
             self.store
                 .insert_local(OpContent::new_insert(None, slice.clone()));
@@ -432,20 +426,51 @@ impl RichText {
         mut len: usize,
         mut f: impl FnMut(&mut Elem),
     ) {
+        // dbg!(id, len);
+        // dbg!(&self.content);
+        // dbg!(&self.cursor_map);
         while len > 0 {
-            let (insert_leaf, mut cur_len) = self.cursor_map.get_insert(id).unwrap();
-            cur_len = cur_len.min(len);
+            let (insert_leaf, mut leaf_del_len) = self.cursor_map.get_insert(id).unwrap();
+            leaf_del_len = leaf_del_len.min(len);
+            let leaf_del_len = leaf_del_len;
+            let mut left_len = leaf_del_len;
+            // Perf: we may optimize this by only update the cache once
             self.content.update_leaf(insert_leaf, |elements| {
-                let index = elements.iter().position(|x| x.contains_id(id)).unwrap();
-                let offset = (id.counter - elements[index].id.counter) as usize;
-                let new = elements[index].update(offset, offset + cur_len, &mut f);
-                if !new.is_empty() {
-                    elements.splice(index..index, new);
+                // dbg!(&elements, leaf_del_len);
+                // there may be many pieces need to be updated inside one leaf node
+                let mut index = 0;
+                loop {
+                    let elem = &elements[index];
+                    if !elem.overlap(id, leaf_del_len) {
+                        index += 1;
+                        continue;
+                    }
+
+                    let offset = if id.counter > elem.id.counter {
+                        (id.counter - elem.id.counter) as usize
+                    } else {
+                        0
+                    };
+                    let end = elem
+                        .rle_len()
+                        .min((id.counter + leaf_del_len as Counter - elem.id.counter) as usize);
+                    let new = elements[index].update(offset, end, &mut f);
+                    left_len -= end - offset;
+                    if !new.is_empty() {
+                        let new_len = new.len();
+                        elements.splice(index + 1..index + 1, new);
+                        index += new_len;
+                    }
+                    index += 1;
+                    if left_len == 0 {
+                        break;
+                    }
                 }
+                assert_eq!(left_len, 0);
                 true
             });
-            len -= cur_len;
-            id = id.inc(cur_len as Counter);
+            id.counter += leaf_del_len as Counter;
+            len -= leaf_del_len;
         }
     }
 
@@ -491,6 +516,11 @@ impl RichText {
                 found: true,
             }),
         }
+    }
+
+    #[inline(always)]
+    fn next_lamport(&self) -> u32 {
+        self.store.next_lamport()
     }
 }
 
