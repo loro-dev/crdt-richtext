@@ -79,7 +79,7 @@ pub enum Action {
 impl From<ListOpId> for OpID {
     fn from(value: ListOpId) -> Self {
         OpID {
-            client: ClientID::new(value.client_id as u64).unwrap(),
+            client: value.client_id as u64,
             counter: value.clock as Counter,
         }
     }
@@ -501,14 +501,14 @@ impl Actor {
 
     fn next_id(&self) -> OpID {
         OpID {
-            client: ClientID::new(self.list.id as u64).unwrap(),
+            client: self.list.id as u64,
             counter: self.list.max_clock as Counter,
         }
     }
 
     fn _use_next_id(&mut self) -> OpID {
         let id = OpID {
-            client: ClientID::new(self.list.id as u64).unwrap(),
+            client: self.list.id as u64,
             counter: self.list.max_clock as Counter,
         };
         self.list.max_clock += 1;

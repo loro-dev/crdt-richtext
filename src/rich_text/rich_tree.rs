@@ -94,6 +94,7 @@ impl Elem {
         right
     }
 
+    #[inline(always)]
     pub fn local_delete(&mut self) -> bool {
         if !self.is_dead() {
             self.status.deleted_times += 1;
@@ -103,46 +104,48 @@ impl Elem {
         }
     }
 
+    #[inline(always)]
     pub fn apply_remote_delete(&mut self) {
         self.status.deleted_times += 1;
     }
 
     #[must_use]
-    pub fn update(
+    pub fn update<R>(
         &mut self,
         start: usize,
         end: usize,
-        f: &mut impl FnMut(&mut Elem),
-    ) -> SmallVec<[Elem; 2]> {
+        f: &mut impl FnMut(&mut Elem) -> R,
+    ) -> (SmallVec<[Elem; 2]>, Option<R>) {
         let mut ans = SmallVec::new();
+        debug_assert!(start <= end && end <= self.rle_len());
         if start == end {
-            return ans;
+            return (ans, None);
         }
 
         assert!(end > start);
         if start == 0 && end == self.atom_len() {
-            f(self);
-            return ans;
+            let r = f(self);
+            return (ans, Some(r));
         }
         if start == 0 {
             let right = self.split(end);
-            f(self);
+            let r = f(self);
             ans.push(right);
-            return ans;
+            return (ans, Some(r));
         }
         if end == self.atom_len() {
             let mut right = self.split(start);
-            f(&mut right);
+            let r = f(&mut right);
             ans.push(right);
-            return ans;
+            return (ans, Some(r));
         }
 
         let mut middle = self.split(start);
         let right = middle.split(end - start);
-        f(&mut middle);
+        let r = f(&mut middle);
         ans.push(middle);
         ans.push(right);
-        ans
+        (ans, Some(r))
     }
 
     pub fn merge_slice(&mut self, s: &BytesSlice) {
@@ -161,6 +164,33 @@ impl Elem {
             && self.id.counter < id.counter + len as Counter
             && self.id.counter + self.rle_len() as Counter > id.counter as Counter
     }
+
+    pub fn try_merge_arr(arr: &mut Vec<Self>, mut from: usize, mut len: usize) -> bool {
+        len = len.min(arr.len() - from);
+        while len > 0 {
+            let mut j = from + 1;
+            while j < arr.len() {
+                let (left, right) = arr.split_at_mut(j);
+                if left[from].can_merge(&right[0]) {
+                    left[from].merge_right(&right[0]);
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if j > from + 1 {
+                arr.drain(from + 1..j);
+                // may continue?
+                len = len.saturating_sub(j - from);
+                from += 1;
+            } else {
+                len -= 1;
+                from += 1;
+            }
+        }
+
+        false
+    }
 }
 
 impl Mergeable for Elem {
@@ -168,7 +198,7 @@ impl Mergeable for Elem {
         self.id.client == rhs.id.client
             && self.id.counter + self.atom_len() as Counter == rhs.id.counter
             && self.lamport + self.atom_len() as Lamport == rhs.lamport
-            && rhs.left == Some(self.id)
+            && rhs.left == Some(self.id_last())
             && self.status == rhs.status
             && self.string.can_merge(&rhs.string)
             && self.anchor_set.end.is_empty()
@@ -330,6 +360,17 @@ impl Cache {
             } else {
                 self.anchor_set.end.remove(&(-ann));
             }
+        }
+    }
+}
+
+impl CacheDiff {
+    pub fn new_len_diff(diff: isize, utf16_len_diff: isize) -> CacheDiff {
+        CacheDiff {
+            len_diff: diff,
+            utf16_len_diff,
+            start: Default::default(),
+            end: Default::default(),
         }
     }
 }

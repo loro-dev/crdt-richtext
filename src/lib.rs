@@ -28,7 +28,7 @@ mod range_map;
 pub mod rich_text;
 pub(crate) type InternalString = DefaultAtom;
 type Lamport = u32;
-type ClientID = NonZeroU64;
+type ClientID = u64;
 type Counter = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -226,10 +226,7 @@ impl<T: RangeBounds<OpID>> From<T> for AnchorRange {
 
 impl OpID {
     pub fn new(client: u64, counter: Counter) -> Self {
-        Self {
-            client: NonZeroU64::new(client).unwrap(),
-            counter,
-        }
+        Self { client, counter }
     }
 }
 

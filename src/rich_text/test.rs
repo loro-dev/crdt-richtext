@@ -64,6 +64,29 @@ mod delete {
         text.delete(..);
         assert_eq!(text.to_string().as_str(), "");
         assert!(text.is_empty());
+        text.check_no_mergeable_neighbor();
+    }
+
+    #[test]
+    fn delete_should_be_merged() {
+        let mut text = RichText::new(1);
+        text.insert(0, "12345");
+        text.delete(3..4);
+        text.delete(1..2);
+        text.delete(..);
+        let node = text.content.get_node(text.content.first_leaf());
+        assert_eq!(node.elements().len(), 1);
+    }
+
+    #[test]
+    fn delete_should_be_merged_1() {
+        let mut text = RichText::new(1);
+        text.insert(0, "12345");
+        text.delete(4..5);
+        text.delete(3..4);
+        text.delete(..2);
+        let node = text.content.get_node(text.content.first_leaf());
+        assert_eq!(node.elements().len(), 3);
     }
 }
 

@@ -72,6 +72,42 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
             })
     }
 
+    /// Remove any entries that start within the range of (exclusive_from, exclusive_from + len)
+    ///
+    /// Perf: maybe return the mutex guar from here?
+    pub fn remove_range(&mut self, exclusive_from: OpID, len: usize) {
+        let last_id = exclusive_from.inc((len - 1) as Counter);
+        let Some(client_map) = self.map.get_mut(&last_id.client) else { return };
+        loop {
+            let item = client_map
+                .range(..=last_id.counter)
+                .next_back()
+                .map(|(counter, v)| {
+                    let v = v.try_lock().unwrap();
+                    debug_assert_eq!(v.start_counter, *counter);
+                    v
+                });
+
+            let Some(item_inner) = item.as_ref() else { return };
+            let item_counter = item_inner.start_counter;
+            let item_end = item_inner.len as Counter + item_counter;
+            if item_inner.start_counter <= exclusive_from.counter {
+                return;
+            }
+
+            drop(item);
+            let item = client_map.remove(&item_counter).unwrap();
+            let new_item_counter = last_id.counter + 1;
+            if item_end > new_item_counter {
+                let mut inner = item.try_lock().unwrap();
+                inner.len = (item_end - new_item_counter) as usize;
+                inner.start_counter = new_item_counter;
+                drop(inner);
+                client_map.insert(new_item_counter, item);
+            }
+        }
+    }
+
     pub fn insert(&mut self, id: OpID, v: Value, len: usize) {
         debug_assert!(
             self.get(id).is_none(),

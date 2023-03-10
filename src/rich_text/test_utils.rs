@@ -192,12 +192,17 @@ impl Actor {
     fn len(&self) -> usize {
         self.text.len()
     }
+
+    fn check(&self) {
+        self.text.check()
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use Action::*;
+    use AnnotationType::*;
 
     #[test]
     fn fuzz_0() {
@@ -401,6 +406,1182 @@ mod test {
 
     #[test]
     fn fuzz_5() {
-        fuzzing(2, vec![]);
+        fuzzing(
+            2,
+            vec![
+                Delete {
+                    actor: 1,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    content: 5397,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 1,
+                    content: 5397,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 3,
+                    content: 5397,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 8,
+                    content: 5397,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 4,
+                    content: 5397,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    content: 5397,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 21,
+                    content: 5397,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 21,
+                    content: 65301,
+                },
+                Sync(1, 0),
+                Sync(1, 0),
+                Sync(0, 1),
+                Delete {
+                    actor: 0,
+                    pos: 4,
+                    len: 10,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 4,
+                    len: 10,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn fuzz_6() {
+        fuzzing(
+            2,
+            vec![
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 18504,
+                },
+                Insert {
+                    actor: 20,
+                    pos: 20,
+                    content: 5140,
+                },
+                Insert {
+                    actor: 20,
+                    pos: 20,
+                    content: 5140,
+                },
+                Insert {
+                    actor: 20,
+                    pos: 20,
+                    content: 5140,
+                },
+                Insert {
+                    actor: 20,
+                    pos: 20,
+                    content: 5140,
+                },
+                Insert {
+                    actor: 20,
+                    pos: 255,
+                    content: 65535,
+                },
+                Sync(255, 255),
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Sync(255, 255),
+                Delete {
+                    actor: 255,
+                    pos: 255,
+                    len: 255,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn fuzz_7() {
+        fuzzing(
+            2,
+            vec![
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 512,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 1,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 1,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 7,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 3,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 22,
+                    content: 5654,
+                },
+                Sync(1, 0),
+                Sync(1, 0),
+                Insert {
+                    actor: 0,
+                    pos: 31,
+                    content: 65535,
+                },
+                Sync(1, 0),
+                Sync(1, 0),
+                Sync(1, 0),
+                Sync(1, 0),
+                Delete {
+                    actor: 0,
+                    pos: 11,
+                    len: 10,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 21,
+                    len: 10,
+                },
+                Sync(1, 0),
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Sync(0, 1),
+                Sync(1, 0),
+                Sync(1, 0),
+                Delete {
+                    actor: 0,
+                    pos: 30,
+                    len: 10,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 8,
+                    len: 10,
+                },
+                Delete {
+                    actor: 1,
+                    pos: 3,
+                    len: 10,
+                },
+                Sync(1, 0),
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 65535,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn fuzz_8() {
+        fuzzing(
+            2,
+            vec![
+                Delete {
+                    actor: 179,
+                    pos: 72,
+                    len: 21,
+                },
+                Delete {
+                    actor: 29,
+                    pos: 29,
+                    len: 29,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 10786,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 92,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8994,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 7458,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 156,
+                    content: 40092,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8739,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 6,
+                    pos: 6,
+                    content: 1542,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 2304,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 2313,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 9,
+                    content: 63228,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 42,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8739,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Sync(231, 231),
+                Sync(231, 231),
+                Sync(231, 231),
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 42,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 0,
+                    content: 0,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 255,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 42,
+                },
+                Sync(255, 255),
+                Insert {
+                    actor: 5,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 16674,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 4,
+                    content: 512,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 40,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 34,
+                    pos: 34,
+                    len: 34,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 22873,
+                },
+                Delete {
+                    actor: 89,
+                    pos: 89,
+                    len: 89,
+                },
+                Delete {
+                    actor: 89,
+                    pos: 89,
+                    len: 89,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 22562,
+                },
+                Delete {
+                    actor: 88,
+                    pos: 88,
+                    len: 88,
+                },
+                Delete {
+                    actor: 88,
+                    pos: 88,
+                    len: 88,
+                },
+                Delete {
+                    actor: 88,
+                    pos: 88,
+                    len: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 34,
+                    content: 2338,
+                },
+                Insert {
+                    actor: 9,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 29,
+                    pos: 29,
+                    content: 7453,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 2,
+                    pos: 34,
+                    content: 8738,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 4,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 1,
+                    pos: 254,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 89,
+                    pos: 89,
+                    len: 89,
+                },
+                Delete {
+                    actor: 89,
+                    pos: 89,
+                    len: 89,
+                },
+                Delete {
+                    actor: 89,
+                    pos: 89,
+                    len: 89,
+                },
+                Delete {
+                    actor: 89,
+                    pos: 89,
+                    len: 89,
+                },
+                Delete {
+                    actor: 88,
+                    pos: 88,
+                    len: 88,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 86,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 34,
+                    pos: 65,
+                    content: 34,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 2,
+                    content: 18432,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 40,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 72,
+                    len: 72,
+                },
+                Delete {
+                    actor: 72,
+                    pos: 89,
+                    len: 89,
+                },
+                Delete {
+                    actor: 89,
+                    pos: 89,
+                    len: 89,
+                },
+            ],
+        );
     }
 }

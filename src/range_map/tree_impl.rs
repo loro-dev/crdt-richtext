@@ -38,6 +38,7 @@ impl AnchorSet {
         self.end.extend(other.end.iter());
     }
 
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.start.is_empty() && self.end.is_empty()
     }
@@ -511,7 +512,7 @@ impl TreeRangeMap {
         self.tree
             .update(&neighbor_range.start..&neighbor_range.end, &mut |slice| {
                 if done {
-                    return false;
+                    return (false, None);
                 }
 
                 let start = slice.start.unwrap_or((0, 0));
@@ -551,7 +552,7 @@ impl TreeRangeMap {
                     }
                 }
 
-                updated
+                (updated, None)
             });
         assert!(visited_zero_span);
     }
@@ -1169,7 +1170,11 @@ impl BTreeTrait for TreeTrait {
         }
     }
 
-    fn calc_cache_leaf(cache: &mut Self::Cache, caches: &[Self::Elem]) -> CacheDiff {
+    fn calc_cache_leaf(
+        cache: &mut Self::Cache,
+        caches: &[Self::Elem],
+        diff: Option<Self::CacheDiff>,
+    ) -> CacheDiff {
         let mut len = 0;
         for child in caches.iter() {
             len += child.len;

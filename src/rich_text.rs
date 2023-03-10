@@ -1,15 +1,12 @@
 use std::{
-    cell::RefCell,
     fmt::Display,
-    num::NonZeroU64,
     ops::{Bound, RangeBounds},
-    rc::Rc,
 };
 
 use append_only_bytes::AppendOnlyBytes;
 
 use generic_btree::{
-    rle::{HasLength, Sliceable},
+    rle::{HasLength, Mergeable, Sliceable},
     BTree, MoveEvent, QueryResult,
 };
 use smallvec::SmallVec;
@@ -19,7 +16,7 @@ use crate::{rich_text::op::OpContent, ClientID, Counter, Lamport, OpID, Style};
 use self::{
     cursor::CursorMap,
     op::{Op, OpStore},
-    rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, Elem},
+    rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, CacheDiff, Elem},
 };
 
 mod cursor;
@@ -44,7 +41,6 @@ pub struct RichText {
 
 impl RichText {
     pub fn new(client_id: u64) -> Self {
-        let client_id = NonZeroU64::new(client_id).unwrap();
         let cursor_map: CursorMap = Default::default();
         let update_fn = cursor_map.gen_update_fn();
         let mut content: BTree<RichTreeTrait> = BTree::new();
@@ -211,10 +207,14 @@ impl RichText {
         let start_result = self.content.query::<IndexFinder>(&start);
         let end_result = self.content.query::<IndexFinder>(&end);
         let mut deleted = SmallVec::<[(OpID, usize); 4]>::new();
+
         // deletions don't remove things from the tree, they just mark them as dead
         let mut delete_fn = |elem: &mut Elem| {
             if elem.local_delete() {
                 deleted.push((elem.id, elem.rle_len()));
+                (-(elem.rle_len() as isize), -(elem.utf16_len as isize))
+            } else {
+                (0, 0)
             }
         };
         self.content
@@ -225,25 +225,39 @@ impl RichText {
                     {
                         // delete within one element
                         if start_idx >= slice.elements.len() {
-                            return false;
+                            return (false, None);
                         }
 
                         let elem = &mut slice.elements[start_idx];
                         if elem.is_dead() {
-                            return false;
+                            return (false, None);
                         }
 
-                        let additions = elem.update(start_offset, end_offset, &mut delete_fn);
+                        let (additions, diff) =
+                            elem.update(start_offset, end_offset, &mut delete_fn);
+                        let (len_diff, utf16_len_diff) = diff.unwrap();
                         if !additions.is_empty() {
+                            let len = additions.len();
                             slice
                                 .elements
                                 .splice(start_idx + 1..start_idx + 1, additions);
+                            Elem::try_merge_arr(slice.elements, start_idx, len + 1);
+                        } else if start_idx > 0 {
+                            Elem::try_merge_arr(slice.elements, start_idx - 1, 2);
+                        } else {
+                            Elem::try_merge_arr(slice.elements, start_idx, 1);
                         }
-                        return true;
+
+                        return (
+                            true,
+                            Some(CacheDiff::new_len_diff(len_diff, utf16_len_diff)),
+                        );
                     }
                     _ => {}
                 }
 
+                let mut len_diff = 0;
+                let mut utf16_len_diff = 0;
                 let mut end = match slice.end {
                     Some((end_idx, end_offset)) => {
                         if end_offset == 0 {
@@ -251,10 +265,12 @@ impl RichText {
                         } else {
                             let elem = &mut slice.elements[end_idx];
                             if !elem.is_dead() {
-                                let additions = elem.update(0, end_offset, &mut delete_fn);
+                                let (additions, diff) = elem.update(0, end_offset, &mut delete_fn);
                                 if !additions.is_empty() {
                                     slice.elements.splice(end_idx + 1..end_idx + 1, additions);
                                 }
+                                len_diff += diff.unwrap().0;
+                                utf16_len_diff += diff.unwrap().1;
                             }
                             end_idx + 1
                         }
@@ -268,8 +284,8 @@ impl RichText {
                             start_idx
                         } else {
                             let elem = &mut slice.elements[start_idx];
-                            if !elem.is_dead() {
-                                let additions =
+                            if !elem.is_dead() && start_offset < elem.rle_len() {
+                                let (additions, diff) =
                                     elem.update(start_offset, elem.rle_len(), &mut delete_fn);
                                 if !additions.is_empty() {
                                     end += additions.len();
@@ -277,6 +293,8 @@ impl RichText {
                                         .elements
                                         .splice(start_idx + 1..start_idx + 1, additions);
                                 }
+                                len_diff += diff.unwrap().0;
+                                utf16_len_diff += diff.unwrap().1;
                             }
                             start_idx + 1
                         }
@@ -285,10 +303,17 @@ impl RichText {
                 };
 
                 for elem in slice.elements[start..end].iter_mut() {
-                    delete_fn(elem);
+                    let diff = delete_fn(elem);
+                    len_diff += diff.0;
+                    utf16_len_diff += diff.1;
                 }
 
-                true
+                let begin = start.saturating_sub(2);
+                Elem::try_merge_arr(slice.elements, begin, end + 2 - begin);
+                (
+                    true,
+                    Some(CacheDiff::new_len_diff(len_diff, utf16_len_diff)),
+                )
             });
 
         for (start, len) in deleted {
@@ -454,7 +479,7 @@ impl RichText {
                     let end = elem
                         .rle_len()
                         .min((id.counter + leaf_del_len as Counter - elem.id.counter) as usize);
-                    let new = elements[index].update(offset, end, &mut f);
+                    let (new, _) = elements[index].update(offset, end, &mut f);
                     left_len -= end - offset;
                     if !new.is_empty() {
                         let new_len = new.len();
@@ -521,6 +546,47 @@ impl RichText {
     #[inline(always)]
     fn next_lamport(&self) -> u32 {
         self.store.next_lamport()
+    }
+
+    pub(crate) fn check(&self) {
+        self.content.check();
+    }
+
+    pub fn debug_log(&self) {
+        println!("Text len = {} (utf16={})", self.len(), self.utf16_len());
+        println!("Nodes len = {}", self.content.node_len());
+        let mut content_inner = format!("{:#?}", &self.content);
+        const MAX: usize = 100000;
+        if content_inner.len() > MAX {
+            for new_len in MAX.. {
+                if content_inner.is_char_boundary(new_len) {
+                    content_inner.truncate(new_len);
+                    break;
+                }
+            }
+        }
+        println!("ContentTree = {}", content_inner);
+        println!("Text = {}", self);
+    }
+
+    pub fn check_no_mergeable_neighbor(&self) {
+        let mut leaf_idx = Some(self.content.first_leaf());
+        while let Some(leaf) = leaf_idx {
+            let node = self.content.get_node(leaf);
+            let elements = node.elements();
+            for i in 0..elements.len() - 1 {
+                if elements[i].can_merge(&elements[i + 1]) {
+                    self.debug_log();
+                    panic!(
+                        "Found mergeable neighbor: \n{:#?} \n{:#?}",
+                        elements[i],
+                        elements[i + 1]
+                    );
+                }
+            }
+
+            leaf_idx = self.content.next_same_level_node(leaf);
+        }
     }
 }
 

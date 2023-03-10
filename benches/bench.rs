@@ -4,6 +4,7 @@ use crdt_range::{Anchor, AnchorRange, AnchorType, Annotation, OpID, RangeMergeRu
 use criterion::{criterion_group, criterion_main, Criterion};
 use pprof::flamegraph::{Direction, Options};
 use rand::{Rng, SeedableRng};
+use string_cache::DefaultAtom;
 
 struct PProfGuard {
     path: String,
@@ -47,7 +48,7 @@ fn a(n: u64) -> Annotation {
             },
         },
         merge_method: RangeMergeRule::Merge,
-        type_: String::new(),
+        type_: DefaultAtom::from(""),
         meta: None,
     }
 }

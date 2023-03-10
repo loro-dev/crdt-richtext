@@ -1,4 +1,5 @@
 use std::{
+    mem::replace,
     ops::ControlFlow,
     sync::{Arc, Mutex},
 };
@@ -38,6 +39,7 @@ impl CursorMap {
         })
     }
 
+    #[inline]
     pub fn update(&mut self, event: MoveEvent<Elem>) {
         listen(event, &mut self.map.try_lock().unwrap());
     }
@@ -101,29 +103,44 @@ impl CursorMap {
 }
 
 fn listen(event: MoveEvent<Elem>, m: &mut IdMap<Cursor>) {
-    if let Some(leaf) = event.target_leaf {
-        let elem = &event.elem;
-        if let Some(mut start) = m.get(elem.id) {
-            if start.value == Cursor::Insert(leaf) {
-                if start.start_counter + (start.len as Counter)
-                    < elem.id.counter + elem.rle_len() as Counter
-                {
-                    start.len = (elem.id.counter - start.start_counter) as usize + elem.rle_len();
-                }
-                return;
+    let Some(leaf) = event.target_leaf else { return };
+    let elem = event.elem;
+    m.remove_range(elem.id, elem.atom_len());
+    let mut id = elem.id;
+    let mut cursor = Cursor::Insert(leaf);
+    let mut len = elem.atom_len();
+    if let Some(mut start) = m.get(elem.id) {
+        if start.value == Cursor::Insert(leaf) {
+            if start.start_counter + (start.len as Counter)
+                < elem.id.counter + elem.atom_len() as Counter
+            {
+                start.len = (elem.id.counter - start.start_counter) as usize + elem.atom_len();
             }
-
-            if start.start_counter == elem.id.counter {
-                start.value = Cursor::Insert(leaf);
-                start.len = elem.rle_len();
-                return;
-            }
-
-            start.len = (elem.id.counter - start.start_counter) as usize;
+            return;
         }
 
-        m.insert(elem.id, Cursor::Insert(leaf), elem.atom_len());
+        if start.start_counter == elem.id.counter {
+            if elem.rle_len() >= start.len {
+                start.value = Cursor::Insert(leaf);
+                start.len = elem.atom_len();
+                return;
+            } else {
+                let left_len = start.len - elem.atom_len();
+                let start_id = elem.id.inc(elem.atom_len() as Counter);
+                let old_value = replace(&mut start.value, Cursor::Insert(leaf));
+                start.len = elem.atom_len();
+                id = start_id;
+                cursor = old_value;
+                len = left_len;
+            }
+        } else {
+            start.len = start
+                .len
+                .min((elem.id.counter - start.start_counter) as usize);
+        }
     }
+
+    m.insert(id, cursor, len);
 }
 
 impl Default for CursorMap {
