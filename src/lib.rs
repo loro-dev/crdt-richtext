@@ -9,12 +9,14 @@
 //! into the middle of tombstones).
 //!
 //!
+//!
+
+#![deny(unsafe_code)]
 
 use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap},
     fmt::Debug,
-    num::NonZeroU64,
     ops::{Bound, Range, RangeBounds},
     sync::Arc,
 };

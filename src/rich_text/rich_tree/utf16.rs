@@ -10,7 +10,7 @@ pub fn get_utf16_len(bytes: &BytesSlice) -> usize {
 #[inline(always)]
 fn bytes_to_str(bytes: &BytesSlice) -> &str {
     // SAFETY: we are sure the range is valid utf8
-    let str = unsafe { std::str::from_utf8_unchecked(&bytes[..]) };
+    let str = std::str::from_utf8(&bytes[..]).unwrap();
     str
 }
 
