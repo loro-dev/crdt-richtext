@@ -1,6 +1,5 @@
 use std::{
     mem::replace,
-    ops::ControlFlow,
     sync::{Arc, Mutex},
 };
 
@@ -105,38 +104,55 @@ impl CursorMap {
 fn listen(event: MoveEvent<Elem>, m: &mut IdMap<Cursor>) {
     let Some(leaf) = event.target_leaf else { return };
     let elem = event.elem;
-    m.remove_range(elem.id, elem.atom_len());
     let mut id = elem.id;
     let mut cursor = Cursor::Insert(leaf);
     let mut len = elem.atom_len();
-    if let Some(mut start) = m.get(elem.id) {
-        if start.value == Cursor::Insert(leaf) {
-            if start.start_counter + (start.len as Counter)
-                < elem.id.counter + elem.atom_len() as Counter
-            {
-                start.len = (elem.id.counter - start.start_counter) as usize + elem.atom_len();
+    'handle_old: {
+        if let Some(nearest_last_span) = m.remove_range_return_last(elem.id, elem.atom_len()) {
+            let mut nearest_last = nearest_last_span.try_lock().unwrap();
+            if nearest_last.start_counter + (nearest_last.len as Counter) <= elem.id.counter {
+                // It have no overlap with the new element, break here
+                break 'handle_old;
             }
-            return;
-        }
 
-        if start.start_counter == elem.id.counter {
-            if elem.rle_len() >= start.len {
-                start.value = Cursor::Insert(leaf);
-                start.len = elem.atom_len();
+            if nearest_last.value == Cursor::Insert(leaf) {
+                // already has the same value as new elem
+                if nearest_last.start_counter + (nearest_last.len as Counter)
+                    < elem.id.counter + elem.atom_len() as Counter
+                {
+                    // extend the length if it's not enough
+                    nearest_last.len =
+                        (elem.id.counter - nearest_last.start_counter) as usize + elem.atom_len();
+                }
                 return;
-            } else {
-                let left_len = start.len - elem.atom_len();
-                let start_id = elem.id.inc(elem.atom_len() as Counter);
-                let old_value = replace(&mut start.value, Cursor::Insert(leaf));
-                start.len = elem.atom_len();
-                id = start_id;
-                cursor = old_value;
-                len = left_len;
             }
-        } else {
-            start.len = start
-                .len
-                .min((elem.id.counter - start.start_counter) as usize);
+
+            if nearest_last.start_counter == elem.id.counter {
+                // both have the same start counter
+                if elem.rle_len() >= nearest_last.len {
+                    // if new elem is longer, replace the target value
+                    nearest_last.value = Cursor::Insert(leaf);
+                    nearest_last.len = elem.atom_len();
+                    return;
+                } else {
+                    // if new elem is shorter, split the last span:
+                    //
+                    // 1. set the new value and new len to the span
+                    // 2. insert the rest of the last span to the map
+                    let left_len = nearest_last.len - elem.atom_len();
+                    let start_id = elem.id.inc(elem.atom_len() as Counter);
+                    let old_value = replace(&mut nearest_last.value, Cursor::Insert(leaf));
+                    nearest_last.len = elem.atom_len();
+                    id = start_id;
+                    cursor = old_value;
+                    len = left_len;
+                }
+            } else {
+                // remove the overlapped part from last span
+                nearest_last.len = nearest_last
+                    .len
+                    .min((elem.id.counter - nearest_last.start_counter) as usize);
+            }
         }
     }
 

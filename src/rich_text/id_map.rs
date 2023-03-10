@@ -74,25 +74,26 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
 
     /// Remove any entries that start within the range of (exclusive_from, exclusive_from + len)
     ///
-    /// Perf: maybe return the mutex guar from here?
-    pub fn remove_range(&mut self, exclusive_from: OpID, len: usize) {
+    /// It'll return the pointer to the alive last entry, which is the same as [`IdMap::get_last`]
+    pub fn remove_range_return_last(
+        &mut self,
+        exclusive_from: OpID,
+        len: usize,
+    ) -> Option<Arc<Mutex<Entry<Value>>>> {
         let last_id = exclusive_from.inc((len - 1) as Counter);
-        let Some(client_map) = self.map.get_mut(&last_id.client) else { return };
+        let Some(client_map) = self.map.get_mut(&last_id.client) else { return None };
         loop {
-            let item = client_map
+            let mutex_item = client_map
                 .range(..=last_id.counter)
                 .next_back()
-                .map(|(counter, v)| {
-                    let v = v.try_lock().unwrap();
-                    debug_assert_eq!(v.start_counter, *counter);
-                    v
-                });
+                .map(|(_, v)| v);
 
-            let Some(item_inner) = item.as_ref() else { return };
+            let item = mutex_item.map(|x| x.try_lock().unwrap());
+            let Some(item_inner) = item.as_ref() else { return None };
             let item_counter = item_inner.start_counter;
             let item_end = item_inner.len as Counter + item_counter;
             if item_inner.start_counter <= exclusive_from.counter {
-                return;
+                return mutex_item.cloned();
             }
 
             drop(item);
