@@ -26,15 +26,24 @@ impl BTreeTrait for RichTreeTrait {
                 Some(diff)
             }
             None => {
-                cache.len = 0;
-                cache.utf16_len = 0;
-                cache.anchor_set.clear();
+                let mut len = 0;
+                let mut utf16_len = 0;
                 for child in caches.iter() {
-                    cache.len += child.cache.len;
-                    cache.utf16_len += child.cache.utf16_len;
-                    cache.anchor_set.union_(&child.cache.anchor_set);
+                    len += child.cache.len;
+                    utf16_len += child.cache.utf16_len;
+                    cache.anchor_set.process_diff(&child.cache.anchor_set);
                 }
-                None
+
+                let temp_diff = cache.anchor_set.finish_diff_calc();
+                let diff = CacheDiff {
+                    start: temp_diff.start,
+                    end: temp_diff.end,
+                    len_diff: len as isize - cache.len as isize,
+                    utf16_len_diff: utf16_len as isize - cache.utf16_len as isize,
+                };
+                cache.len = len;
+                cache.utf16_len = utf16_len;
+                Some(diff)
             }
         }
     }

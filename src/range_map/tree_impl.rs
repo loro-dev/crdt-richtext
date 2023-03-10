@@ -33,6 +33,10 @@ pub struct AnchorSet {
 
 impl AnchorSet {
     pub fn union_(&mut self, other: &Self) {
+        if other.is_empty() {
+            return;
+        }
+
         self.start.extend(other.start.iter());
         self.end.extend(other.end.iter());
     }
@@ -108,6 +112,7 @@ impl AnchorSet {
         if self.is_empty() {
             return Default::default();
         }
+
         // if the child has an element that is not in the parent, then it is a new element,
         // it will have ann + Self::NEW_ELEM_THRESHOLD
 
