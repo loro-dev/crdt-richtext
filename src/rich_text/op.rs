@@ -30,7 +30,7 @@ impl OpContent {
 
 #[derive(Debug, Clone)]
 pub enum OpContent {
-    Ann(RangeOp),
+    Ann(Box<RangeOp>),
     Text(TextInsertOp),
     Del(DeleteOp),
 }
@@ -41,12 +41,36 @@ pub struct TextInsertOp {
     pub left: Option<OpID>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DeleteOp {
     pub start: OpID,
     // can be negative, so we can merge backward
     pub len: i32,
 }
+
+impl HasLength for DeleteOp {
+    fn rle_len(&self) -> usize {
+        self.len.unsigned_abs() as usize
+    }
+}
+
+impl PartialEq for DeleteOp {
+    fn eq(&self, other: &Self) -> bool {
+        if self.start.client != other.start.client {
+            return false;
+        }
+
+        let p = if other.len > 0 {
+            self.positive()
+        } else {
+            self.negative()
+        };
+
+        p.start.counter == other.start.counter && p.len == other.len
+    }
+}
+
+impl Eq for DeleteOp {}
 
 impl DeleteOp {
     fn slice(&self, start: usize, end: usize) -> Self {
@@ -65,17 +89,84 @@ impl DeleteOp {
         }
     }
 
-    pub fn next_id(&self) -> OpID {
-        self.start.inc_i32(self.len)
+    fn next_counter(&self) -> (i32, Option<i32>) {
+        (
+            self.start.counter as i32 + self.len,
+            if self.len.abs() == 1 {
+                if self.len > 0 {
+                    Some(self.start.counter as i32 - 1)
+                } else {
+                    Some(self.start.counter as i32 + 1)
+                }
+            } else {
+                None
+            },
+        )
     }
 
-    pub fn positive_(&mut self) {
+    pub fn positive(&self) -> DeleteOp {
         if self.len > 0 {
-            return;
+            *self
+        } else {
+            DeleteOp {
+                start: self.start.inc_i32(self.len + 1),
+                len: -self.len,
+            }
+        }
+    }
+
+    pub fn negative(&self) -> DeleteOp {
+        if self.len < 0 {
+            *self
+        } else {
+            DeleteOp {
+                start: self.start.inc_i32(self.len - 1),
+                len: -self.len,
+            }
+        }
+    }
+
+    fn direction(&self) -> u8 {
+        if self.len.abs() == 1 {
+            0b11
+        } else if self.len > 0 {
+            0b01
+        } else {
+            0b10
+        }
+    }
+}
+
+impl Mergeable for DeleteOp {
+    fn can_merge(&self, rhs: &Self) -> bool {
+        if self.start.client != rhs.start.client || (self.direction() & rhs.direction()) == 0 {
+            return false;
         }
 
-        self.start = self.start.inc_i32(self.len + 1);
-        self.len = -self.len;
+        let (a, b) = self.next_counter();
+        a == rhs.start.counter as i32 || b == Some(rhs.start.counter as i32)
+    }
+
+    fn merge_right(&mut self, rhs: &Self) {
+        if self.len > 1 {
+            self.len += rhs.len.abs();
+        } else if self.len < -1 {
+            self.len -= rhs.len.abs();
+        } else if self.len.abs() == 1 {
+            if rhs.start.counter > self.start.counter {
+                self.len = rhs.len.abs() + 1;
+            } else {
+                self.len = -rhs.len.abs() - 1;
+            }
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn merge_left(&mut self, left: &Self) {
+        let mut left = *left;
+        left.merge_right(self);
+        *self = left;
     }
 }
 
@@ -99,14 +190,7 @@ impl Mergeable for Op {
                     ins.left == Some(self.id.inc(self.rle_len() as Counter - 1))
                         && left.text.can_merge(&ins.text)
                 }
-                (OpContent::Del(a), OpContent::Del(b)) => {
-                    if a.start.client != b.start.client {
-                        false
-                    } else {
-                        a.next_id().counter == b.start.counter
-                        // TODO: +1/-1
-                    }
-                }
+                (OpContent::Del(a), OpContent::Del(b)) => a.can_merge(b),
                 _ => false,
             }
     }
@@ -116,9 +200,7 @@ impl Mergeable for Op {
             (OpContent::Text(ins), OpContent::Text(ins2)) => {
                 ins.text.try_merge(&ins2.text).unwrap();
             }
-            (OpContent::Del(del), OpContent::Del(del2)) => {
-                del.len += del2.len;
-            }
+            (OpContent::Del(del), OpContent::Del(del2)) => del.merge_right(del2),
             _ => unreachable!(),
         }
     }
@@ -332,4 +414,26 @@ pub enum CanApply {
     Trim(Counter),
     Pending,
     Seen,
+}
+
+#[cfg(test)]
+mod test {
+    use generic_btree::rle::Mergeable;
+
+    use crate::OpID;
+
+    use super::DeleteOp;
+
+    #[test]
+    fn del_merge() {
+        let a = DeleteOp {
+            start: OpID::new(1, 1),
+            len: 2,
+        };
+        let b = DeleteOp {
+            start: OpID::new(1, 3),
+            len: -1,
+        };
+        assert!(a.can_merge(&b))
+    }
 }

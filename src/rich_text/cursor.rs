@@ -3,20 +3,23 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use generic_btree::{rle::HasLength, ArenaIndex, MoveEvent, MoveListener};
+use generic_btree::{
+    rle::{HasLength, Mergeable},
+    ArenaIndex, MoveEvent, MoveListener,
+};
 
 use crate::{Counter, OpID};
 
 use super::{
     id_map::IdMap,
-    op::{Op, OpContent},
+    op::{DeleteOp, Op, OpContent},
     rich_tree::Elem,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cursor {
     Insert(ArenaIndex),
-    DeleteBackward(OpID),
+    Delete(DeleteOp),
 }
 
 #[derive(Debug)]
@@ -49,17 +52,19 @@ impl CursorMap {
             OpContent::Del(del) => del,
             _ => unreachable!(),
         };
-        assert!(content.len < 0);
         if let Some(mut start) = map.get_last(op.id) {
             if start.start_counter == op.id.counter {
                 debug_assert!(op.rle_len() > start.len);
-                debug_assert_eq!(start.value, Cursor::DeleteBackward(content.start));
+                let Cursor::Delete(del) = &mut start.value else { unreachable!() };
+                debug_assert_eq!(del.start, content.start);
+                del.len = content.len;
                 start.len = op.rle_len();
                 return;
             } else if start.start_counter + start.len as Counter == op.id.counter {
-                if let Cursor::DeleteBackward(del) = start.value {
-                    if del.inc_i32(-(start.len as i32)) == content.start {
-                        start.len += (-content.len) as usize;
+                if let Cursor::Delete(del) = &mut start.value {
+                    if del.can_merge(content) {
+                        del.merge_right(content);
+                        start.len += content.rle_len();
                         return;
                     }
                 }
@@ -71,7 +76,7 @@ impl CursorMap {
 
         map.insert(
             op.id,
-            Cursor::DeleteBackward(content.start),
+            Cursor::Delete(*content),
             content.len.unsigned_abs() as usize,
         );
     }

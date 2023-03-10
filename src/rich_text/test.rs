@@ -88,6 +88,16 @@ mod delete {
         let node = text.content.get_node(text.content.first_leaf());
         assert_eq!(node.elements().len(), 3);
     }
+
+    #[test]
+    fn delete_op_merge() {
+        let mut text = RichText::new(1);
+        text.insert(0, "12345");
+        text.delete(0..1);
+        text.delete(0..1);
+        text.delete(0..1);
+        assert_eq!(text.store.op_len(), 2);
+    }
 }
 
 mod insert {

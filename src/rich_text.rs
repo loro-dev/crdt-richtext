@@ -429,8 +429,8 @@ impl RichText {
                             .push(Elem::new(op.id, text.left, op.lamport, text.text));
                     }
                 }
-                OpContent::Del(mut del) => {
-                    del.positive_();
+                OpContent::Del(del) => {
+                    let del = del.positive();
                     self.update_elem_in_id_range(del.start, del.len as usize, |elem| {
                         elem.apply_remote_delete()
                     })

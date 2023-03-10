@@ -1584,4 +1584,49 @@ mod test {
             ],
         );
     }
+
+    #[test]
+    fn fuzz_9() {
+        fuzzing(
+            2,
+            vec![
+                Delete {
+                    actor: 184,
+                    pos: 183,
+                    len: 183,
+                },
+                Insert {
+                    actor: 2,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 255,
+                    content: 65535,
+                },
+                Sync(255, 255),
+                Delete {
+                    actor: 255,
+                    pos: 255,
+                    len: 255,
+                },
+            ],
+        );
+    }
 }
