@@ -224,8 +224,9 @@ impl RichText {
                 (0, 0)
             }
         };
-        self.content
-            .update(&start_result..&end_result, &mut |slice| {
+        self.content.update_with_filter(
+            &start_result..&end_result,
+            &mut |slice| {
                 match (slice.start, slice.end) {
                     (Some((start_idx, start_offset)), Some((end_idx, end_offset)))
                         if start_idx == end_idx =>
@@ -321,7 +322,9 @@ impl RichText {
                     true,
                     Some(CacheDiff::new_len_diff(len_diff, utf16_len_diff)),
                 )
-            });
+            },
+            &|cache| cache.len > 0,
+        );
 
         for (start, len) in deleted {
             let op = self

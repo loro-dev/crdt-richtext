@@ -347,18 +347,22 @@ impl Cache {
     fn apply_diff(&mut self, diff: &CacheDiff) {
         self.len = (self.len as isize + diff.len_diff) as usize;
         self.utf16_len = (self.utf16_len as isize + diff.utf16_len_diff) as usize;
-        for ann in diff.start.iter() {
-            if ann >= 0 {
-                self.anchor_set.start.insert(ann);
-            } else {
-                self.anchor_set.start.remove(&(-ann));
+        if diff.start.len() > 0 {
+            for ann in diff.start.iter() {
+                if ann >= 0 {
+                    self.anchor_set.start.insert(ann);
+                } else {
+                    self.anchor_set.start.remove(&(-ann));
+                }
             }
         }
-        for ann in diff.end.iter() {
-            if ann >= 0 {
-                self.anchor_set.end.insert(ann);
-            } else {
-                self.anchor_set.end.remove(&(-ann));
+        if diff.end.len() > 0 {
+            for ann in diff.end.iter() {
+                if ann >= 0 {
+                    self.anchor_set.end.insert(ann);
+                } else {
+                    self.anchor_set.end.remove(&(-ann));
+                }
             }
         }
     }
