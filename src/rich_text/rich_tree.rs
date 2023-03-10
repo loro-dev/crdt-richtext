@@ -13,7 +13,7 @@ use self::{rich_tree_btree_impl::RichTreeTrait, utf16::get_utf16_len};
 
 pub(crate) mod query;
 pub(crate) mod rich_tree_btree_impl;
-mod utf16;
+pub mod utf16;
 
 type AnnIdx = i32;
 

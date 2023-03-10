@@ -5,7 +5,6 @@ use generic_btree::{
 use std::{
     collections::BTreeSet,
     mem::take,
-    num::NonZeroU64,
     ops::{Range, RangeInclusive},
     sync::Arc,
 };
@@ -440,7 +439,8 @@ impl TreeRangeMap {
                 .anchor_set
                 .start
                 .remove(&ann);
-            self.tree.recursive_update_cache(right_path.leaf, true);
+            self.tree
+                .recursive_update_cache(right_path.leaf, true, None);
             new_elem.anchor_set.start.insert(ann);
         }
         for ann in new_end_set {
@@ -451,7 +451,7 @@ impl TreeRangeMap {
                 .anchor_set
                 .end
                 .remove(&ann);
-            self.tree.recursive_update_cache(left_path.leaf, true);
+            self.tree.recursive_update_cache(left_path.leaf, true, None);
             new_elem.anchor_set.end.insert(ann);
         }
         if use_next {
@@ -574,7 +574,7 @@ impl TreeRangeMap {
 
         let path = self.tree.query::<IndexFinder>(&pos);
         self.tree.update_leaf(path.leaf, |elements| {
-            set_anchor_set(anchor_set, path, elements)
+            (set_anchor_set(anchor_set, path, elements), None)
         })
     }
 }

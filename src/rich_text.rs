@@ -11,7 +11,10 @@ use generic_btree::{
 };
 use smallvec::SmallVec;
 
-use crate::{rich_text::op::OpContent, ClientID, Counter, Lamport, OpID, Style};
+use crate::{
+    rich_text::{op::OpContent, rich_tree::utf16::get_utf16_len},
+    ClientID, Counter, Lamport, OpID, Style,
+};
 
 use self::{
     cursor::CursorMap,
@@ -76,6 +79,10 @@ impl RichText {
         let start = self.bytes.len();
         self.bytes.push_str(string);
         let slice = self.bytes.slice(start..);
+        let cache_diff = Some(CacheDiff::new_len_diff(
+            string.len() as isize,
+            get_utf16_len(&slice) as isize,
+        ));
         let id = self.next_id();
         let lamport = self.next_lamport();
         if index == 0 {
@@ -129,13 +136,13 @@ impl RichText {
                         // can merge directly
                         last.merge_slice(&slice);
                         self.cursor_map.update(MoveEvent::new_move(path.leaf, last));
-                        return true;
+                        return (true, cache_diff);
                     }
                     let elem = Elem::new(id, left, lamport, slice);
                     self.cursor_map
                         .update(MoveEvent::new_move(path.leaf, &elem));
                     elements.push(elem);
-                    return true;
+                    return (true, cache_diff);
                 } else {
                     // Elements cannot be empty
                     unreachable!();
@@ -158,7 +165,7 @@ impl RichText {
                     elements[index].merge_slice(&slice);
                     self.cursor_map
                         .update(MoveEvent::new_move(path.leaf, &elements[index]));
-                    return true;
+                    return (true, cache_diff);
                 }
 
                 elements.insert(
@@ -167,7 +174,7 @@ impl RichText {
                 );
                 self.cursor_map
                     .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
-                return true;
+                return (true, cache_diff);
             }
 
             // need to split element
@@ -182,7 +189,7 @@ impl RichText {
             );
             self.cursor_map
                 .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
-            true
+            (true, cache_diff)
         });
 
         self.store
@@ -492,7 +499,8 @@ impl RichText {
                     }
                 }
                 assert_eq!(left_len, 0);
-                true
+                // TODO: Perf can be optimized by merge the cache diff from f
+                (true, None)
             });
             id.counter += leaf_del_len as Counter;
             len -= leaf_del_len;
