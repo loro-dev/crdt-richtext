@@ -1,5 +1,7 @@
 use std::{
+    cell::{RefCell, RefMut},
     collections::BTreeMap,
+    rc::Rc,
     sync::{Arc, Mutex, MutexGuard},
 };
 
@@ -7,19 +9,13 @@ use fxhash::FxHashMap;
 
 use crate::{ClientID, Counter, OpID};
 
-type Tree<T> = BTreeMap<Counter, Arc<Mutex<Entry<T>>>>;
+type Tree<T> = BTreeMap<Counter, Rc<RefCell<Entry<T>>>>;
 /// This structure helps to map a range of IDs to a value.
 ///
 /// It's the call site's responsibility to ensure there is no overlap in the range
 #[derive(Debug, Default)]
 pub(super) struct IdMap<Value> {
     pub(super) map: FxHashMap<ClientID, Tree<Value>>,
-}
-
-#[derive(Debug)]
-struct Change<Value> {
-    id: ClientID,
-    value: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -44,13 +40,13 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
         self.map.is_empty()
     }
 
-    pub fn get(&self, id: OpID) -> Option<MutexGuard<'_, Entry<Value>>> {
+    pub fn get(&self, id: OpID) -> Option<RefMut<'_, Entry<Value>>> {
         let client_map = self.map.get(&id.client)?;
         client_map
             .range(..=id.counter)
             .next_back()
             .and_then(|(counter, v)| {
-                let v = v.try_lock().unwrap();
+                let v = v.borrow_mut();
                 debug_assert_eq!(v.start_counter, *counter);
                 if counter + v.len as Counter > id.counter {
                     Some(v)
@@ -60,13 +56,13 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
             })
     }
 
-    pub fn get_last(&self, id: OpID) -> Option<MutexGuard<'_, Entry<Value>>> {
+    pub fn get_last(&self, id: OpID) -> Option<RefMut<'_, Entry<Value>>> {
         let client_map = self.map.get(&id.client)?;
         client_map
             .range(..=id.counter)
             .next_back()
             .map(|(counter, v)| {
-                let v = v.try_lock().unwrap();
+                let v = v.borrow_mut();
                 debug_assert_eq!(v.start_counter, *counter);
                 v
             })
@@ -79,7 +75,7 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
         &mut self,
         exclusive_from: OpID,
         len: usize,
-    ) -> Option<Arc<Mutex<Entry<Value>>>> {
+    ) -> Option<Rc<RefCell<Entry<Value>>>> {
         let last_id = exclusive_from.inc((len - 1) as Counter);
         let Some(client_map) = self.map.get_mut(&last_id.client) else { return None };
         loop {
@@ -88,7 +84,7 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
                 .next_back()
                 .map(|(_, v)| v);
 
-            let item = mutex_item.map(|x| x.try_lock().unwrap());
+            let item = mutex_item.map(|x| x.borrow_mut());
             let Some(item_inner) = item.as_ref() else { return None };
             let item_counter = item_inner.start_counter;
             let item_end = item_inner.len as Counter + item_counter;
@@ -100,7 +96,7 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
             let item = client_map.remove(&item_counter).unwrap();
             let new_item_counter = last_id.counter + 1;
             if item_end > new_item_counter {
-                let mut inner = item.try_lock().unwrap();
+                let mut inner = item.borrow_mut();
                 inner.len = (item_end - new_item_counter) as usize;
                 inner.start_counter = new_item_counter;
                 drop(inner);
@@ -118,7 +114,7 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
             self.get(id).unwrap()
         );
         let client_map = self.map.entry(id.client).or_default();
-        let elem = Arc::new(Mutex::new(Entry {
+        let elem = Rc::new(RefCell::new(Entry {
             len,
             value: v,
             start_counter: id.counter,
@@ -147,7 +143,7 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
         } else {
             // adjust length + split
             let start_counter = id.counter + len as Counter;
-            let new_elem = Arc::new(Mutex::new(Entry {
+            let new_elem = Rc::new(RefCell::new(Entry {
                 len: g.len - len - (id.counter - g.start_counter) as usize,
                 value: g.value.clone(),
                 start_counter,

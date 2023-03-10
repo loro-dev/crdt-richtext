@@ -89,8 +89,11 @@ pub fn main() {
 
 #[inline(never)]
 fn bench(actions: Vec<TextAction>) {
-    for _ in 0..10 {
+    #[global_allocator]
+    static ALLOC: dhat::Alloc = dhat::Alloc;
+    for _ in 0..1 {
         let mut text = RichText::new(1);
+        let profiler = dhat::Profiler::builder().trim_backtraces(None).build();
         for action in actions.iter() {
             if action.del > 0 {
                 text.delete(action.pos..action.pos + action.del);
@@ -99,6 +102,7 @@ fn bench(actions: Vec<TextAction>) {
                 text.insert(action.pos, &action.ins)
             }
         }
+        drop(profiler);
         // text.debug_log()
     }
 }

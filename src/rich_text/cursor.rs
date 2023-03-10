@@ -109,7 +109,7 @@ fn listen(event: MoveEvent<Elem>, m: &mut IdMap<Cursor>) {
     let mut len = elem.atom_len();
     'handle_old: {
         if let Some(nearest_last_span) = m.remove_range_return_last(elem.id, elem.atom_len()) {
-            let mut nearest_last = nearest_last_span.try_lock().unwrap();
+            let mut nearest_last = nearest_last_span.borrow_mut();
             if nearest_last.start_counter + (nearest_last.len as Counter) <= elem.id.counter {
                 // It have no overlap with the new element, break here
                 break 'handle_old;

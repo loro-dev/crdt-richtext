@@ -13,7 +13,7 @@ impl BTreeTrait for RichTreeTrait {
 
     type WriteBuffer = ();
 
-    const MAX_LEN: usize = 12;
+    const MAX_LEN: usize = 32;
 
     fn calc_cache_internal(
         cache: &mut Self::Cache,

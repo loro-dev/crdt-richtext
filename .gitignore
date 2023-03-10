@@ -2,3 +2,4 @@
 /Cargo.lock
 *.log
 flamegraph.svg
+dhat-heap.json
