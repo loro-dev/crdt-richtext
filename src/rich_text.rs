@@ -566,6 +566,7 @@ impl RichText {
     pub fn debug_log(&self) {
         println!("Text len = {} (utf16={})", self.len(), self.utf16_len());
         println!("Nodes len = {}", self.content.node_len());
+        println!("Op len = {}", self.store.op_len());
         let mut content_inner = format!("{:#?}", &self.content);
         const MAX: usize = 100000;
         if content_inner.len() > MAX {
@@ -577,7 +578,8 @@ impl RichText {
             }
         }
         println!("ContentTree = {}", content_inner);
-        println!("Text = {}", self);
+        // println!("Text = {}", self);
+        println!("Store = {:#?}", &self.store);
     }
 
     pub fn check_no_mergeable_neighbor(&self) {

@@ -167,11 +167,31 @@ impl Sliceable for Op {
     }
 }
 
-#[derive(Debug)]
 pub struct OpStore {
     map: FxHashMap<ClientID, Vec<Op>>,
     client: ClientID,
     next_lamport: Lamport,
+}
+
+impl std::fmt::Debug for OpStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpStore")
+            .field("client", &self.client)
+            .field("next_lamport", &self.next_lamport)
+            .field("map", &self.map.len())
+            .finish()?;
+
+        for (key, value) in self.map.iter() {
+            f.write_str("\n")?;
+            f.write_str(&key.to_string())?;
+            for op in value.iter() {
+                f.write_str("\n    ")?;
+                f.write_fmt(format_args!("{:?}", op))?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl OpStore {
@@ -300,6 +320,10 @@ impl OpStore {
     #[inline(always)]
     pub fn next_lamport(&self) -> u32 {
         self.next_lamport
+    }
+
+    pub fn op_len(&self) -> usize {
+        self.map.iter().map(|x| x.1.len()).sum()
     }
 }
 
