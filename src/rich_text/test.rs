@@ -206,3 +206,26 @@ mod apply {
         assert_eq!(a.to_string(), b.to_string());
     }
 }
+
+mod annotation {
+    use crate::{AnchorType, InternalString};
+
+    use super::*;
+
+    fn bold() -> Style {
+        Style {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::Before,
+            merge_method: crate::RangeMergeRule::Merge,
+            type_: InternalString::from("bold"),
+        }
+    }
+
+    #[test]
+    fn annotate_simple() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..2, bold());
+        dbg!(&text.iter().collect::<Vec<_>>());
+    }
+}

@@ -2,7 +2,6 @@ use std::{
     cell::{RefCell, RefMut},
     collections::BTreeMap,
     rc::Rc,
-    sync::{Arc, Mutex, MutexGuard},
 };
 
 use fxhash::FxHashMap;

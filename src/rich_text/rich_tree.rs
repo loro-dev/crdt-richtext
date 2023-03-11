@@ -11,6 +11,8 @@ use std::{mem::take, str::Chars};
 
 use self::{rich_tree_btree_impl::RichTreeTrait, utf16::get_utf16_len};
 
+use super::ann::{AnchorSetDiff, CacheAnchorSet, ElemAnchorSet};
+
 pub(crate) mod query;
 pub(crate) mod rich_tree_btree_impl;
 pub mod utf16;
@@ -25,7 +27,7 @@ pub struct Elem {
     pub string: BytesSlice,
     pub utf16_len: usize,
     pub status: Status,
-    pub anchor_set: AnchorSet,
+    pub anchor_set: ElemAnchorSet,
 }
 
 impl Elem {
@@ -37,7 +39,7 @@ impl Elem {
             utf16_len: get_utf16_len(&string),
             string,
             status: Status::ALIVE,
-            anchor_set: AnchorSet::default(),
+            anchor_set: Default::default(),
         }
     }
 
@@ -78,10 +80,7 @@ impl Elem {
         let s = self.string.slice_clone(offset..);
         let utf16_len = get_utf16_len(&s);
         let right = Self {
-            anchor_set: AnchorSet {
-                start: Default::default(),
-                end: take(&mut self.anchor_set.end),
-            },
+            anchor_set: self.anchor_set.split(),
             id: self.id.inc(start as Counter),
             left: Some(self.id.inc(start as Counter - 1)),
             lamport: self.lamport + start as Lamport,
@@ -201,14 +200,13 @@ impl Mergeable for Elem {
             && rhs.left == Some(self.id_last())
             && self.status == rhs.status
             && self.string.can_merge(&rhs.string)
-            && self.anchor_set.end.is_empty()
-            && rhs.anchor_set.start.is_empty()
+            && self.anchor_set.can_merge(&rhs.anchor_set)
     }
 
     fn merge_right(&mut self, rhs: &Self) {
         self.string.try_merge(&rhs.string).unwrap();
         self.utf16_len += rhs.utf16_len;
-        self.anchor_set.end = rhs.anchor_set.end.clone();
+        self.anchor_set.merge_right(&rhs.anchor_set);
     }
 
     fn merge_left(&mut self, lhs: &Self) {
@@ -219,7 +217,7 @@ impl Mergeable for Elem {
         string.try_merge(&self.string).unwrap();
         self.string = string;
         self.utf16_len += lhs.utf16_len;
-        self.anchor_set.start = lhs.anchor_set.start.clone();
+        self.anchor_set.merge_left(&lhs.anchor_set);
     }
 }
 
@@ -244,18 +242,7 @@ impl Sliceable for Elem {
         let s = self.string.slice_clone(range);
         let utf16_len = get_utf16_len(&s);
         Self {
-            anchor_set: AnchorSet {
-                start: if start == 0 {
-                    self.anchor_set.start.clone()
-                } else {
-                    Default::default()
-                },
-                end: if end == self.atom_len() {
-                    self.anchor_set.end.clone()
-                } else {
-                    Default::default()
-                },
-            },
+            anchor_set: self.anchor_set.trim(start != 0, end != self.rle_len()),
             id: self.id.inc(start as Counter),
             left: if start == 0 {
                 self.left
@@ -287,12 +274,7 @@ impl Sliceable for Elem {
             return;
         }
 
-        if start != 0 {
-            self.anchor_set.start.clear();
-        }
-        if end != self.atom_len() {
-            self.anchor_set.end.clear();
-        }
+        self.anchor_set.trim_(start != 0, end != self.atom_len());
         self.id = self.id.inc(start as Counter);
         self.left = if start == 0 {
             self.left
@@ -332,13 +314,12 @@ impl Status {
 pub(crate) struct Cache {
     pub len: usize,
     pub utf16_len: usize,
-    pub anchor_set: AnchorSet,
+    pub anchor_set: CacheAnchorSet,
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct CacheDiff {
-    start: SmallSetI32,
-    end: SmallSetI32,
+    anchor_diff: AnchorSetDiff,
     len_diff: isize,
     utf16_len_diff: isize,
 }
@@ -347,24 +328,7 @@ impl Cache {
     fn apply_diff(&mut self, diff: &CacheDiff) {
         self.len = (self.len as isize + diff.len_diff) as usize;
         self.utf16_len = (self.utf16_len as isize + diff.utf16_len_diff) as usize;
-        if diff.start.len() > 0 {
-            for ann in diff.start.iter() {
-                if ann >= 0 {
-                    self.anchor_set.start.insert(ann);
-                } else {
-                    self.anchor_set.start.remove(&(-ann));
-                }
-            }
-        }
-        if diff.end.len() > 0 {
-            for ann in diff.end.iter() {
-                if ann >= 0 {
-                    self.anchor_set.end.insert(ann);
-                } else {
-                    self.anchor_set.end.remove(&(-ann));
-                }
-            }
-        }
+        self.anchor_set.apply_diff(&diff.anchor_diff);
     }
 }
 
@@ -373,8 +337,7 @@ impl CacheDiff {
         CacheDiff {
             len_diff: diff,
             utf16_len_diff,
-            start: Default::default(),
-            end: Default::default(),
+            anchor_diff: Default::default(),
         }
     }
 }

@@ -1,6 +1,8 @@
 use std::{
+    any::Any,
     fmt::Display,
     ops::{Bound, RangeBounds},
+    sync::Arc,
 };
 
 use append_only_bytes::AppendOnlyBytes;
@@ -13,15 +15,17 @@ use smallvec::SmallVec;
 
 use crate::{
     rich_text::{op::OpContent, rich_tree::utf16::get_utf16_len},
-    ClientID, Counter, Lamport, OpID, Style,
+    Anchor, AnchorType, Annotation, ClientID, Counter, Lamport, OpID, Style,
 };
 
 use self::{
+    ann::{AnnIdx, AnnManager, Span},
     cursor::CursorMap,
     op::{Op, OpStore},
     rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, CacheDiff, Elem},
 };
 
+mod ann;
 mod cursor;
 mod id_map;
 mod iter;
@@ -40,6 +44,7 @@ pub struct RichText {
     cursor_map: CursorMap,
     store: OpStore,
     pending_ops: Vec<Op>,
+    ann: AnnManager,
 }
 
 impl RichText {
@@ -55,6 +60,7 @@ impl RichText {
             cursor_map,
             store: OpStore::new(client_id),
             pending_ops: Default::default(),
+            ann: AnnManager::new(),
         }
     }
 
@@ -350,11 +356,188 @@ impl RichText {
             return;
         }
 
-        todo!();
+        let mut start = if style.start_type == AnchorType::Before {
+            Some(self.content.query::<IndexFinder>(&start))
+        } else {
+            if start == 0 {
+                None
+            } else {
+                Some(self.content.query::<IndexFinder>(&start.saturating_sub(1)))
+            }
+        };
+        let mut end = if style.end_type == AnchorType::Before {
+            if end == self.len() {
+                None
+            } else {
+                Some(self.content.query::<IndexFinder>(&(end + 1)))
+            }
+        } else {
+            Some(self.content.query::<IndexFinder>(&end))
+        };
+
+        let start_id = start.map(|start| self.get_id_at_pos(start));
+        let end_id = end.map(|end| self.get_id_at_pos(end));
+        let id = self.next_id();
+        let lamport = self.next_lamport();
+        let ann = Annotation {
+            id,
+            range_lamport: (lamport, id),
+            range: crate::AnchorRange {
+                start: Anchor {
+                    id: start_id,
+                    type_: style.start_type,
+                },
+                end: Anchor {
+                    id: end_id,
+                    type_: style.end_type,
+                },
+            },
+            merge_method: style.merge_method,
+            type_: style.type_,
+            meta: None,
+        };
+
+        let ann_idx = self.ann.register(Arc::new(ann));
+        match (start, end) {
+            (None, None) => todo!("start begin cache and end cache"),
+            (None, Some(end)) => {
+                self.content.update_leaf(end.leaf, |elements| {
+                    // insert end anchor
+                    if end.offset == 0 && end.elem_index > 0 {
+                        end.elem_index -= 1;
+                        end.offset = elements[end.elem_index].rle_len();
+                    }
+                    update_elem(elements, end.elem_index, 0, end.offset, &mut |elem| {
+                        elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
+                    });
+                    // Perf, provide ann data
+                    (true, None)
+                });
+                todo!("set begin cache")
+            }
+            (Some(start), None) => {
+                self.content.update_leaf(start.leaf, |elements| {
+                    if start.offset == elements[start.elem_index].rle_len()
+                        && start.elem_index + 1 < elements.len()
+                    {
+                        start.elem_index += 1;
+                        start.offset = 0;
+                    }
+                    let len = elements[start.elem_index].rle_len();
+                    update_elem(elements, start.elem_index, start.offset, len, &mut |elem| {
+                        elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
+                    });
+                    // Perf, provide ann data
+                    (true, None)
+                });
+                todo!("set end cache");
+            }
+            (Some(start), Some(end)) => {
+                self.annotate_given_range(start, end, ann_idx, style);
+            }
+        }
+        // insert new annotation idx to content tree
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Elem> {
-        self.content.iter()
+    fn annotate_given_range(
+        &mut self,
+        mut start: QueryResult,
+        mut end: QueryResult,
+        ann_idx: AnnIdx,
+        style: Style,
+    ) {
+        self.content
+            .update2_leaf(start.leaf, end.leaf, |elements, from| {
+                match from {
+                    Some(leaf) => {
+                        if leaf == end.leaf {
+                            // insert end anchor
+                            if end.offset == 0 && end.elem_index > 0 {
+                                end.elem_index -= 1;
+                                end.offset = elements[end.elem_index].rle_len();
+                            }
+                            update_elem(elements, end.elem_index, 0, end.offset, &mut |elem| {
+                                elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
+                            });
+                        } else {
+                            // insert start anchor
+                            debug_assert_eq!(leaf, start.leaf);
+                            if start.offset == elements[start.elem_index].rle_len()
+                                && start.elem_index + 1 < elements.len()
+                            {
+                                start.elem_index += 1;
+                                start.offset = 0;
+                            }
+                            let len = elements[start.elem_index].rle_len();
+                            update_elem(
+                                elements,
+                                start.elem_index,
+                                start.offset,
+                                len,
+                                &mut |elem| {
+                                    elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
+                                },
+                            );
+                        }
+
+                        true
+                    }
+                    None => {
+                        // start leaf and end leaf is the same
+                        if end.offset == 0 && end.elem_index > 0 {
+                            end.elem_index -= 1;
+                            end.offset = elements[end.elem_index].rle_len();
+                        }
+                        if start.offset == elements[start.elem_index].rle_len()
+                            && start.elem_index + 1 < elements.len()
+                        {
+                            start.elem_index += 1;
+                            start.offset = 0;
+                        }
+
+                        if start.elem_index == end.elem_index {
+                            let (new_elems, _) = elements[start.elem_index].update(
+                                start.offset,
+                                end.offset,
+                                &mut |elem| {
+                                    elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
+                                    elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
+                                },
+                            );
+                            if !new_elems.is_empty() {
+                                elements
+                                    .splice(start.elem_index + 1..start.elem_index + 1, new_elems);
+                            }
+
+                            return true;
+                        }
+
+                        assert!(end.elem_index > start.elem_index);
+                        update_elem(elements, end.elem_index, 0, end.offset, &mut |elem| {
+                            elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
+                        });
+                        let len = elements[start.elem_index].rle_len();
+                        update_elem(elements, start.elem_index, start.offset, len, &mut |elem| {
+                            elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
+                        });
+
+                        true
+                    }
+                }
+            })
+    }
+
+    fn get_id_at_pos(&self, pos: QueryResult) -> OpID {
+        let node = self.content.get_node(pos.leaf);
+        // elem_index may be > elements.len()?
+        let elem = &node.elements()[pos.elem_index];
+        assert!(pos.offset < elem.rle_len());
+        elem.id.inc(pos.offset as u32)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Span> + '_ {
+        todo!("provide begin cache to iter init");
+        iter::Iter::new(self)
     }
 
     pub fn iter_range(&self, range: impl RangeBounds<usize>) {
@@ -600,6 +783,19 @@ impl RichText {
 
             leaf_idx = self.content.next_same_level_node(leaf);
         }
+    }
+}
+
+fn update_elem(
+    elements: &mut Vec<Elem>,
+    index: usize,
+    offset_start: usize,
+    offset_end: usize,
+    f: &mut impl FnMut(&mut Elem),
+) {
+    let (new, _) = elements[index].update(offset_start, offset_end, f);
+    if !new.is_empty() {
+        elements.splice(index + 1..index + 1, new);
     }
 }
 
