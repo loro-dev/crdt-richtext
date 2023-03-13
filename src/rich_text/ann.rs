@@ -359,6 +359,12 @@ impl AnchorSetDiff {
             self.end.insert(ann);
         }
     }
+
+    pub fn from_ann(ann: AnnIdx, is_start: bool) -> AnchorSetDiff {
+        let mut diff = AnchorSetDiff::default();
+        diff.insert(ann, is_start);
+        diff
+    }
 }
 
 impl From<AnchorSetDiff> for CacheDiff {
@@ -414,22 +420,23 @@ impl StyleCalculator {
     }
 }
 
-pub fn insert_anchor(
+/// This method insert the range anchor to the character at the given index and offset.
+pub fn insert_anchor_to_char(
     elements: &mut Vec<Elem>,
     index: usize,
     offset: usize,
     ann: AnnIdx,
     type_: AnchorType,
     is_start: bool,
-) -> AnchorSetDiff {
+) {
     match type_ {
         AnchorType::Before => {
             debug_assert!(offset < elements[index].rle_len());
             if offset == 0 {
                 elements[index].anchor_set.insert_ann(ann, type_, is_start);
             } else {
-                let new_elem = elements[index].split(offset);
-                elements[index].anchor_set.insert_ann(ann, type_, is_start);
+                let mut new_elem = elements[index].split(offset);
+                new_elem.anchor_set.insert_ann(ann, type_, is_start);
                 elements.insert(index + 1, new_elem);
             }
         }
@@ -444,25 +451,24 @@ pub fn insert_anchor(
             }
         }
     }
-
-    let mut diff = AnchorSetDiff::default();
-    diff.insert(ann, is_start);
-    diff
 }
 
 pub fn insert_anchors_at_same_elem(
     elem: &mut Elem,
     start_offset: usize,
-    end_offset: usize,
+    inclusive_end_offset: usize,
     ann: AnnIdx,
     start_type: AnchorType,
     end_type: AnchorType,
 ) -> SmallVec<[Elem; 2]> {
+    debug_assert!(start_offset < inclusive_end_offset);
+    debug_assert!(inclusive_end_offset < elem.rle_len()); // it's inclusive end, the anchor need be
+                                                          // assigned to the character at the end_offset
     let mut ans = SmallVec::new();
     match (start_type, end_type) {
         (AnchorType::Before, AnchorType::Before) => {
             if start_offset == 0 {
-                let mut new_elem = elem.split(end_offset);
+                let mut new_elem = elem.split(inclusive_end_offset);
                 elem.anchor_set.insert_ann(ann, AnchorType::Before, true);
                 new_elem
                     .anchor_set
@@ -471,7 +477,7 @@ pub fn insert_anchors_at_same_elem(
             } else {
                 for v in elem.update_twice(
                     start_offset,
-                    end_offset,
+                    inclusive_end_offset,
                     elem.rle_len(),
                     &mut |elem| {
                         elem.anchor_set.insert_ann(ann, AnchorType::Before, true);
@@ -486,29 +492,32 @@ pub fn insert_anchors_at_same_elem(
         }
         (AnchorType::Before, AnchorType::After) => {
             ans = elem
-                .update(start_offset, end_offset, &mut |elem| {
+                .update(start_offset, inclusive_end_offset + 1, &mut |elem| {
                     elem.anchor_set.insert_ann(ann, AnchorType::Before, true);
+                    elem.anchor_set.insert_ann(ann, AnchorType::After, false);
                 })
                 .0;
         }
         (AnchorType::After, AnchorType::Before) => {
-            debug_assert!(start_offset + 1 <= end_offset);
-            let mut middle = elem.split(start_offset + 1);
+            debug_assert!(start_offset + 1 <= inclusive_end_offset);
+            let mut middle = elem.split(start_offset + 1); // need to include start_offset at elem
             elem.anchor_set.insert_ann(ann, AnchorType::After, true);
             let len = middle.rle_len();
-            let (mut new, _) = middle.update(end_offset - start_offset, len, &mut |elem| {
-                elem.anchor_set.insert_ann(ann, end_type, false);
-            });
+            let (mut new, _) =
+                middle.update(inclusive_end_offset - elem.atom_len(), len, &mut |elem| {
+                    elem.anchor_set.insert_ann(ann, end_type, false);
+                });
             ans.push(middle);
             ans.append(&mut new);
         }
         (AnchorType::After, AnchorType::After) => {
-            debug_assert!(start_offset + 1 <= end_offset);
+            debug_assert!(start_offset + 1 <= inclusive_end_offset);
             let mut middle = elem.split(start_offset + 1);
             elem.anchor_set.insert_ann(ann, AnchorType::After, true);
-            let (mut new, _) = middle.update(0, end_offset + 1 - start_offset, &mut |elem| {
-                elem.anchor_set.insert_ann(ann, end_type, false);
-            });
+            let (mut new, _) =
+                middle.update(0, inclusive_end_offset + 1 - elem.atom_len(), &mut |elem| {
+                    elem.anchor_set.insert_ann(ann, end_type, false);
+                });
             ans.push(middle);
             ans.append(&mut new);
         }

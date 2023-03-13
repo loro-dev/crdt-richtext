@@ -18,7 +18,7 @@ use crate::{
 };
 
 use self::{
-    ann::{AnnIdx, AnnManager, Span, StyleCalculator},
+    ann::{AnchorSetDiff, AnnIdx, AnnManager, Span, StyleCalculator},
     cursor::CursorMap,
     op::{Op, OpStore},
     rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, CacheDiff, Elem},
@@ -372,7 +372,7 @@ impl RichText {
                 Some(self.content.query::<IndexFinder>(&start.saturating_sub(1)))
             }
         };
-        let end = if style.end_type == AnchorType::Before {
+        let inclusive_end = if style.end_type == AnchorType::Before {
             if inclusive_end >= self.len() - 1 {
                 None
             } else {
@@ -383,7 +383,7 @@ impl RichText {
         };
 
         let start_id = start.map(|start| self.get_id_at_pos(start));
-        let end_id = end.map(|end| self.get_id_at_pos(end));
+        let end_id = inclusive_end.map(|end| self.get_id_at_pos(end));
         let id = self.next_id();
         let lamport = self.next_lamport();
         let ann = Annotation {
@@ -405,52 +405,42 @@ impl RichText {
         };
 
         let ann_idx = self.ann.register(Arc::new(ann));
-        match (start, end) {
-            (None, None) => {
-                self.init_styles.insert_start(ann_idx);
-                // the target ends when the doc ends, so we do not need to insert an end anchor
-            }
-            (None, Some(end)) => {
-                self.content.update_leaf(end.leaf, |elements| {
-                    (
-                        true,
-                        Some(
-                            ann::insert_anchor(
-                                elements,
-                                end.elem_index,
-                                end.offset,
-                                ann_idx,
-                                style.end_type,
-                                false,
-                            )
-                            .into(),
-                        ),
-                    )
-                });
-                self.init_styles.insert_start(ann_idx);
+        match (start, inclusive_end) {
+            (Some(start), Some(end)) => {
+                self.annotate_given_range(start, end, ann_idx, style);
             }
             (Some(start), None) => {
                 self.content.update_leaf(start.leaf, |elements| {
-                    (
+                    ann::insert_anchor_to_char(
+                        elements,
+                        start.elem_index,
+                        start.offset,
+                        ann_idx,
+                        style.start_type,
                         true,
-                        Some(
-                            ann::insert_anchor(
-                                elements,
-                                start.elem_index,
-                                start.offset,
-                                ann_idx,
-                                style.start_type,
-                                true,
-                            )
-                            .into(),
-                        ),
-                    )
+                    );
+                    (true, Some(AnchorSetDiff::from_ann(ann_idx, true).into()))
                 });
                 // the target ends when the doc ends,
                 // so we do not need to insert an end anchor
             }
-            (Some(start), Some(end)) => {
-                self.annotate_given_range(start, end, ann_idx, style);
+            (None, Some(end)) => {
+                self.content.update_leaf(end.leaf, |elements| {
+                    ann::insert_anchor_to_char(
+                        elements,
+                        end.elem_index,
+                        end.offset,
+                        ann_idx,
+                        style.end_type,
+                        false,
+                    );
+                    (true, Some(AnchorSetDiff::from_ann(ann_idx, false).into()))
+                });
+                self.init_styles.insert_start(ann_idx);
+            }
+            (None, None) => {
+                self.init_styles.insert_start(ann_idx);
+                // the target ends when the doc ends, so we do not need to insert an end anchor
             }
         }
         // insert new annotation idx to content tree
@@ -469,7 +459,7 @@ impl RichText {
                     Some(leaf) => {
                         if leaf == end.leaf {
                             // insert end anchor
-                            ann::insert_anchor(
+                            ann::insert_anchor_to_char(
                                 elements,
                                 end.elem_index,
                                 end.offset,
@@ -480,7 +470,7 @@ impl RichText {
                         } else {
                             // insert start anchor
                             debug_assert_eq!(leaf, start.leaf);
-                            ann::insert_anchor(
+                            ann::insert_anchor_to_char(
                                 elements,
                                 start.elem_index,
                                 start.offset,
@@ -509,7 +499,7 @@ impl RichText {
                         }
 
                         assert!(end.elem_index > start.elem_index);
-                        ann::insert_anchor(
+                        ann::insert_anchor_to_char(
                             elements,
                             end.elem_index,
                             end.offset,
@@ -517,7 +507,7 @@ impl RichText {
                             style.end_type,
                             false,
                         );
-                        ann::insert_anchor(
+                        ann::insert_anchor_to_char(
                             elements,
                             start.elem_index,
                             start.offset,

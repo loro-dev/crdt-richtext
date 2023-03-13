@@ -221,11 +221,32 @@ mod annotation {
         }
     }
 
+    fn link() -> Style {
+        Style {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::After,
+            merge_method: crate::RangeMergeRule::Merge,
+            type_: InternalString::from("bold"),
+        }
+    }
+
     #[test]
-    fn annotate_simple() {
+    fn annotate_bold() {
         let mut text = RichText::new(1);
         text.insert(0, "123456789");
         text.annotate(0..=2, bold());
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 2);
+        assert_eq!(ans[0].len(), 3);
+        assert_eq!(ans[1].len(), 6);
+        assert_eq!(ans[0].as_str(), "123");
+    }
+
+    #[test]
+    fn annotate_link() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..3, link());
         let ans = text.iter().collect::<Vec<_>>();
         assert_eq!(ans.len(), 2);
         assert_eq!(ans[0].len(), 3);

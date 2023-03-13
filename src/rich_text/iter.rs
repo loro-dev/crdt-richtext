@@ -65,6 +65,7 @@ impl<'a> Iterator for Iter<'a> {
         }
 
         let elem = &leaf.elements()[self.index];
+        dbg!(&elem);
         self.style_calc.apply_start(&elem.anchor_set);
         let annotations: FxHashSet<_> = self
             .style_calc
