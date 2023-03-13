@@ -19,7 +19,7 @@ use crate::{
 };
 
 use self::{
-    ann::{AnnIdx, AnnManager, Span},
+    ann::{AnnIdx, AnnManager, Span, StyleCalculator},
     cursor::CursorMap,
     op::{Op, OpStore},
     rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, CacheDiff, Elem},
@@ -45,6 +45,9 @@ pub struct RichText {
     store: OpStore,
     pending_ops: Vec<Op>,
     ann: AnnManager,
+    /// this is the styles starting from the very beginning,
+    /// which have start anchor of None
+    init_styles: StyleCalculator,
 }
 
 impl RichText {
@@ -61,6 +64,7 @@ impl RichText {
             store: OpStore::new(client_id),
             pending_ops: Default::default(),
             ann: AnnManager::new(),
+            init_styles: StyleCalculator::default(),
         }
     }
 
@@ -356,7 +360,7 @@ impl RichText {
             return;
         }
 
-        let mut start = if style.start_type == AnchorType::Before {
+        let start = if style.start_type == AnchorType::Before {
             Some(self.content.query::<IndexFinder>(&start))
         } else {
             if start == 0 {
@@ -365,7 +369,7 @@ impl RichText {
                 Some(self.content.query::<IndexFinder>(&start.saturating_sub(1)))
             }
         };
-        let mut end = if style.end_type == AnchorType::Before {
+        let end = if style.end_type == AnchorType::Before {
             if end == self.len() {
                 None
             } else {
@@ -393,14 +397,14 @@ impl RichText {
                 },
             },
             merge_method: style.merge_method,
-            type_: style.type_,
+            type_: style.type_.clone(),
             meta: None,
         };
 
         let ann_idx = self.ann.register(Arc::new(ann));
         match (start, end) {
             (None, None) => todo!("start begin cache and end cache"),
-            (None, Some(end)) => {
+            (None, Some(mut end)) => {
                 self.content.update_leaf(end.leaf, |elements| {
                     // insert end anchor
                     if end.offset == 0 && end.elem_index > 0 {
@@ -413,9 +417,9 @@ impl RichText {
                     // Perf, provide ann data
                     (true, None)
                 });
-                todo!("set begin cache")
+                self.init_styles.insert_start(ann_idx);
             }
-            (Some(start), None) => {
+            (Some(mut start), None) => {
                 self.content.update_leaf(start.leaf, |elements| {
                     if start.offset == elements[start.elem_index].rle_len()
                         && start.elem_index + 1 < elements.len()
@@ -430,7 +434,8 @@ impl RichText {
                     // Perf, provide ann data
                     (true, None)
                 });
-                todo!("set end cache");
+                // the target ends when the doc ends,
+                // so we do not need to insert an end anchor
             }
             (Some(start), Some(end)) => {
                 self.annotate_given_range(start, end, ann_idx, style);
@@ -536,7 +541,6 @@ impl RichText {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Span> + '_ {
-        todo!("provide begin cache to iter init");
         iter::Iter::new(self)
     }
 

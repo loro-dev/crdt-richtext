@@ -138,11 +138,42 @@ impl CacheAnchorSet {
             }
         }
     }
+
+    #[inline]
+    pub fn contains_start(&self, ann: AnnIdx) -> bool {
+        self.start.contains(&ann)
+    }
+
+    #[inline]
+    pub fn contains_end(&self, ann: AnnIdx) -> bool {
+        self.end.contains(&ann)
+    }
+
+    pub fn union_(&mut self, other: &Self) {
+        self.start.extend(other.start.iter());
+        self.end.extend(other.end.iter());
+    }
+
+    pub fn union_elem_set(&mut self, other: &ElemAnchorSet) {
+        self.start.extend(other.start_at_start.iter());
+        self.start.extend(other.start_at_end.iter());
+        self.end.extend(other.end_at_start.iter());
+        self.end.extend(other.end_at_end.iter());
+    }
 }
 
 impl ElemAnchorSet {
-    pub fn contains_start(&self, ann: AnnIdx) -> bool {
-        self.start_at_start.contains(&ann) || self.start_at_end.contains(&ann)
+    pub fn contains_start(&self, ann: AnnIdx) -> (bool, bool) {
+        let a = self.start_at_start.contains(&ann);
+        let b = self.start_at_end.contains(&ann);
+        (a || b, a)
+    }
+
+    /// return (contains_end, is_inclusive)
+    pub fn contains_end(&self, ann: AnnIdx) -> (bool, bool) {
+        let a = self.end_at_start.contains(&ann);
+        let b = self.end_at_end.contains(&ann);
+        (a || b, b)
     }
 
     pub fn calc_diff(&self, other: &Self) -> AnchorSetDiff {
@@ -177,12 +208,18 @@ impl ElemAnchorSet {
 
     #[inline]
     pub fn insert_ann_start(&mut self, idx: AnnIdx, type_: AnchorType) {
-        todo!()
+        match type_ {
+            AnchorType::Before => self.start_at_start.insert(idx),
+            AnchorType::After => self.start_at_end.insert(idx),
+        };
     }
 
     #[inline]
     pub fn insert_ann_end(&mut self, idx: AnnIdx, type_: AnchorType) {
-        todo!()
+        match type_ {
+            AnchorType::Before => self.end_at_start.insert(idx),
+            AnchorType::After => self.end_at_end.insert(idx),
+        };
     }
 
     #[inline]
@@ -237,6 +274,35 @@ impl ElemAnchorSet {
             self.end_at_end.clear();
         }
     }
+
+    pub fn cache_anchor_set(&self) -> CacheAnchorSet {
+        let mut ans = CacheAnchorSet::default();
+        if !self.start_at_start.is_empty() {
+            for ann in self.start_at_start.iter() {
+                ans.start.insert(*ann);
+            }
+        }
+
+        if !self.end_at_start.is_empty() {
+            for ann in self.end_at_start.iter() {
+                ans.end.insert(*ann);
+            }
+        }
+
+        if !self.start_at_end.is_empty() {
+            for ann in self.start_at_end.iter() {
+                ans.start.insert(*ann);
+            }
+        }
+
+        if !self.end_at_end.is_empty() {
+            for ann in self.end_at_end.iter() {
+                ans.end.insert(*ann);
+            }
+        }
+
+        ans
+    }
 }
 
 #[derive(Debug, Default)]
@@ -256,10 +322,26 @@ impl AnchorSetDiff {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, PartialEq, Eq, Default, Clone)]
 pub struct StyleCalculator(FxHashSet<AnnIdx>);
 
 impl StyleCalculator {
+    pub fn insert_start(&mut self, start: AnnIdx) {
+        self.0.insert(start);
+    }
+
+    pub fn apply_node_start(&mut self, anchor_set: &CacheAnchorSet) {
+        for ann in anchor_set.start.iter() {
+            self.0.insert(*ann);
+        }
+    }
+
+    pub fn apply_node_end(&mut self, anchor_set: &CacheAnchorSet) {
+        for ann in anchor_set.end.iter() {
+            self.0.remove(ann);
+        }
+    }
+
     pub fn apply_start(&mut self, anchor_set: &ElemAnchorSet) {
         for ann in anchor_set.start_at_start.iter() {
             self.0.insert(*ann);

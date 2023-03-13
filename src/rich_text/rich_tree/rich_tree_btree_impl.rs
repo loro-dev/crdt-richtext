@@ -28,19 +28,20 @@ impl BTreeTrait for RichTreeTrait {
             None => {
                 let mut len = 0;
                 let mut utf16_len = 0;
+                let mut anchor_set = CacheAnchorSet::default();
                 for child in caches.iter() {
                     len += child.cache.len;
                     utf16_len += child.cache.utf16_len;
-                    cache.anchor_set.process_diff(&child.cache.anchor_set);
+                    anchor_set.union_(&child.cache.anchor_set);
                 }
 
-                let temp_diff = cache.anchor_set.finish_diff_calc();
+                let anchor_diff = anchor_set.calc_diff(&cache.anchor_set);
                 let diff = CacheDiff {
-                    start: temp_diff.start,
-                    end: temp_diff.end,
+                    anchor_diff,
                     len_diff: len as isize - cache.len as isize,
                     utf16_len_diff: utf16_len as isize - cache.utf16_len as isize,
                 };
+
                 cache.len = len;
                 cache.utf16_len = utf16_len;
                 Some(diff)
@@ -61,18 +62,18 @@ impl BTreeTrait for RichTreeTrait {
             None => {
                 let mut len = 0;
                 let mut utf16_len = 0;
+                let mut anchor_set = CacheAnchorSet::default();
                 for child in caches.iter() {
                     if !child.is_dead() {
                         len += child.string.len();
                         utf16_len += child.utf16_len;
                     }
-                    cache.anchor_set.process_diff(&child.anchor_set);
+                    anchor_set.union_elem_set(&child.anchor_set);
                 }
 
-                let temp_diff = cache.anchor_set.finish_diff_calc();
+                let anchor_diff = cache.anchor_set.calc_diff(&anchor_set);
                 let diff = CacheDiff {
-                    start: temp_diff.start,
-                    end: temp_diff.end,
+                    anchor_diff,
                     len_diff: len as isize - cache.len as isize,
                     utf16_len_diff: utf16_len as isize - cache.utf16_len as isize,
                 };
@@ -84,21 +85,7 @@ impl BTreeTrait for RichTreeTrait {
     }
 
     fn merge_cache_diff(diff1: &mut Self::CacheDiff, diff2: &Self::CacheDiff) {
-        for ann in diff2.start.iter() {
-            if diff1.start.contains(-ann) {
-                diff1.start.remove(-ann);
-            } else {
-                diff1.start.insert(ann);
-            }
-        }
-        for ann in diff2.end.iter() {
-            if diff1.end.contains(-ann) {
-                diff1.end.remove(-ann);
-            } else {
-                diff1.end.insert(ann);
-            }
-        }
-
+        diff1.anchor_diff.merge(&diff2.anchor_diff);
         diff1.len_diff += diff2.len_diff;
         diff1.utf16_len_diff += diff2.utf16_len_diff;
     }

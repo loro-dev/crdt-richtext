@@ -71,6 +71,10 @@ impl SmallSetI32 {
     }
 
     pub(crate) fn contains(&self, value: i32) -> bool {
+        if value == 0 {
+            return false;
+        }
+
         match self {
             SmallSetI32::Stack((stack, size)) => {
                 if *size == 0 {
