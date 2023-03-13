@@ -1,5 +1,4 @@
 use std::{
-    any::Any,
     fmt::Display,
     ops::{Bound, RangeBounds},
     sync::Arc,
@@ -14,7 +13,7 @@ use generic_btree::{
 use smallvec::SmallVec;
 
 use crate::{
-    rich_text::{op::OpContent, rich_tree::utf16::get_utf16_len},
+    rich_text::{ann::insert_anchors_at_same_elem, op::OpContent, rich_tree::utf16::get_utf16_len},
     Anchor, AnchorType, Annotation, ClientID, Counter, Lamport, OpID, Style,
 };
 
@@ -344,19 +343,23 @@ impl RichText {
         }
     }
 
+    /// Annotate the given range with style.
+    ///
+    /// Under the hood, it will assign anchors to the characters at the given start pos and end pos.
+    /// The range start OpID and end OpID are the OpID of those characters;
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, style: Style) {
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
             Bound::Excluded(start) => *start + 1,
             Bound::Unbounded => 0,
         };
-        let end = match range.end_bound() {
-            Bound::Included(end) => *end + 1,
-            Bound::Excluded(end) => *end,
+        let inclusive_end = match range.end_bound() {
+            Bound::Included(end) => *end,
+            Bound::Excluded(end) => *end - 1,
             Bound::Unbounded => self.len(),
         };
 
-        if start == end {
+        if start == inclusive_end {
             return;
         }
 
@@ -370,13 +373,13 @@ impl RichText {
             }
         };
         let end = if style.end_type == AnchorType::Before {
-            if end == self.len() {
+            if inclusive_end >= self.len() - 1 {
                 None
             } else {
-                Some(self.content.query::<IndexFinder>(&(end + 1)))
+                Some(self.content.query::<IndexFinder>(&(inclusive_end + 1)))
             }
         } else {
-            Some(self.content.query::<IndexFinder>(&end))
+            Some(self.content.query::<IndexFinder>(&inclusive_end))
         };
 
         let start_id = start.map(|start| self.get_id_at_pos(start));
@@ -403,36 +406,45 @@ impl RichText {
 
         let ann_idx = self.ann.register(Arc::new(ann));
         match (start, end) {
-            (None, None) => todo!("start begin cache and end cache"),
-            (None, Some(mut end)) => {
+            (None, None) => {
+                self.init_styles.insert_start(ann_idx);
+                // the target ends when the doc ends, so we do not need to insert an end anchor
+            }
+            (None, Some(end)) => {
                 self.content.update_leaf(end.leaf, |elements| {
-                    // insert end anchor
-                    if end.offset == 0 && end.elem_index > 0 {
-                        end.elem_index -= 1;
-                        end.offset = elements[end.elem_index].rle_len();
-                    }
-                    update_elem(elements, end.elem_index, 0, end.offset, &mut |elem| {
-                        elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
-                    });
-                    // Perf, provide ann data
-                    (true, None)
+                    (
+                        true,
+                        Some(
+                            ann::insert_anchor(
+                                elements,
+                                end.elem_index,
+                                end.offset,
+                                ann_idx,
+                                style.end_type,
+                                false,
+                            )
+                            .into(),
+                        ),
+                    )
                 });
                 self.init_styles.insert_start(ann_idx);
             }
-            (Some(mut start), None) => {
+            (Some(start), None) => {
                 self.content.update_leaf(start.leaf, |elements| {
-                    if start.offset == elements[start.elem_index].rle_len()
-                        && start.elem_index + 1 < elements.len()
-                    {
-                        start.elem_index += 1;
-                        start.offset = 0;
-                    }
-                    let len = elements[start.elem_index].rle_len();
-                    update_elem(elements, start.elem_index, start.offset, len, &mut |elem| {
-                        elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
-                    });
-                    // Perf, provide ann data
-                    (true, None)
+                    (
+                        true,
+                        Some(
+                            ann::insert_anchor(
+                                elements,
+                                start.elem_index,
+                                start.offset,
+                                ann_idx,
+                                style.start_type,
+                                true,
+                            )
+                            .into(),
+                        ),
+                    )
                 });
                 // the target ends when the doc ends,
                 // so we do not need to insert an end anchor
@@ -446,8 +458,8 @@ impl RichText {
 
     fn annotate_given_range(
         &mut self,
-        mut start: QueryResult,
-        mut end: QueryResult,
+        start: QueryResult,
+        end: QueryResult,
         ann_idx: AnnIdx,
         style: Style,
     ) {
@@ -457,74 +469,62 @@ impl RichText {
                     Some(leaf) => {
                         if leaf == end.leaf {
                             // insert end anchor
-                            if end.offset == 0 && end.elem_index > 0 {
-                                end.elem_index -= 1;
-                                end.offset = elements[end.elem_index].rle_len();
-                            }
-                            update_elem(elements, end.elem_index, 0, end.offset, &mut |elem| {
-                                elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
-                            });
+                            ann::insert_anchor(
+                                elements,
+                                end.elem_index,
+                                end.offset,
+                                ann_idx,
+                                style.end_type,
+                                false,
+                            );
                         } else {
                             // insert start anchor
                             debug_assert_eq!(leaf, start.leaf);
-                            if start.offset == elements[start.elem_index].rle_len()
-                                && start.elem_index + 1 < elements.len()
-                            {
-                                start.elem_index += 1;
-                                start.offset = 0;
-                            }
-                            let len = elements[start.elem_index].rle_len();
-                            update_elem(
+                            ann::insert_anchor(
                                 elements,
                                 start.elem_index,
                                 start.offset,
-                                len,
-                                &mut |elem| {
-                                    elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
-                                },
+                                ann_idx,
+                                style.start_type,
+                                true,
                             );
                         }
 
                         true
                     }
                     None => {
-                        // start leaf and end leaf is the same
-                        if end.offset == 0 && end.elem_index > 0 {
-                            end.elem_index -= 1;
-                            end.offset = elements[end.elem_index].rle_len();
-                        }
-                        if start.offset == elements[start.elem_index].rle_len()
-                            && start.elem_index + 1 < elements.len()
-                        {
-                            start.elem_index += 1;
-                            start.offset = 0;
-                        }
-
                         if start.elem_index == end.elem_index {
-                            let (new_elems, _) = elements[start.elem_index].update(
+                            assert_ne!(end.offset, elements[start.elem_index].rle_len());
+                            let new = insert_anchors_at_same_elem(
+                                &mut elements[start.elem_index],
                                 start.offset,
                                 end.offset,
-                                &mut |elem| {
-                                    elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
-                                    elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
-                                },
+                                ann_idx,
+                                style.start_type,
+                                style.end_type,
                             );
-                            if !new_elems.is_empty() {
-                                elements
-                                    .splice(start.elem_index + 1..start.elem_index + 1, new_elems);
-                            }
 
+                            elements.splice(start.elem_index + 1..start.elem_index + 1, new);
                             return true;
                         }
 
                         assert!(end.elem_index > start.elem_index);
-                        update_elem(elements, end.elem_index, 0, end.offset, &mut |elem| {
-                            elem.anchor_set.insert_ann_end(ann_idx, style.end_type);
-                        });
-                        let len = elements[start.elem_index].rle_len();
-                        update_elem(elements, start.elem_index, start.offset, len, &mut |elem| {
-                            elem.anchor_set.insert_ann_start(ann_idx, style.start_type);
-                        });
+                        ann::insert_anchor(
+                            elements,
+                            end.elem_index,
+                            end.offset,
+                            ann_idx,
+                            style.end_type,
+                            false,
+                        );
+                        ann::insert_anchor(
+                            elements,
+                            start.elem_index,
+                            start.offset,
+                            ann_idx,
+                            style.start_type,
+                            true,
+                        );
 
                         true
                     }

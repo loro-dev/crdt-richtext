@@ -225,7 +225,11 @@ mod annotation {
     fn annotate_simple() {
         let mut text = RichText::new(1);
         text.insert(0, "123456789");
-        text.annotate(0..2, bold());
-        dbg!(&text.iter().collect::<Vec<_>>());
+        text.annotate(0..=2, bold());
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 2);
+        assert_eq!(ans[0].len(), 3);
+        assert_eq!(ans[1].len(), 6);
+        assert_eq!(ans[0].as_str(), "123");
     }
 }

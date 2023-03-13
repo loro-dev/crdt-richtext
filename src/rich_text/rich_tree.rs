@@ -113,7 +113,7 @@ impl Elem {
         &mut self,
         start: usize,
         end: usize,
-        f: &mut impl FnMut(&mut Elem) -> R,
+        f: &mut dyn FnMut(&mut Elem) -> R,
     ) -> (SmallVec<[Elem; 2]>, Option<R>) {
         let mut ans = SmallVec::new();
         debug_assert!(start <= end && end <= self.rle_len());
@@ -145,6 +145,58 @@ impl Elem {
         ans.push(middle);
         ans.push(right);
         (ans, Some(r))
+    }
+
+    #[must_use]
+    pub fn update_twice(
+        &mut self,
+        f_start: usize,
+        f_end_g_start: usize,
+        g_end: usize,
+        f: &mut dyn FnMut(&mut Elem),
+        g: &mut dyn FnMut(&mut Elem),
+    ) -> SmallVec<[Elem; 4]> {
+        let mut ans = SmallVec::new();
+        debug_assert!(f_start < f_end_g_start && f_end_g_start < g_end);
+        debug_assert!(g_end <= self.rle_len());
+        if f_start == 0 && g_end == self.atom_len() {
+            let new = self.split(f_end_g_start);
+            ans.push(new);
+            f(self);
+            g(&mut ans[0]);
+            return ans;
+        }
+
+        if f_start == 0 {
+            let mut middle = self.split(f_end_g_start);
+            let mut new_elems = middle.update(0, g_end - f_end_g_start, g);
+            ans.push(middle);
+            ans.append(&mut new_elems.0);
+            f(self);
+            return ans;
+        }
+
+        if g_end == self.atom_len() {
+            let mut middle = self.split(f_start);
+            let mut new_elems = middle.update(0, f_end_g_start - f_start, f);
+            ans.push(middle);
+            ans.append(&mut new_elems.0);
+            g(ans.last_mut().unwrap());
+            return ans;
+        }
+
+        let len = self.atom_len();
+        let mut left = self.split(f_start);
+        let mut middle0 = left.split(f_end_g_start - f_start);
+        let mut middle1 = middle0.split(g_end - f_end_g_start);
+        let right = middle1.split(len - g_end);
+        f(&mut middle0);
+        g(&mut middle1);
+        ans.push(left);
+        ans.push(middle0);
+        ans.push(middle1);
+        ans.push(right);
+        ans
     }
 
     pub fn merge_slice(&mut self, s: &BytesSlice) {
@@ -319,9 +371,9 @@ pub(crate) struct Cache {
 
 #[derive(Default, Debug)]
 pub(crate) struct CacheDiff {
-    anchor_diff: AnchorSetDiff,
-    len_diff: isize,
-    utf16_len_diff: isize,
+    pub(super) anchor_diff: AnchorSetDiff,
+    pub(super) len_diff: isize,
+    pub(super) utf16_len_diff: isize,
 }
 
 impl Cache {

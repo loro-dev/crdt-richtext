@@ -2,9 +2,12 @@ use std::{mem::take, sync::Arc};
 
 use append_only_bytes::BytesSlice;
 use fxhash::{FxHashMap, FxHashSet};
-use generic_btree::rle::Mergeable;
+use generic_btree::rle::{HasLength, Mergeable};
+use smallvec::SmallVec;
 
 use crate::{range_map::small_set::SmallSetI32, AnchorType, Annotation, InternalString, OpID};
+
+use super::rich_tree::{CacheDiff, Elem};
 
 /// Use negative to represent deletions
 pub type AnnIdx = i32;
@@ -56,6 +59,20 @@ impl AnnManager {
 pub struct Span {
     pub text: BytesSlice,
     pub annotations: FxHashSet<InternalString>,
+}
+
+impl Span {
+    pub fn len(&self) -> usize {
+        self.text.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(self.text.as_ref()).unwrap()
+    }
 }
 
 pub fn apply_start_ann_set(set: &mut FxHashSet<AnnIdx>, start: &FxHashSet<AnnIdx>) {
@@ -222,6 +239,20 @@ impl ElemAnchorSet {
         };
     }
 
+    pub fn insert_ann(&mut self, idx: AnnIdx, type_: AnchorType, is_start: bool) {
+        if is_start {
+            match type_ {
+                AnchorType::Before => self.start_at_start.insert(idx),
+                AnchorType::After => self.start_at_end.insert(idx),
+            };
+        } else {
+            match type_ {
+                AnchorType::Before => self.end_at_start.insert(idx),
+                AnchorType::After => self.end_at_end.insert(idx),
+            };
+        }
+    }
+
     #[inline]
     pub fn insert_start_at_start(&mut self, idx: AnnIdx) {
         self.start_at_start.insert(idx);
@@ -320,6 +351,24 @@ impl AnchorSetDiff {
             self.end.insert(ann);
         }
     }
+
+    pub fn insert(&mut self, ann: AnnIdx, is_start: bool) {
+        if is_start {
+            self.start.insert(ann);
+        } else {
+            self.end.insert(ann);
+        }
+    }
+}
+
+impl From<AnchorSetDiff> for CacheDiff {
+    fn from(value: AnchorSetDiff) -> Self {
+        Self {
+            anchor_diff: value,
+            len_diff: 0,
+            utf16_len_diff: 0,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
@@ -363,4 +412,107 @@ impl StyleCalculator {
     pub fn iter(&self) -> impl Iterator<Item = &AnnIdx> {
         self.0.iter()
     }
+}
+
+pub fn insert_anchor(
+    elements: &mut Vec<Elem>,
+    index: usize,
+    offset: usize,
+    ann: AnnIdx,
+    type_: AnchorType,
+    is_start: bool,
+) -> AnchorSetDiff {
+    match type_ {
+        AnchorType::Before => {
+            debug_assert!(offset < elements[index].rle_len());
+            if offset == 0 {
+                elements[index].anchor_set.insert_ann(ann, type_, is_start);
+            } else {
+                let new_elem = elements[index].split(offset);
+                elements[index].anchor_set.insert_ann(ann, type_, is_start);
+                elements.insert(index + 1, new_elem);
+            }
+        }
+        AnchorType::After => {
+            debug_assert!(offset < elements[index].rle_len());
+            if offset == elements[index].rle_len() - 1 {
+                elements[index].anchor_set.insert_ann(ann, type_, is_start);
+            } else {
+                let new_elem = elements[index].split(offset + 1);
+                elements[index].anchor_set.insert_ann(ann, type_, is_start);
+                elements.insert(index + 1, new_elem);
+            }
+        }
+    }
+
+    let mut diff = AnchorSetDiff::default();
+    diff.insert(ann, is_start);
+    diff
+}
+
+pub fn insert_anchors_at_same_elem(
+    elem: &mut Elem,
+    start_offset: usize,
+    end_offset: usize,
+    ann: AnnIdx,
+    start_type: AnchorType,
+    end_type: AnchorType,
+) -> SmallVec<[Elem; 2]> {
+    let mut ans = SmallVec::new();
+    match (start_type, end_type) {
+        (AnchorType::Before, AnchorType::Before) => {
+            if start_offset == 0 {
+                let mut new_elem = elem.split(end_offset);
+                elem.anchor_set.insert_ann(ann, AnchorType::Before, true);
+                new_elem
+                    .anchor_set
+                    .insert_ann(ann, AnchorType::Before, false);
+                ans.push(new_elem);
+            } else {
+                for v in elem.update_twice(
+                    start_offset,
+                    end_offset,
+                    elem.rle_len(),
+                    &mut |elem| {
+                        elem.anchor_set.insert_ann(ann, AnchorType::Before, true);
+                    },
+                    &mut |elem| {
+                        elem.anchor_set.insert_ann(ann, AnchorType::Before, false);
+                    },
+                ) {
+                    ans.push(v);
+                }
+            }
+        }
+        (AnchorType::Before, AnchorType::After) => {
+            ans = elem
+                .update(start_offset, end_offset, &mut |elem| {
+                    elem.anchor_set.insert_ann(ann, AnchorType::Before, true);
+                })
+                .0;
+        }
+        (AnchorType::After, AnchorType::Before) => {
+            debug_assert!(start_offset + 1 <= end_offset);
+            let mut middle = elem.split(start_offset + 1);
+            elem.anchor_set.insert_ann(ann, AnchorType::After, true);
+            let len = middle.rle_len();
+            let (mut new, _) = middle.update(end_offset - start_offset, len, &mut |elem| {
+                elem.anchor_set.insert_ann(ann, end_type, false);
+            });
+            ans.push(middle);
+            ans.append(&mut new);
+        }
+        (AnchorType::After, AnchorType::After) => {
+            debug_assert!(start_offset + 1 <= end_offset);
+            let mut middle = elem.split(start_offset + 1);
+            elem.anchor_set.insert_ann(ann, AnchorType::After, true);
+            let (mut new, _) = middle.update(0, end_offset + 1 - start_offset, &mut |elem| {
+                elem.anchor_set.insert_ann(ann, end_type, false);
+            });
+            ans.push(middle);
+            ans.append(&mut new);
+        }
+    }
+
+    ans
 }

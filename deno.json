@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "test": "RUST_BACKTRACE=full cargo nextest run --features test",
+    "test_log": "RUST_BACKTRACE=full NEXTEST_SUCCESS_OUTPUT=immediate cargo nextest run --features test"
+  }
+}
