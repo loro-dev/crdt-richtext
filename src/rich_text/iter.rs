@@ -3,6 +3,8 @@ use std::mem::{replace, take};
 use fxhash::FxHashSet;
 use generic_btree::{rle::Mergeable, ArenaIndex};
 
+use crate::Behavior;
+
 use super::{
     ann::{Span, StyleCalculator},
     RichText,
@@ -76,8 +78,15 @@ impl<'a> Iterator for Iter<'a> {
             self.style_calc.apply_start(&elem.anchor_set);
             let annotations: FxHashSet<_> = self
                 .style_calc
-                .iter()
-                .map(|&x| self.text.ann.get_ann_by_idx(x).unwrap().type_.clone())
+                .calc_styles(&self.text.ann)
+                .into_iter()
+                .filter_map(|x| {
+                    if x.behavior == Behavior::Delete {
+                        None
+                    } else {
+                        Some(x.type_.clone())
+                    }
+                })
                 .collect();
             self.style_calc.apply_end(&elem.anchor_set);
             self.index += 1;

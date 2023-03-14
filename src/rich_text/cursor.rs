@@ -8,7 +8,7 @@ use generic_btree::{
     ArenaIndex, MoveEvent, MoveListener,
 };
 
-use crate::{Counter, OpID};
+use crate::{Annotation, Counter, OpID};
 
 use super::{
     id_map::IdMap,
@@ -20,6 +20,7 @@ use super::{
 pub enum Cursor {
     Insert(ArenaIndex),
     Delete(DeleteOp),
+    Ann(Arc<Annotation>),
 }
 
 #[derive(Debug)]
@@ -79,6 +80,15 @@ impl CursorMap {
             Cursor::Delete(*content),
             content.len.unsigned_abs() as usize,
         );
+    }
+
+    pub fn register_ann(&mut self, op: &Op) {
+        let mut map = self.map.try_lock().unwrap();
+        let content = match &op.content {
+            OpContent::Ann(ann) => ann,
+            _ => unreachable!(),
+        };
+        map.insert(op.id, Cursor::Ann(content.clone()), 1);
     }
 
     pub fn get_insert(&self, id: OpID) -> Option<(ArenaIndex, usize)> {

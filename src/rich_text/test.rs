@@ -221,12 +221,30 @@ mod annotation {
         }
     }
 
+    fn unbold() -> Style {
+        Style {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::Before,
+            behavior: crate::Behavior::Delete,
+            type_: InternalString::from("bold"),
+        }
+    }
+
     fn link() -> Style {
         Style {
             start_type: AnchorType::Before,
             end_type: AnchorType::After,
             behavior: crate::Behavior::Merge,
-            type_: InternalString::from("bold"),
+            type_: InternalString::from("link"),
+        }
+    }
+
+    fn unlink() -> Style {
+        Style {
+            start_type: AnchorType::After,
+            end_type: AnchorType::Before,
+            behavior: crate::Behavior::Delete,
+            type_: InternalString::from("link"),
         }
     }
 
@@ -261,7 +279,7 @@ mod annotation {
         assert_eq!(ans[0].len(), 3);
         assert_eq!(ans[1].len(), 6);
         assert_eq!(ans[0].as_str(), "123");
-        assert!(ans[0].annotations.contains(&"bold".into()));
+        assert!(ans[0].annotations.contains(&"link".into()));
     }
 
     #[test]
@@ -351,10 +369,32 @@ mod annotation {
     }
 
     #[test]
-    fn unbold() {}
+    fn test_unbold() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..5, bold());
+        text.annotate(3..5, unbold());
+        {
+            let ans = text.iter().collect::<Vec<_>>();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].len(), 3);
+            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[1].len(), 6);
+            assert_eq!(ans[1].annotations.len(), 0);
+        }
+        text.insert(3, "k");
+        {
+            let ans = text.iter().collect::<Vec<_>>();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].as_str(), "123k");
+            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[1].len(), 6);
+            assert_eq!(ans[1].annotations.len(), 0);
+        }
+    }
 
     #[test]
-    fn unlink() {}
+    fn test_unlink() {}
 
     #[test]
     fn expand() {}

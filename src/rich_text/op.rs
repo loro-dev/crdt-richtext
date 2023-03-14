@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use append_only_bytes::BytesSlice;
 use fxhash::FxHashMap;
 use generic_btree::rle::{HasLength, Mergeable, Sliceable};
 
-use crate::{ClientID, Counter, Lamport, OpID, RangeOp};
+use crate::{Annotation, ClientID, Counter, Lamport, OpID, RangeOp};
 
 use super::vv::VersionVector;
 
@@ -11,6 +13,13 @@ pub struct Op {
     pub id: OpID,
     pub lamport: Lamport,
     pub content: OpContent,
+}
+
+#[derive(Debug, Clone)]
+pub enum OpContent {
+    Ann(Arc<Annotation>),
+    Text(TextInsertOp),
+    Del(DeleteOp),
 }
 
 impl OpContent {
@@ -26,13 +35,10 @@ impl OpContent {
         }
         OpContent::Del(DeleteOp { start, len })
     }
-}
 
-#[derive(Debug, Clone)]
-pub enum OpContent {
-    Ann(Box<RangeOp>),
-    Text(TextInsertOp),
-    Del(DeleteOp),
+    pub fn new_ann(ann: Arc<Annotation>) -> Self {
+        OpContent::Ann(ann)
+    }
 }
 
 #[derive(Debug, Clone)]

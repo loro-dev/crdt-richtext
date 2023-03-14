@@ -42,8 +42,12 @@ impl Query<RichTreeTrait> for IndexFinder {
 
         let mut last_left = self.left;
         for (i, cache) in child_caches.iter().enumerate() {
+            if cache.cache.len == 0 {
+                continue;
+            }
+
             // prefer the end of an element
-            if self.left > cache.cache.len {
+            if self.left >= cache.cache.len {
                 last_left = self.left;
                 self.left -= cache.cache.len;
             } else {
@@ -63,8 +67,12 @@ impl Query<RichTreeTrait> for IndexFinder {
 
         let mut last_left = self.left;
         for (i, cache) in elements.iter().enumerate() {
+            if cache.content_len() == 0 {
+                continue;
+            }
+
             // prefer the end of an element
-            if self.left > cache.content_len() {
+            if self.left >= cache.content_len() {
                 // use content len here, because we need to skip deleted/future spans
                 last_left = self.left;
                 self.left -= cache.content_len();
@@ -102,9 +110,13 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
 
         let mut last_left = self.left;
         for (i, cache) in child_caches.iter().enumerate() {
+            if cache.cache.len == 0 {
+                continue;
+            }
+
             self.style_caculator
                 .apply_node_start(&cache.cache.anchor_set);
-            if self.left > cache.cache.len {
+            if self.left >= cache.cache.len {
                 last_left = self.left;
                 self.left -= cache.cache.len;
             } else {
@@ -126,8 +138,12 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
 
         let mut last_left = self.left;
         for (i, cache) in elements.iter().enumerate() {
+            if cache.content_len() == 0 {
+                continue;
+            }
+
             self.style_caculator.apply_start(&cache.anchor_set);
-            if self.left > cache.content_len() {
+            if self.left >= cache.content_len() {
                 last_left = self.left;
                 self.left -= cache.content_len();
             } else {

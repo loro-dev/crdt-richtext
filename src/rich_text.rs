@@ -407,7 +407,10 @@ impl RichText {
             meta: None,
         };
 
-        let ann_idx = self.ann.register(Arc::new(ann));
+        let ann = Arc::new(ann);
+        let ann_idx = self.ann.register(ann.clone());
+
+        // insert new annotation idx to content tree
         match (start, inclusive_end) {
             (Some(start), Some(end)) => {
                 self.annotate_given_range(start, end, ann_idx, style);
@@ -446,7 +449,10 @@ impl RichText {
                 // the target ends when the doc ends, so we do not need to insert an end anchor
             }
         }
-        // insert new annotation idx to content tree
+
+        // register op to store
+        let op = self.store.insert_local(OpContent::new_ann(ann));
+        self.cursor_map.register_ann(op);
     }
 
     fn annotate_given_range(
@@ -739,6 +745,7 @@ impl RichText {
         self.store.next_lamport()
     }
 
+    #[inline]
     pub(crate) fn check(&self) {
         self.content.check();
     }

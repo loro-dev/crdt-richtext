@@ -1,11 +1,11 @@
-use std::{mem::take, sync::Arc};
-
-use append_only_bytes::BytesSlice;
 use fxhash::{FxHashMap, FxHashSet};
 use generic_btree::rle::{HasLength, Mergeable};
 use smallvec::SmallVec;
+use std::{mem::take, sync::Arc};
 
-use crate::{range_map::small_set::SmallSetI32, AnchorType, Annotation, InternalString, OpID};
+use crate::{
+    range_map::small_set::SmallSetI32, AnchorType, Annotation, Behavior, InternalString, OpID,
+};
 
 use super::rich_tree::{CacheDiff, Elem};
 
@@ -431,6 +431,33 @@ impl StyleCalculator {
 
     pub fn iter(&self) -> impl Iterator<Item = &AnnIdx> {
         self.0.iter()
+    }
+
+    pub fn calc_styles(&self, manager: &AnnManager) -> Vec<Arc<Annotation>> {
+        let mut style_map = FxHashMap::default();
+        for ann in self.0.iter() {
+            let ann = manager.get_ann_by_idx(*ann).unwrap();
+            dbg!(&ann);
+            let suffix_to_make_inclusive_work = if ann.behavior == Behavior::Inclusive {
+                Some(ann.id)
+            } else {
+                None
+            };
+            match style_map.entry((ann.type_.clone(), suffix_to_make_inclusive_work)) {
+                std::collections::hash_map::Entry::Occupied(mut o) => {
+                    let (lamport, old_ann) = o.get_mut();
+                    if *lamport < ann.range_lamport {
+                        *old_ann = ann.clone();
+                        *lamport = ann.range_lamport;
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(t) => {
+                    t.insert((ann.range_lamport, ann.clone()));
+                }
+            }
+        }
+        dbg!(&style_map);
+        style_map.into_iter().map(|(_, (_, ann))| ann).collect()
     }
 }
 
