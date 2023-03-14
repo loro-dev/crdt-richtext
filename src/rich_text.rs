@@ -347,6 +347,9 @@ impl RichText {
     ///
     /// Under the hood, it will assign anchors to the characters at the given start pos and end pos.
     /// The range start OpID and end OpID are the OpID of those characters;
+    ///
+    /// Although the arg is a range bound, a `..` range doesn't necessary means the start anchor
+    /// and the end anchor is None. Because the range is also depends on the anchor type.
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, style: Style) {
         let start = match range.start_bound() {
             Bound::Included(start) => *start,

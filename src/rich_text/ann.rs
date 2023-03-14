@@ -57,7 +57,7 @@ impl AnnManager {
 /// The annotated text span.
 #[derive(Debug, Clone)]
 pub struct Span {
-    pub text: BytesSlice,
+    pub text: String,
     pub annotations: FxHashSet<InternalString>,
 }
 
@@ -71,7 +71,21 @@ impl Span {
     }
 
     pub fn as_str(&self) -> &str {
-        std::str::from_utf8(self.text.as_ref()).unwrap()
+        &self.text
+    }
+}
+
+impl Mergeable for Span {
+    fn can_merge(&self, rhs: &Self) -> bool {
+        self.annotations == rhs.annotations
+    }
+
+    fn merge_right(&mut self, rhs: &Self) {
+        self.text.push_str(&rhs.text);
+    }
+
+    fn merge_left(&mut self, left: &Self) {
+        todo!()
     }
 }
 

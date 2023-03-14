@@ -216,7 +216,7 @@ mod annotation {
         Style {
             start_type: AnchorType::Before,
             end_type: AnchorType::Before,
-            merge_method: crate::RangeMergeRule::Merge,
+            merge_method: crate::Behavior::Merge,
             type_: InternalString::from("bold"),
         }
     }
@@ -225,8 +225,17 @@ mod annotation {
         Style {
             start_type: AnchorType::Before,
             end_type: AnchorType::After,
-            merge_method: crate::RangeMergeRule::Merge,
+            merge_method: crate::Behavior::Merge,
             type_: InternalString::from("bold"),
+        }
+    }
+
+    fn expanding_style() -> Style {
+        Style {
+            start_type: AnchorType::After,
+            end_type: AnchorType::Before,
+            merge_method: crate::Behavior::Merge,
+            type_: InternalString::from("expand"),
         }
     }
 
@@ -252,5 +261,116 @@ mod annotation {
         assert_eq!(ans[0].len(), 3);
         assert_eq!(ans[1].len(), 6);
         assert_eq!(ans[0].as_str(), "123");
+        assert!(ans[0].annotations.contains(&"bold".into()));
     }
+
+    #[test]
+    fn annotate_whole_doc() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(.., expanding_style());
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 1);
+        assert_eq!(ans[0].len(), 9);
+        assert_eq!(ans[0].as_str(), "123456789");
+        text.delete(..);
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 0);
+        text.insert(0, "123456789");
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 1);
+        assert_eq!(ans[0].len(), 9);
+        assert_eq!(ans[0].as_str(), "123456789");
+        assert!(ans[0].annotations.contains(&"expand".into()));
+    }
+
+    #[test]
+    fn annotate_half_doc_start() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(..5, expanding_style());
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 2);
+        assert_eq!(ans[0].len(), 5);
+        assert_eq!(ans[1].len(), 4);
+        assert!(ans[0].annotations.contains(&"expand".into()));
+
+        // should expand
+        text.insert(5, "k");
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans[0].len(), 6);
+        assert!(ans[0].annotations.contains(&"expand".into()));
+
+        text.delete(3..7);
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans[0].len(), 3);
+        assert!(ans[0].annotations.contains(&"expand".into()));
+
+        text.insert(3, "k");
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans[0].len(), 4);
+
+        text.delete(0..5);
+        text.insert(0, "12");
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans[0].len(), 2);
+        assert!(ans[0].annotations.contains(&"expand".into()));
+    }
+
+    #[test]
+    fn annotate_half_doc_end() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(5.., expanding_style());
+        {
+            let ans = text.iter().collect::<Vec<_>>();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].len(), 5);
+            assert_eq!(ans[0].annotations.len(), 0);
+            assert_eq!(ans[1].len(), 4);
+            assert_eq!(ans[1].annotations.len(), 1);
+        }
+        text.delete(4..6);
+        {
+            let ans = text.iter().collect::<Vec<_>>();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].len(), 4);
+            assert_eq!(ans[0].annotations.len(), 0);
+            assert_eq!(ans[1].len(), 3);
+            assert_eq!(ans[1].annotations.len(), 1);
+        }
+        text.insert(7, "k");
+        {
+            let ans = text.iter().collect::<Vec<_>>();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].len(), 4);
+            assert_eq!(ans[0].annotations.len(), 0);
+            assert_eq!(ans[1].as_str(), "789k");
+            assert_eq!(ans[1].annotations.len(), 1);
+        }
+    }
+
+    #[test]
+    fn unbold() {}
+
+    #[test]
+    fn unlink() {}
+
+    #[test]
+    fn expand() {}
+
+    #[test]
+    fn shrink() {}
+
+    #[test]
+    fn insert_before_tombstone_bold() {}
+
+    #[test]
+    fn insert_before_tombstone_link() {}
+
+    #[test]
+    fn insert_after_tombstone_bold() {}
+
+    #[test]
+    fn insert_after_tombstone_link() {}
 }

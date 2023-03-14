@@ -1,5 +1,7 @@
+use std::mem::{replace, take};
+
 use fxhash::FxHashSet;
-use generic_btree::{rle::HasLength, ArenaIndex};
+use generic_btree::{rle::Mergeable, ArenaIndex};
 
 use super::{
     ann::{Span, StyleCalculator},
@@ -11,6 +13,7 @@ pub struct Iter<'a> {
     style_calc: StyleCalculator,
     leaf: ArenaIndex,
     index: usize,
+    pending_return: Option<Span>,
     done: bool,
 }
 
@@ -22,6 +25,7 @@ impl<'a> Iter<'a> {
             text,
             leaf,
             index: 0,
+            pending_return: None,
             done: false,
         }
     }
@@ -31,52 +35,70 @@ impl<'a> Iterator for Iter<'a> {
     type Item = Span;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-
-        let mut leaf = self.text.content.get_node(self.leaf);
+        let mut pending_return = take(&mut self.pending_return);
         loop {
-            while self.index >= leaf.elements().len() {
-                // index out of range, find next valid leaf node
-                let next = if let Some(next) = self.text.content.next_same_level_node(self.leaf) {
-                    next
-                } else {
-                    self.done = true;
-                    return None;
-                };
-                self.index = 0;
-                self.leaf = next;
-                leaf = self.text.content.get_node(self.leaf);
+            if self.done {
+                return pending_return;
             }
 
-            let elements = leaf.elements();
-            while self.index < elements.len() && elements[self.index].rle_len() == 0 {
-                // skip zero len elements
-                self.style_calc
-                    .apply_start(&elements[self.index].anchor_set);
-                self.style_calc.apply_end(&elements[self.index].anchor_set);
-                self.index += 1;
+            let mut leaf = self.text.content.get_node(self.leaf);
+            loop {
+                while self.index >= leaf.elements().len() {
+                    // index out of range, find next valid leaf node
+                    let next = if let Some(next) = self.text.content.next_same_level_node(self.leaf)
+                    {
+                        next
+                    } else {
+                        self.done = true;
+                        return pending_return;
+                    };
+                    self.index = 0;
+                    self.leaf = next;
+                    leaf = self.text.content.get_node(self.leaf);
+                }
+
+                let elements = leaf.elements();
+
+                // skip zero len (deleted) elements
+                while self.index < elements.len() && elements[self.index].content_len() == 0 {
+                    self.style_calc
+                        .apply_start(&elements[self.index].anchor_set);
+                    self.style_calc.apply_end(&elements[self.index].anchor_set);
+                    self.index += 1;
+                }
+
+                if self.index < elements.len() {
+                    break;
+                }
             }
 
-            if self.index < elements.len() {
-                break;
+            let elem = &leaf.elements()[self.index];
+            self.style_calc.apply_start(&elem.anchor_set);
+            let annotations: FxHashSet<_> = self
+                .style_calc
+                .iter()
+                .map(|&x| self.text.ann.get_ann_by_idx(x).unwrap().type_.clone())
+                .collect();
+            self.style_calc.apply_end(&elem.anchor_set);
+            self.index += 1;
+            let ans = Span {
+                text: std::str::from_utf8(&elem.string).unwrap().to_string(),
+                annotations,
+            };
+
+            if let Some(mut pending) = pending_return {
+                if pending.can_merge(&ans) {
+                    pending.merge_right(&ans);
+                    pending_return = Some(pending);
+                    continue;
+                }
+
+                self.pending_return = Some(ans);
+                return Some(pending);
+            } else {
+                pending_return = Some(ans);
+                continue;
             }
         }
-
-        let elem = &leaf.elements()[self.index];
-        dbg!(&elem);
-        self.style_calc.apply_start(&elem.anchor_set);
-        let annotations: FxHashSet<_> = self
-            .style_calc
-            .iter()
-            .map(|&x| self.text.ann.get_ann_by_idx(x).unwrap().type_.clone())
-            .collect();
-        self.style_calc.apply_end(&elem.anchor_set);
-        self.index += 1;
-        Some(Span {
-            text: elem.string.clone(),
-            annotations,
-        })
     }
 }
