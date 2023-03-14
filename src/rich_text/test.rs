@@ -394,19 +394,101 @@ mod annotation {
     }
 
     #[test]
-    fn test_unlink() {}
+    fn test_unlink() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..5, link());
+        text.annotate(3..5, unlink());
+        {
+            let ans = text.iter().collect::<Vec<_>>();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].len(), 3);
+            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[1].len(), 6);
+            assert_eq!(ans[1].annotations.len(), 0);
+        }
+        text.insert(3, "k");
+        {
+            let ans = text.iter().collect::<Vec<_>>();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].as_str(), "123");
+            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[1].len(), 7);
+            assert_eq!(ans[1].annotations.len(), 0);
+        }
+    }
 
     #[test]
-    fn expand() {}
+    fn expand() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..5, link());
+        text.annotate(0..5, bold());
+        {
+            let ans = text.get_spans();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].len(), 5);
+            assert_eq!(ans[1].len(), 4);
+            assert_eq!(ans[0].annotations.len(), 2);
+        }
+        text.insert(5, "k");
+        {
+            let ans = text.get_spans();
+            assert_eq!(ans.len(), 3);
+            assert_eq!(ans[0].len(), 5);
+            assert_eq!(ans[1].len(), 1);
+            assert_eq!(ans[2].len(), 4);
+            assert!(ans[0].annotations.contains(&"link".into()));
+            assert!(ans[0].annotations.contains(&"bold".into()));
+            assert!(ans[1].annotations.contains(&"bold".into()));
+            assert!(ans[2].annotations.is_empty());
+        }
+    }
 
     #[test]
-    fn shrink() {}
+    fn shrink() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..5, link());
+        text.annotate(0..5, bold());
+        text.delete(3..7);
+        {
+            let ans = text.get_spans();
+            assert_eq!(ans.len(), 2);
+            assert_eq!(ans[0].len(), 3);
+            assert_eq!(ans[1].len(), 2);
+            assert!(ans[0].annotations.contains(&"link".into()));
+            assert!(ans[0].annotations.contains(&"bold".into()));
+            assert!(ans[1].annotations.is_empty());
+        }
+    }
 
     #[test]
-    fn insert_before_tombstone_bold() {}
+    fn insert_before_tombstone_bold() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..5, bold());
+        text.delete(4..6);
+        text.insert(4, "k");
+        let spans = text.get_spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].text, "1234k");
+        assert!(spans[0].annotations.contains(&"bold".into()));
+    }
 
     #[test]
-    fn insert_before_tombstone_link() {}
+    fn insert_before_tombstone_link() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..5, link());
+        text.delete(4..6);
+        text.insert(4, "k");
+        let spans = text.get_spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].text, "1234");
+        assert!(spans[0].annotations.contains(&"link".into()));
+        assert!(spans[1].annotations.is_empty());
+    }
 
     #[test]
     fn insert_after_tombstone_bold() {}

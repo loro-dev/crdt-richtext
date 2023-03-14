@@ -543,6 +543,10 @@ impl RichText {
         iter::Iter::new(self)
     }
 
+    pub fn get_spans(&self) -> Vec<Span> {
+        self.iter().collect()
+    }
+
     pub fn iter_range(&self, range: impl RangeBounds<usize>) {
         todo!()
     }
