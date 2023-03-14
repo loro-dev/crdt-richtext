@@ -102,66 +102,16 @@ impl RichText {
         }
 
         // need to find left op id
-        let mut path = self.content.query::<IndexFinder>(&index);
-        loop {
-            let node = self.content.get_node(path.leaf);
-            while path.offset == 0 && path.elem_index > 0 {
-                path.elem_index -= 1;
-                path.offset = node.elements()[path.elem_index].content_len();
-            }
-
-            while path.elem_index > 0 && node.elements()[path.elem_index].is_dead() {
-                // avoid left is a tombstone
-                path.elem_index -= 1;
-                path.offset = node.elements()[path.elem_index].content_len();
-            }
-
-            if path.offset == 0 && path.elem_index == 0 {
-                while path.offset == 0 && path.elem_index == 0 {
-                    // need to go left, because we need to locate the left
-                    match self.content.prev_same_level_node(path.leaf) {
-                        Some(prev) => {
-                            let node = self.content.get_node(prev);
-                            path.elem_index = node.len();
-                            path.offset = 0;
-                            path.leaf = prev;
-                        }
-                        None => unreachable!(), // we already handled the index==0, this cannot happen
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-
+        let path = self.find_ideal_insert_pos(index);
         let mut left = None;
         let op_slice = slice.clone();
         self.content.update_leaf(path.leaf, |elements| {
-            if path.elem_index >= elements.len() {
-                // insert at the end
-                if let Some(last) = elements.last_mut() {
-                    left = Some(last.id_last());
-                    if can_merge_new_slice(last, id, lamport, &slice) {
-                        // can merge directly
-                        last.merge_slice(&slice);
-                        self.cursor_map.update(MoveEvent::new_move(path.leaf, last));
-                        return (true, cache_diff);
-                    }
-                    let elem = Elem::new(id, left, lamport, slice);
-                    self.cursor_map
-                        .update(MoveEvent::new_move(path.leaf, &elem));
-                    elements.push(elem);
-                    return (true, cache_diff);
-                } else {
-                    // Elements cannot be empty
-                    unreachable!();
-                }
-            }
-
+            debug_assert!(path.elem_index < elements.len());
             let mut offset = path.offset;
             let mut index = path.elem_index;
             if offset == 0 {
-                // ensure not at the beginning of an element
+                // ensure not at the beginning of an element,
+                // it would make us hard to merge and hard to find left
                 assert!(index > 0);
                 index -= 1;
                 offset = elements[index].rle_len();
@@ -203,6 +153,69 @@ impl RichText {
 
         self.store
             .insert_local(OpContent::new_insert(left, op_slice));
+    }
+
+    /// When user insert text at index, there may be tombstones at the given position.
+    /// We need to find the ideal position among the tombstones to insert.
+    /// Insertion at different position may have different styles.
+    ///
+    /// The ideal position is:
+    ///
+    /// - Before tombstones with before anchor
+    /// - After tombstones with after anchor
+    ///
+    /// Sometimes the insertion may not have a ideal position for example an after anchor
+    /// may exist before a before anchor.
+    ///
+    /// The current method is quite straightforward, it will scan from the end backward and stop at
+    /// the first position that is not a tombstone or has an after anchor.
+    ///
+    /// The returned result points to the position the new insertion should be at.
+    /// It uses the rle_len() rather than the content_len().
+    ///
+    /// - rle_len() includes the length of deleted string
+    /// - content_len() does not include the length of deleted string
+    fn find_ideal_insert_pos(&mut self, index: usize) -> QueryResult {
+        let mut path = self.content.query::<IndexFinder>(&index);
+        loop {
+            let node = self.content.get_node(path.leaf);
+
+            // avoid offset == 0, as it makes it hard to find `left` for insertion later
+            while path.offset == 0 && path.elem_index > 0 {
+                path.elem_index -= 1;
+                path.offset = node.elements()[path.elem_index].rle_len();
+                if node.elements()[path.elem_index].has_after_anchor() {
+                    break;
+                }
+            }
+
+            // skip tombstones if it does not have after anchor
+            while path.elem_index > 0
+                && node.elements()[path.elem_index].is_dead()
+                && !node.elements()[path.elem_index].has_after_anchor()
+            {
+                path.elem_index -= 1;
+                path.offset = node.elements()[path.elem_index].rle_len();
+            }
+
+            if path.offset == 0 && path.elem_index == 0 {
+                // cannot find `left` for insertion by this, so we need to go to left node
+                while path.offset == 0 && path.elem_index == 0 {
+                    match self.content.prev_same_level_node(path.leaf) {
+                        Some(prev) => {
+                            let node = self.content.get_node(prev);
+                            path.elem_index = node.len();
+                            path.offset = 0;
+                            path.leaf = prev;
+                        }
+                        None => unreachable!(), // we already handled the index == 0, this cannot happen
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        path
     }
 
     pub fn delete(&mut self, range: impl RangeBounds<usize>) {

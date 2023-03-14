@@ -242,6 +242,16 @@ impl Elem {
 
         false
     }
+
+    #[inline]
+    pub fn has_after_anchor(&self) -> bool {
+        self.anchor_set.has_after_anchor()
+    }
+
+    #[inline]
+    pub fn has_before_anchor(&self) -> bool {
+        self.anchor_set.has_before_anchor()
+    }
 }
 
 impl Mergeable for Elem {

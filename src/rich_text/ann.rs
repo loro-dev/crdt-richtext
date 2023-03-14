@@ -348,6 +348,14 @@ impl ElemAnchorSet {
 
         ans
     }
+
+    pub fn has_after_anchor(&self) -> bool {
+        !self.start_at_end.is_empty() || !self.end_at_end.is_empty()
+    }
+
+    pub fn has_before_anchor(&self) -> bool {
+        !self.start_at_start.is_empty() || !self.end_at_start.is_empty()
+    }
 }
 
 #[derive(Debug, Default)]

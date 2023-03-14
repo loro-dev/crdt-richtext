@@ -432,7 +432,7 @@ impl Actor {
         &mut self,
         range: impl RangeBounds<usize>,
         type_: &str,
-        merge_method: Behavior,
+        behavior: Behavior,
     ) {
         let id = self._use_next_id();
         let lamport = self._use_next_lamport();
@@ -459,7 +459,7 @@ impl Actor {
             id,
             range_lamport: (lamport, id),
             range: AnchorRange { start, end },
-            behavior: merge_method,
+            behavior,
             type_: type_.into(),
             meta: None,
         };
