@@ -42,12 +42,14 @@ impl AnnManager {
         self.idx_to_ann.get(idx as usize)
     }
 
+    #[allow(unused)]
     #[inline(always)]
     pub fn get_ann_by_id(&self, id: OpID) -> Option<&Arc<Annotation>> {
         let idx = self.id_to_idx.get(&id)?;
         self.idx_to_ann.get(*idx as usize)
     }
 
+    #[allow(unused)]
     #[inline(always)]
     pub fn get_idx_by_id(&self, id: OpID) -> Option<AnnIdx> {
         self.id_to_idx.get(&id).copied()
@@ -89,18 +91,6 @@ impl Mergeable for Span {
     }
 }
 
-pub fn apply_start_ann_set(set: &mut FxHashSet<AnnIdx>, start: &FxHashSet<AnnIdx>) {
-    for elem in start.iter() {
-        set.insert(*elem);
-    }
-}
-
-pub fn apply_end_ann_set(set: &mut FxHashSet<AnnIdx>, end: &FxHashSet<AnnIdx>) {
-    for elem in end.iter() {
-        set.remove(elem);
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CacheAnchorSet {
     start: FxHashSet<AnnIdx>,
@@ -109,28 +99,28 @@ pub struct CacheAnchorSet {
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
 pub struct ElemAnchorSet {
-    start_at_start: FxHashSet<AnnIdx>,
-    end_at_start: FxHashSet<AnnIdx>,
-    start_at_end: FxHashSet<AnnIdx>,
-    end_at_end: FxHashSet<AnnIdx>,
+    start_before: FxHashSet<AnnIdx>,
+    end_before: FxHashSet<AnnIdx>,
+    start_after: FxHashSet<AnnIdx>,
+    end_after: FxHashSet<AnnIdx>,
 }
 
 impl Mergeable for ElemAnchorSet {
     fn can_merge(&self, rhs: &Self) -> bool {
-        self.start_at_end.is_empty()
-            && self.end_at_end.is_empty()
-            && rhs.start_at_start.is_empty()
-            && rhs.end_at_start.is_empty()
+        self.start_after.is_empty()
+            && self.end_after.is_empty()
+            && rhs.start_before.is_empty()
+            && rhs.end_before.is_empty()
     }
 
     fn merge_right(&mut self, rhs: &Self) {
-        self.start_at_end = rhs.start_at_end.clone();
-        self.end_at_end = rhs.end_at_end.clone();
+        self.start_after = rhs.start_after.clone();
+        self.end_after = rhs.end_after.clone();
     }
 
     fn merge_left(&mut self, left: &Self) {
-        self.start_at_start = left.start_at_start.clone();
-        self.end_at_start = left.end_at_start.clone();
+        self.start_before = left.start_before.clone();
+        self.end_before = left.end_before.clone();
     }
 }
 
@@ -186,175 +176,81 @@ impl CacheAnchorSet {
     }
 
     pub fn union_elem_set(&mut self, other: &ElemAnchorSet) {
-        self.start.extend(other.start_at_start.iter());
-        self.start.extend(other.start_at_end.iter());
-        self.end.extend(other.end_at_start.iter());
-        self.end.extend(other.end_at_end.iter());
+        self.start.extend(other.start_before.iter());
+        self.start.extend(other.start_after.iter());
+        self.end.extend(other.end_before.iter());
+        self.end.extend(other.end_after.iter());
     }
 }
 
 impl ElemAnchorSet {
     pub fn contains_start(&self, ann: AnnIdx) -> (bool, bool) {
-        let a = self.start_at_start.contains(&ann);
-        let b = self.start_at_end.contains(&ann);
+        let a = self.start_before.contains(&ann);
+        let b = self.start_after.contains(&ann);
         (a || b, a)
     }
 
     /// return (contains_end, is_inclusive)
     pub fn contains_end(&self, ann: AnnIdx) -> (bool, bool) {
-        let a = self.end_at_start.contains(&ann);
-        let b = self.end_at_end.contains(&ann);
+        let a = self.end_before.contains(&ann);
+        let b = self.end_after.contains(&ann);
         (a || b, b)
-    }
-
-    pub fn calc_diff(&self, other: &Self) -> AnchorSetDiff {
-        let mut ans: AnchorSetDiff = Default::default();
-        for ann in self.start_at_start.difference(&other.start_at_start) {
-            ans.start.insert(*ann);
-        }
-        for ann in other.start_at_start.difference(&self.start_at_start) {
-            ans.start.insert(-*ann);
-        }
-        for ann in self.end_at_start.difference(&other.end_at_start) {
-            ans.end.insert(*ann);
-        }
-        for ann in other.end_at_start.difference(&self.end_at_start) {
-            ans.end.insert(-*ann);
-        }
-        for ann in self.start_at_end.difference(&other.start_at_end) {
-            ans.start.insert(*ann);
-        }
-        for ann in other.start_at_end.difference(&self.start_at_end) {
-            ans.start.insert(-*ann);
-        }
-        for ann in self.end_at_end.difference(&other.end_at_end) {
-            ans.end.insert(*ann);
-        }
-        for ann in other.end_at_end.difference(&self.end_at_end) {
-            ans.end.insert(-*ann);
-        }
-
-        ans
-    }
-
-    #[inline]
-    pub fn insert_ann_start(&mut self, idx: AnnIdx, type_: AnchorType) {
-        match type_ {
-            AnchorType::Before => self.start_at_start.insert(idx),
-            AnchorType::After => self.start_at_end.insert(idx),
-        };
-    }
-
-    #[inline]
-    pub fn insert_ann_end(&mut self, idx: AnnIdx, type_: AnchorType) {
-        match type_ {
-            AnchorType::Before => self.end_at_start.insert(idx),
-            AnchorType::After => self.end_at_end.insert(idx),
-        };
     }
 
     pub fn insert_ann(&mut self, idx: AnnIdx, type_: AnchorType, is_start: bool) {
         if is_start {
             match type_ {
-                AnchorType::Before => self.start_at_start.insert(idx),
-                AnchorType::After => self.start_at_end.insert(idx),
+                AnchorType::Before => self.start_before.insert(idx),
+                AnchorType::After => self.start_after.insert(idx),
             };
         } else {
             match type_ {
-                AnchorType::Before => self.end_at_start.insert(idx),
-                AnchorType::After => self.end_at_end.insert(idx),
+                AnchorType::Before => self.end_before.insert(idx),
+                AnchorType::After => self.end_after.insert(idx),
             };
         }
     }
 
-    #[inline]
-    pub fn insert_start_at_start(&mut self, idx: AnnIdx) {
-        self.start_at_start.insert(idx);
-    }
-
-    #[inline]
-    pub fn insert_start_at_end(&mut self, idx: AnnIdx) {
-        self.start_at_end.insert(idx);
-    }
-
-    #[inline]
-    pub fn insert_end_at_start(&mut self, idx: AnnIdx) {
-        self.end_at_start.insert(idx);
-    }
-
-    #[inline]
-    pub fn insert_end_at_end(&mut self, idx: AnnIdx) {
-        self.end_at_end.insert(idx);
-    }
-
     pub(crate) fn split(&mut self) -> ElemAnchorSet {
         ElemAnchorSet {
-            start_at_start: Default::default(),
-            end_at_start: Default::default(),
-            start_at_end: take(&mut self.start_at_end),
-            end_at_end: take(&mut self.end_at_end),
+            start_before: Default::default(),
+            end_before: Default::default(),
+            start_after: take(&mut self.start_after),
+            end_after: take(&mut self.end_after),
         }
     }
 
     pub(crate) fn trim(&self, trim_start: bool, trim_end: bool) -> ElemAnchorSet {
         let mut ans = ElemAnchorSet::default();
         if !trim_start {
-            ans.start_at_start = self.start_at_start.clone();
-            ans.end_at_start = self.end_at_start.clone();
+            ans.start_before = self.start_before.clone();
+            ans.end_before = self.end_before.clone();
         }
         if !trim_end {
-            ans.start_at_end = self.start_at_end.clone();
-            ans.end_at_end = self.end_at_end.clone();
+            ans.start_after = self.start_after.clone();
+            ans.end_after = self.end_after.clone();
         }
         ans
     }
 
     pub(crate) fn trim_(&mut self, trim_start: bool, trim_end: bool) {
         if trim_start {
-            self.start_at_start.clear();
-            self.end_at_start.clear();
+            self.start_before.clear();
+            self.end_before.clear();
         }
         if trim_end {
-            self.start_at_end.clear();
-            self.end_at_end.clear();
+            self.start_after.clear();
+            self.end_after.clear();
         }
-    }
-
-    pub fn cache_anchor_set(&self) -> CacheAnchorSet {
-        let mut ans = CacheAnchorSet::default();
-        if !self.start_at_start.is_empty() {
-            for ann in self.start_at_start.iter() {
-                ans.start.insert(*ann);
-            }
-        }
-
-        if !self.end_at_start.is_empty() {
-            for ann in self.end_at_start.iter() {
-                ans.end.insert(*ann);
-            }
-        }
-
-        if !self.start_at_end.is_empty() {
-            for ann in self.start_at_end.iter() {
-                ans.start.insert(*ann);
-            }
-        }
-
-        if !self.end_at_end.is_empty() {
-            for ann in self.end_at_end.iter() {
-                ans.end.insert(*ann);
-            }
-        }
-
-        ans
     }
 
     pub fn has_after_anchor(&self) -> bool {
-        !self.start_at_end.is_empty() || !self.end_at_end.is_empty()
+        !self.start_after.is_empty() || !self.end_after.is_empty()
     }
 
+    #[allow(unused)]
     pub fn has_before_anchor(&self) -> bool {
-        !self.start_at_start.is_empty() || !self.end_at_start.is_empty()
+        !self.start_before.is_empty() || !self.end_before.is_empty()
     }
 }
 
@@ -420,23 +316,24 @@ impl StyleCalculator {
     }
 
     pub fn apply_start(&mut self, anchor_set: &ElemAnchorSet) {
-        for ann in anchor_set.start_at_start.iter() {
+        for ann in anchor_set.start_before.iter() {
             self.0.insert(*ann);
         }
-        for ann in anchor_set.end_at_start.iter() {
+        for ann in anchor_set.end_before.iter() {
             self.0.remove(ann);
         }
     }
 
     pub fn apply_end(&mut self, anchor_set: &ElemAnchorSet) {
-        for ann in anchor_set.start_at_end.iter() {
+        for ann in anchor_set.start_after.iter() {
             self.0.insert(*ann);
         }
-        for ann in anchor_set.end_at_end.iter() {
+        for ann in anchor_set.end_after.iter() {
             self.0.remove(ann);
         }
     }
 
+    #[allow(unused)]
     pub fn iter(&self) -> impl Iterator<Item = &AnnIdx> {
         self.0.iter()
     }
@@ -548,7 +445,7 @@ pub fn insert_anchors_at_same_elem(
                 .0;
         }
         (AnchorType::After, AnchorType::Before) => {
-            debug_assert!(start_offset + 1 <= inclusive_end_offset);
+            debug_assert!(start_offset < inclusive_end_offset);
             let mut middle = elem.split(start_offset + 1); // need to include start_offset at elem
             elem.anchor_set.insert_ann(ann, AnchorType::After, true);
             let len = middle.rle_len();
@@ -560,7 +457,7 @@ pub fn insert_anchors_at_same_elem(
             ans.append(&mut new);
         }
         (AnchorType::After, AnchorType::After) => {
-            debug_assert!(start_offset + 1 <= inclusive_end_offset);
+            debug_assert!(start_offset < inclusive_end_offset);
             let mut middle = elem.split(start_offset + 1);
             elem.anchor_set.insert_ann(ann, AnchorType::After, true);
             let (mut new, _) =
