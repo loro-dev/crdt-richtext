@@ -712,7 +712,7 @@ impl TreeRangeMap {
                     type_: crate::AnchorType::After,
                 },
             },
-            merge_method: crate::RangeMergeRule::Delete,
+            behavior: crate::Behavior::Delete,
             type_: InternalString::from(""),
             meta: None,
         };
@@ -1731,7 +1731,7 @@ mod tree_impl_tests {
                     type_: AnchorType::Before,
                 },
             },
-            merge_method: crate::RangeMergeRule::Merge,
+            behavior: crate::Behavior::Merge,
             type_: InternalString::from(""),
             meta: None,
         }

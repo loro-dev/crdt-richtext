@@ -80,7 +80,7 @@ pub enum AnchorType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RangeMergeRule {
+pub enum Behavior {
     /// When calculating the final state, it will keep all the ranges even if they have the same type
     ///
     /// For example, we would like to keep both comments alive even if they have overlapped regions
@@ -109,7 +109,7 @@ pub struct Annotation {
     /// lamport value of the current range (it may be updated by patch)
     pub range_lamport: (Lamport, OpID),
     pub range: AnchorRange,
-    pub merge_method: RangeMergeRule,
+    pub behavior: Behavior,
     /// "bold", "comment", "italic", etc.
     pub type_: InternalString,
     pub meta: Option<Vec<u8>>,
@@ -119,7 +119,7 @@ pub struct Annotation {
 pub struct Style {
     pub start_type: AnchorType,
     pub end_type: AnchorType,
-    pub merge_method: RangeMergeRule,
+    pub behavior: Behavior,
     /// "bold", "comment", "italic", etc.
     pub type_: InternalString,
 }
@@ -569,7 +569,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 HashMap::new();
             for a in std::mem::take(&mut span.annotations) {
                 if let Some(x) = annotations.get_mut(&a.type_) {
-                    if a.merge_method == RangeMergeRule::Inclusive {
+                    if a.behavior == Behavior::Inclusive {
                         x.1.push(a);
                     } else if a.range_lamport > x.0 {
                         *x = (a.range_lamport, vec![a]);

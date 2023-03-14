@@ -24,7 +24,7 @@ impl From<&Span> for SimpleSpan {
                 .annotations
                 .iter()
                 .filter_map(|x| {
-                    if x.merge_method == RangeMergeRule::Delete {
+                    if x.behavior == Behavior::Delete {
                         None
                     } else {
                         Some(x.type_.clone())
@@ -420,19 +420,19 @@ impl Actor {
 
     #[inline(always)]
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {
-        self.annotate_with_type(range, type_, RangeMergeRule::Merge);
+        self.annotate_with_type(range, type_, Behavior::Merge);
     }
 
     #[inline(always)]
     fn un_annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {
-        self.annotate_with_type(range, type_, RangeMergeRule::Delete);
+        self.annotate_with_type(range, type_, Behavior::Delete);
     }
 
     fn annotate_with_type(
         &mut self,
         range: impl RangeBounds<usize>,
         type_: &str,
-        merge_method: RangeMergeRule,
+        merge_method: Behavior,
     ) {
         let id = self._use_next_id();
         let lamport = self._use_next_lamport();
@@ -459,7 +459,7 @@ impl Actor {
             id,
             range_lamport: (lamport, id),
             range: AnchorRange { start, end },
-            merge_method,
+            behavior: merge_method,
             type_: type_.into(),
             meta: None,
         };

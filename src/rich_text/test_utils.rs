@@ -1,4 +1,4 @@
-use crate::{test_utils::AnnotationType, RangeMergeRule};
+use crate::{test_utils::AnnotationType, Behavior};
 
 use super::*;
 use arbitrary::Arbitrary;

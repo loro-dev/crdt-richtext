@@ -402,7 +402,7 @@ impl RichText {
                     type_: style.end_type,
                 },
             },
-            merge_method: style.merge_method,
+            behavior: style.behavior,
             type_: style.type_.clone(),
             meta: None,
         };

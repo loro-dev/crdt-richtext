@@ -580,7 +580,7 @@ mod test {
                     type_: AnchorType::Before,
                 },
             },
-            merge_method: crate::RangeMergeRule::Merge,
+            behavior: crate::Behavior::Merge,
             type_: InternalString::from(""),
             meta: None,
         }

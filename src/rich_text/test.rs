@@ -216,7 +216,7 @@ mod annotation {
         Style {
             start_type: AnchorType::Before,
             end_type: AnchorType::Before,
-            merge_method: crate::Behavior::Merge,
+            behavior: crate::Behavior::Merge,
             type_: InternalString::from("bold"),
         }
     }
@@ -225,7 +225,7 @@ mod annotation {
         Style {
             start_type: AnchorType::Before,
             end_type: AnchorType::After,
-            merge_method: crate::Behavior::Merge,
+            behavior: crate::Behavior::Merge,
             type_: InternalString::from("bold"),
         }
     }
@@ -234,7 +234,7 @@ mod annotation {
         Style {
             start_type: AnchorType::After,
             end_type: AnchorType::Before,
-            merge_method: crate::Behavior::Merge,
+            behavior: crate::Behavior::Merge,
             type_: InternalString::from("expand"),
         }
     }
