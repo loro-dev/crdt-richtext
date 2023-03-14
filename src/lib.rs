@@ -9,6 +9,9 @@
 //! into the middle of tombstones).
 //!
 //!
+//!
+
+#![deny(unsafe_code)]
 
 use std::{
     cmp::Ordering,
@@ -21,8 +24,11 @@ use std::{
 pub use range_map::tree_impl::TreeRangeMap;
 pub use range_map::RangeMap;
 use range_map::{AnnPosRelativeToInsert, Span};
+use string_cache::DefaultAtom;
 
 mod range_map;
+pub mod rich_text;
+pub(crate) type InternalString = DefaultAtom;
 type Lamport = u32;
 type ClientID = u64;
 type Counter = u32;
@@ -31,6 +37,34 @@ type Counter = u32;
 pub struct OpID {
     client: ClientID,
     counter: Counter,
+}
+
+impl OpID {
+    pub fn inc(&self, inc: Counter) -> Self {
+        Self {
+            client: self.client,
+            counter: self.counter + inc as Counter,
+        }
+    }
+
+    pub fn inc_i32(&self, inc: i32) -> Self {
+        if inc > 0 {
+            Self {
+                client: self.client,
+                counter: self.counter + inc as Counter,
+            }
+        } else {
+            let (mut counter, overflow) = self.counter.overflowing_sub((-inc) as Counter);
+            if overflow {
+                counter = Counter::MAX;
+            }
+
+            Self {
+                client: self.client,
+                counter,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +80,7 @@ pub enum AnchorType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RangeMergeRule {
+pub enum Behavior {
     /// When calculating the final state, it will keep all the ranges even if they have the same type
     ///
     /// For example, we would like to keep both comments alive even if they have overlapped regions
@@ -75,11 +109,19 @@ pub struct Annotation {
     /// lamport value of the current range (it may be updated by patch)
     pub range_lamport: (Lamport, OpID),
     pub range: AnchorRange,
-    pub merge_method: RangeMergeRule,
-    // TODO: use internal string
+    pub behavior: Behavior,
     /// "bold", "comment", "italic", etc.
-    pub type_: String,
+    pub type_: InternalString,
     pub meta: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Style {
+    pub start_type: AnchorType,
+    pub end_type: AnchorType,
+    pub behavior: Behavior,
+    /// "bold", "comment", "italic", etc.
+    pub type_: InternalString,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
@@ -185,7 +227,7 @@ impl<T: RangeBounds<OpID>> From<T> for AnchorRange {
 }
 
 impl OpID {
-    pub const fn new(client: ClientID, counter: Counter) -> Self {
+    pub fn new(client: u64, counter: Counter) -> Self {
         Self { client, counter }
     }
 }
@@ -523,10 +565,11 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
             span.len = len;
 
             type Key = (Lamport, OpID);
-            let mut annotations: HashMap<String, (Key, Vec<Arc<Annotation>>)> = HashMap::new();
+            let mut annotations: HashMap<InternalString, (Key, Vec<Arc<Annotation>>)> =
+                HashMap::new();
             for a in std::mem::take(&mut span.annotations) {
                 if let Some(x) = annotations.get_mut(&a.type_) {
-                    if a.merge_method == RangeMergeRule::Inclusive {
+                    if a.behavior == Behavior::Inclusive {
                         x.1.push(a);
                     } else if a.range_lamport > x.0 {
                         *x = (a.range_lamport, vec![a]);

@@ -1,9 +1,10 @@
 use std::fs::File;
 
-use crdt_range::{Anchor, AnchorRange, AnchorType, Annotation, OpID, RangeMergeRule};
+use crdt_range::{Anchor, AnchorRange, AnchorType, Annotation, Behavior, OpID};
 use criterion::{criterion_group, criterion_main, Criterion};
 use pprof::flamegraph::{Direction, Options};
 use rand::{Rng, SeedableRng};
+use string_cache::DefaultAtom;
 
 struct PProfGuard {
     path: String,
@@ -46,8 +47,8 @@ fn a(n: u64) -> Annotation {
                 type_: AnchorType::Before,
             },
         },
-        merge_method: RangeMergeRule::Merge,
-        type_: String::new(),
+        behavior: Behavior::Merge,
+        type_: DefaultAtom::from(""),
         meta: None,
     }
 }

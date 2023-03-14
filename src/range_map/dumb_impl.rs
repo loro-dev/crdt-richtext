@@ -560,13 +560,10 @@ impl RangeMap for DumbRangeMap {
 
 #[cfg(test)]
 mod test {
-    use crate::{Anchor, AnchorType};
+    use crate::{Anchor, AnchorType, InternalString};
 
     fn id(k: u64) -> OpID {
-        OpID {
-            client: k,
-            counter: 0,
-        }
+        OpID::new(k, 0)
     }
 
     fn a(n: u64) -> Annotation {
@@ -583,8 +580,8 @@ mod test {
                     type_: AnchorType::Before,
                 },
             },
-            merge_method: crate::RangeMergeRule::Merge,
-            type_: String::new(),
+            behavior: crate::Behavior::Merge,
+            type_: InternalString::from(""),
             meta: None,
         }
     }
@@ -670,27 +667,27 @@ mod test {
     fn test_expand() {
         let mut range_map = DumbRangeMap::init();
         range_map.insert_directly(0, 10);
-        range_map.annotate(2, 2, a(0));
-        range_map.adjust_annotation(id(0), 2, id(0), None, Some((2, None)));
+        range_map.annotate(2, 2, a(1));
+        range_map.adjust_annotation(id(1), 2, id(1), None, Some((2, None)));
         let spans = range_map.get_annotations(0, 10);
         assert_eq!(
             from_spans(&spans),
-            (vec![(vec![], 2), (vec![0], 4), (vec![], 4)])
+            (vec![(vec![], 2), (vec![1], 4), (vec![], 4)])
         );
         // 0..2..6..7..10
         //  0  2  1  0
-        range_map.annotate(2, 5, a(1));
+        range_map.annotate(2, 5, a(2));
         let spans = range_map.get_annotations(0, 10);
         assert_eq!(
             from_spans(&spans),
-            (vec![(vec![], 2), (vec![0, 1], 4), (vec![1], 1), (vec![], 3)])
+            (vec![(vec![], 2), (vec![1, 2], 4), (vec![2], 1), (vec![], 3)])
         );
 
-        range_map.adjust_annotation(id(0), 3, id(0), None, Some((2, None)));
+        range_map.adjust_annotation(id(1), 3, id(1), None, Some((2, None)));
         let spans = range_map.get_annotations(0, 10);
         assert_eq!(
             from_spans(&spans),
-            (vec![(vec![], 2), (vec![0, 1], 5), (vec![0], 1), (vec![], 2)])
+            (vec![(vec![], 2), (vec![1, 2], 5), (vec![1], 1), (vec![], 2)])
         );
 
         range_map.check();

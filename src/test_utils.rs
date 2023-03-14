@@ -13,7 +13,7 @@ use fxhash::FxHashSet;
 #[derive(Debug, PartialEq, Eq)]
 pub struct SimpleSpan {
     pub len: usize,
-    pub annotations: HashSet<String>,
+    pub annotations: HashSet<InternalString>,
 }
 
 impl From<&Span> for SimpleSpan {
@@ -24,7 +24,7 @@ impl From<&Span> for SimpleSpan {
                 .annotations
                 .iter()
                 .filter_map(|x| {
-                    if x.merge_method == RangeMergeRule::Delete {
+                    if x.behavior == Behavior::Delete {
                         None
                     } else {
                         Some(x.type_.clone())
@@ -79,7 +79,7 @@ pub enum Action {
 impl From<ListOpId> for OpID {
     fn from(value: ListOpId) -> Self {
         OpID {
-            client: value.client_id as ClientID,
+            client: value.client_id as u64,
             counter: value.clock as Counter,
         }
     }
@@ -420,19 +420,19 @@ impl Actor {
 
     #[inline(always)]
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {
-        self.annotate_with_type(range, type_, RangeMergeRule::Merge);
+        self.annotate_with_type(range, type_, Behavior::Merge);
     }
 
     #[inline(always)]
     fn un_annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {
-        self.annotate_with_type(range, type_, RangeMergeRule::Delete);
+        self.annotate_with_type(range, type_, Behavior::Delete);
     }
 
     fn annotate_with_type(
         &mut self,
         range: impl RangeBounds<usize>,
         type_: &str,
-        merge_method: RangeMergeRule,
+        behavior: Behavior,
     ) {
         let id = self._use_next_id();
         let lamport = self._use_next_lamport();
@@ -459,8 +459,8 @@ impl Actor {
             id,
             range_lamport: (lamport, id),
             range: AnchorRange { start, end },
-            merge_method,
-            type_: type_.to_string(),
+            behavior,
+            type_: type_.into(),
             meta: None,
         };
         debug_log::debug_dbg!(&ann);
@@ -501,14 +501,14 @@ impl Actor {
 
     fn next_id(&self) -> OpID {
         OpID {
-            client: self.list.id as ClientID,
+            client: self.list.id as u64,
             counter: self.list.max_clock as Counter,
         }
     }
 
     fn _use_next_id(&mut self) -> OpID {
         let id = OpID {
-            client: self.list.id as ClientID,
+            client: self.list.id as u64,
             counter: self.list.max_clock as Counter,
         };
         self.list.max_clock += 1;
@@ -745,7 +745,7 @@ pub fn make_spans(spans: &[(Vec<&str>, usize)]) -> Vec<SimpleSpan> {
     spans
         .iter()
         .map(|(annotations, len)| SimpleSpan {
-            annotations: annotations.iter().map(|x| x.to_string()).collect(),
+            annotations: annotations.iter().map(|x| (*x).into()).collect(),
             len: *len,
         })
         .collect()
