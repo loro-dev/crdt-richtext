@@ -477,7 +477,7 @@ mod annotation {
     }
 
     #[test]
-    fn insert_before_tombstone_link() {
+    fn insert_after_tombstone_link() {
         let mut text = RichText::new(1);
         text.insert(0, "123456789");
         text.annotate(0..5, link());
@@ -491,8 +491,26 @@ mod annotation {
     }
 
     #[test]
-    fn insert_after_tombstone_bold() {}
-
-    #[test]
-    fn insert_after_tombstone_link() {}
+    fn insert_before_bold_anchor_but_after_link_anchor_in_tombstones() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        // end anchor attached to `5`
+        text.annotate(0..5, link());
+        // end anchor attached to `6`
+        text.annotate(0..5, bold());
+        // delete `5` and `6`
+        text.delete(4..6);
+        text.insert(4, "k");
+        assert_eq!(text.to_string().as_str(), "1234k789");
+        let spans = text.get_spans();
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].text, "1234");
+        assert!(spans[0].annotations.contains(&"link".into()));
+        assert!(spans[0].annotations.contains(&"bold".into()));
+        assert_eq!(spans[1].text, "k");
+        assert!(!spans[1].annotations.contains(&"link".into()));
+        assert!(spans[1].annotations.contains(&"bold".into()));
+        assert_eq!(spans[2].text, "789");
+        assert!(spans[2].annotations.is_empty());
+    }
 }

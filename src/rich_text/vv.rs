@@ -1,6 +1,6 @@
 use fxhash::FxHashMap;
 
-use crate::{ClientID, Counter, OpID};
+use crate::{ClientID, Counter};
 
 #[derive(Default, Debug, Clone)]
 pub struct VersionVector {
