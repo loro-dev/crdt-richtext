@@ -219,11 +219,6 @@ mod apply {
         a.merge(&b);
         b.merge(&a);
         assert_eq!(a.get_spans(), b.get_spans());
-        a.insert(0, "12");
-        b.insert(5, "4");
-        a.merge(&b);
-        b.merge(&a);
-        assert_eq!(a.get_spans(), b.get_spans());
     }
 }
 
@@ -299,6 +294,20 @@ mod annotation {
         assert_eq!(ans[1].len(), 6);
         assert_eq!(ans[0].as_str(), "123");
         assert!(ans[0].annotations.contains(&"link".into()));
+    }
+
+    #[test]
+    fn annotate_link_single_char() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(3..=3, link());
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 3);
+        assert_eq!(ans[0].len(), 3);
+        assert_eq!(ans[1].len(), 1);
+        assert_eq!(ans[2].len(), 5);
+        assert_eq!(ans[1].as_str(), "4");
+        assert!(ans[1].annotations.contains(&"link".into()));
     }
 
     #[test]

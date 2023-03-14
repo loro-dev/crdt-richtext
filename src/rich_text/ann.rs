@@ -405,7 +405,7 @@ pub fn insert_anchors_at_same_elem(
     start_type: AnchorType,
     end_type: AnchorType,
 ) -> SmallVec<[Elem; 2]> {
-    debug_assert!(start_offset < inclusive_end_offset);
+    debug_assert!(start_offset <= inclusive_end_offset);
     debug_assert!(inclusive_end_offset < elem.rle_len()); // it's inclusive end, the anchor need be
                                                           // assigned to the character at the end_offset
     let mut ans = SmallVec::new();
