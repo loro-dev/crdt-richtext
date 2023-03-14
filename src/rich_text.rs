@@ -18,7 +18,7 @@ use crate::{
 };
 
 use self::{
-    ann::{AnchorSetDiff, AnnIdx, AnnManager, Span, StyleCalculator},
+    ann::{insert_anchor_to_char, AnchorSetDiff, AnnIdx, AnnManager, Span, StyleCalculator},
     cursor::CursorMap,
     op::{Op, OpStore},
     rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, CacheDiff, Elem},
@@ -369,16 +369,17 @@ impl RichText {
             Bound::Excluded(start) => *start + 1,
             Bound::Unbounded => 0,
         };
-        let inclusive_end = match range.end_bound() {
+        let mut inclusive_end = match range.end_bound() {
             Bound::Included(end) => *end,
             Bound::Excluded(end) => *end - 1,
-            Bound::Unbounded => self.len(),
+            Bound::Unbounded => self.len() - 1,
         };
 
-        if start == inclusive_end {
+        if inclusive_end < start {
             return;
         }
 
+        inclusive_end = inclusive_end.min(self.len() - 1);
         let start = if style.start_type == AnchorType::Before {
             Some(self.content.query::<IndexFinder>(&start))
         } else if start == 0 {
@@ -387,7 +388,7 @@ impl RichText {
             Some(self.content.query::<IndexFinder>(&start.saturating_sub(1)))
         };
         let inclusive_end = if style.end_type == AnchorType::Before {
-            if inclusive_end >= self.len() - 1 {
+            if inclusive_end + 1 >= self.len() {
                 None
             } else {
                 Some(self.content.query::<IndexFinder>(&(inclusive_end + 1)))
@@ -591,7 +592,50 @@ impl RichText {
         let op_clone = op.clone();
         'apply: {
             match op.content {
-                OpContent::Ann(_) => todo!(),
+                OpContent::Ann(ann) => {
+                    let ann_idx = self.ann.register(ann.clone());
+                    match ann.range.start.id {
+                        Some(start_id) => {
+                            let cursor = self.find_cursor(start_id);
+                            self.content.update_leaf(cursor.leaf, |elements| {
+                                let index = cursor.elem_index;
+                                let offset = cursor.offset;
+                                let type_ = ann.range.start.type_;
+                                let is_start = true;
+                                insert_anchor_to_char(
+                                    elements, index, offset, ann_idx, type_, is_start,
+                                );
+                                (
+                                    true,
+                                    Some(AnchorSetDiff::from_ann(ann_idx, is_start).into()),
+                                )
+                            });
+                        }
+                        None => {
+                            self.init_styles.insert_start(ann_idx);
+                        }
+                    }
+
+                    match ann.range.end.id {
+                        Some(end_id) => {
+                            let cursor = self.find_cursor(end_id);
+                            self.content.update_leaf(cursor.leaf, |elements| {
+                                let index = cursor.elem_index;
+                                let offset = cursor.offset;
+                                let type_ = ann.range.end.type_;
+                                let is_start = false;
+                                insert_anchor_to_char(
+                                    elements, index, offset, ann_idx, type_, is_start,
+                                );
+                                (
+                                    true,
+                                    Some(AnchorSetDiff::from_ann(ann_idx, is_start).into()),
+                                )
+                            });
+                        }
+                        None => {}
+                    }
+                }
                 OpContent::Text(text) => {
                     let scan_start = self.find_next_cursor_of(text.left);
                     if scan_start.is_none() {
@@ -708,6 +752,29 @@ impl RichText {
             });
             id.counter += leaf_del_len as Counter;
             len -= leaf_del_len;
+        }
+    }
+
+    fn find_cursor(&self, id: OpID) -> QueryResult {
+        let (insert_leaf, _) = self
+            .cursor_map
+            .get_insert(id)
+            .expect("Cannot find target id");
+        let node = self.content.get_node(insert_leaf);
+        let mut elem_index = 0;
+        let elements = &node.elements();
+        while !elements[elem_index].contains_id(id) {
+            // if range out of bound, then cursor_map is off
+            elem_index += 1;
+        }
+
+        let offset = (id.counter - elements[elem_index].id.counter) as usize;
+        assert!(offset < elements[elem_index].atom_len());
+        QueryResult {
+            leaf: insert_leaf,
+            elem_index,
+            offset,
+            found: true,
         }
     }
 

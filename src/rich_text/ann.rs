@@ -57,7 +57,7 @@ impl AnnManager {
 }
 
 /// The annotated text span.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub text: String,
     pub annotations: FxHashSet<InternalString>,
@@ -342,7 +342,6 @@ impl StyleCalculator {
         let mut style_map = FxHashMap::default();
         for ann in self.0.iter() {
             let ann = manager.get_ann_by_idx(*ann).unwrap();
-            dbg!(&ann);
             let suffix_to_make_inclusive_work = if ann.behavior == Behavior::Inclusive {
                 Some(ann.id)
             } else {
@@ -361,7 +360,6 @@ impl StyleCalculator {
                 }
             }
         }
-        dbg!(&style_map);
         style_map.into_iter().map(|(_, (_, ann))| ann).collect()
     }
 }

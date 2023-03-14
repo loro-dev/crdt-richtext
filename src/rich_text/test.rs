@@ -1,3 +1,5 @@
+use crate::InternalString;
+
 use super::*;
 
 mod delete {
@@ -205,57 +207,74 @@ mod apply {
         b.merge(&a);
         assert_eq!(a.to_string(), b.to_string());
     }
+
+    #[test]
+    fn apply_annotation() {
+        let mut a = RichText::new(1);
+        let mut b = RichText::new(2);
+        a.insert(0, "12345");
+        b.insert(0, "12345");
+        a.annotate(.., bold());
+        b.annotate(.., link());
+        a.merge(&b);
+        b.merge(&a);
+        assert_eq!(a.get_spans(), b.get_spans());
+        a.insert(0, "12");
+        b.insert(5, "4");
+        a.merge(&b);
+        b.merge(&a);
+        assert_eq!(a.get_spans(), b.get_spans());
+    }
+}
+
+fn bold() -> Style {
+    Style {
+        start_type: AnchorType::Before,
+        end_type: AnchorType::Before,
+        behavior: crate::Behavior::Merge,
+        type_: InternalString::from("bold"),
+    }
+}
+
+fn unbold() -> Style {
+    Style {
+        start_type: AnchorType::Before,
+        end_type: AnchorType::Before,
+        behavior: crate::Behavior::Delete,
+        type_: InternalString::from("bold"),
+    }
+}
+
+fn link() -> Style {
+    Style {
+        start_type: AnchorType::Before,
+        end_type: AnchorType::After,
+        behavior: crate::Behavior::Merge,
+        type_: InternalString::from("link"),
+    }
+}
+
+fn unlink() -> Style {
+    Style {
+        start_type: AnchorType::After,
+        end_type: AnchorType::Before,
+        behavior: crate::Behavior::Delete,
+        type_: InternalString::from("link"),
+    }
+}
+
+fn expanding_style() -> Style {
+    Style {
+        start_type: AnchorType::After,
+        end_type: AnchorType::Before,
+        behavior: crate::Behavior::Merge,
+        type_: InternalString::from("expand"),
+    }
 }
 
 mod annotation {
-    use crate::{AnchorType, InternalString};
 
     use super::*;
-
-    fn bold() -> Style {
-        Style {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::Before,
-            behavior: crate::Behavior::Merge,
-            type_: InternalString::from("bold"),
-        }
-    }
-
-    fn unbold() -> Style {
-        Style {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::Before,
-            behavior: crate::Behavior::Delete,
-            type_: InternalString::from("bold"),
-        }
-    }
-
-    fn link() -> Style {
-        Style {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::After,
-            behavior: crate::Behavior::Merge,
-            type_: InternalString::from("link"),
-        }
-    }
-
-    fn unlink() -> Style {
-        Style {
-            start_type: AnchorType::After,
-            end_type: AnchorType::Before,
-            behavior: crate::Behavior::Delete,
-            type_: InternalString::from("link"),
-        }
-    }
-
-    fn expanding_style() -> Style {
-        Style {
-            start_type: AnchorType::After,
-            end_type: AnchorType::Before,
-            behavior: crate::Behavior::Merge,
-            type_: InternalString::from("expand"),
-        }
-    }
 
     #[test]
     fn annotate_bold() {
@@ -512,5 +531,15 @@ mod annotation {
         assert!(spans[1].annotations.contains(&"bold".into()));
         assert_eq!(spans[2].text, "789");
         assert!(spans[2].annotations.is_empty());
+    }
+
+    #[test]
+    fn apply_remote_annotation() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(0..5, link());
+        let mut b = RichText::new(2);
+        b.merge(&text);
+        assert_eq!(b.get_spans(), text.get_spans());
     }
 }
