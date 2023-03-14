@@ -1178,7 +1178,7 @@ impl BTreeTrait for TreeTrait {
     fn calc_cache_leaf(
         cache: &mut Self::Cache,
         caches: &[Self::Elem],
-        diff: Option<Self::CacheDiff>,
+        _diff: Option<Self::CacheDiff>,
     ) -> CacheDiff {
         let mut len = 0;
         for child in caches.iter() {

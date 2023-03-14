@@ -1,4 +1,4 @@
-use crate::{test_utils::AnnotationType, Behavior};
+use crate::{test_utils::AnnotationType};
 
 use super::*;
 use arbitrary::Arbitrary;
@@ -173,10 +173,10 @@ impl Actor {
     }
 
     #[inline(always)]
-    pub fn annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {}
+    pub fn annotate(&mut self, _range: impl RangeBounds<usize>, _type_: &str) {}
 
     #[inline(always)]
-    fn un_annotate(&mut self, range: impl RangeBounds<usize>, type_: &str) {}
+    fn un_annotate(&mut self, _range: impl RangeBounds<usize>, _type_: &str) {}
 
     fn merge(&mut self, other: &Self) {
         self.text.merge(&other.text)
@@ -202,7 +202,7 @@ impl Actor {
 mod test {
     use super::*;
     use Action::*;
-    use AnnotationType::*;
+    
 
     #[test]
     fn fuzz_0() {

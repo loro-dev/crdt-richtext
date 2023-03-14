@@ -1,4 +1,4 @@
-use std::mem::{replace, take};
+use std::mem::{take};
 
 use fxhash::FxHashSet;
 use generic_btree::{rle::Mergeable, ArenaIndex};

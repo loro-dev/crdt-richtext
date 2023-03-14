@@ -381,12 +381,10 @@ impl RichText {
 
         let start = if style.start_type == AnchorType::Before {
             Some(self.content.query::<IndexFinder>(&start))
+        } else if start == 0 {
+            None
         } else {
-            if start == 0 {
-                None
-            } else {
-                Some(self.content.query::<IndexFinder>(&start.saturating_sub(1)))
-            }
+            Some(self.content.query::<IndexFinder>(&start.saturating_sub(1)))
         };
         let inclusive_end = if style.end_type == AnchorType::Before {
             if inclusive_end >= self.len() - 1 {
@@ -560,7 +558,7 @@ impl RichText {
         self.iter().collect()
     }
 
-    pub fn iter_range(&self, range: impl RangeBounds<usize>) {
+    pub fn iter_range(&self, _range: impl RangeBounds<usize>) {
         todo!()
     }
 

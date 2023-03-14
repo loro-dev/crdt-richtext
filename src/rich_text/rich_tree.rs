@@ -1,13 +1,10 @@
-use crate::{
-    range_map::{small_set::SmallSetI32, tree_impl::AnchorSet},
-    Counter, Lamport, OpID,
-};
+use crate::{Counter, Lamport, OpID};
 use append_only_bytes::BytesSlice;
 use core::fmt;
-use fxhash::FxHashSet;
+
 use generic_btree::rle::{HasLength, Mergeable, Sliceable};
 use smallvec::SmallVec;
-use std::{mem::take, str::Chars};
+use std::str::Chars;
 
 use self::{rich_tree_btree_impl::RichTreeTrait, utf16::get_utf16_len};
 
@@ -67,11 +64,6 @@ impl Elem {
     #[inline(always)]
     pub fn is_dead(&self) -> bool {
         self.status.is_dead()
-    }
-
-    #[inline(always)]
-    pub fn status(&self) -> Status {
-        self.status
     }
 
     pub fn split(&mut self, offset: usize) -> Self {
@@ -249,6 +241,7 @@ impl Elem {
     }
 
     #[inline]
+    #[allow(unused)]
     pub fn has_before_anchor(&self) -> bool {
         self.anchor_set.has_before_anchor()
     }
@@ -359,7 +352,9 @@ impl Status {
         future: false,
         deleted_times: 0,
     };
-    fn new() -> Self {
+
+    #[allow(unused)]
+    pub fn new() -> Self {
         Status {
             future: false,
             deleted_times: 0,

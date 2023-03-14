@@ -4,7 +4,7 @@ use append_only_bytes::BytesSlice;
 use fxhash::FxHashMap;
 use generic_btree::rle::{HasLength, Mergeable, Sliceable};
 
-use crate::{Annotation, ClientID, Counter, Lamport, OpID, RangeOp};
+use crate::{Annotation, ClientID, Counter, Lamport, OpID};
 
 use super::vv::VersionVector;
 
@@ -211,7 +211,7 @@ impl Mergeable for Op {
         }
     }
 
-    fn merge_left(&mut self, left: &Self) {
+    fn merge_left(&mut self, _left: &Self) {
         unimplemented!()
     }
 }

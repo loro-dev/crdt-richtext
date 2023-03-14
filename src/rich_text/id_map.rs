@@ -31,10 +31,12 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
         }
     }
 
+    #[allow(unused)]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
+    #[allow(unused)]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
@@ -121,6 +123,7 @@ impl<Value: Clone + std::fmt::Debug> IdMap<Value> {
         client_map.insert(id.counter, elem);
     }
 
+    #[allow(unused)]
     pub fn remove(&mut self, id: OpID, len: usize) -> bool {
         let Some(mut g) = self.get(id) else { return false };
         if g.start_counter == id.counter && g.len == len {

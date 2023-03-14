@@ -86,7 +86,7 @@ impl Mergeable for Span {
         self.text.push_str(&rhs.text);
     }
 
-    fn merge_left(&mut self, left: &Self) {
+    fn merge_left(&mut self, _left: &Self) {
         todo!()
     }
 }
