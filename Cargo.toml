@@ -14,7 +14,7 @@ arref = "0.1.0"
 debug-log = "0.1.4"
 heapless = "0.7.16"
 fxhash = "0.2.1"
-generic-btree = { version = "0.1.0", path = "../generic-btree" }
+generic-btree = { version = "0.2.0", path = "../generic-btree" }
 bitvec = "1.0.1"
 append-only-bytes = "0.1.5"
 string_cache = "0.8.6"
