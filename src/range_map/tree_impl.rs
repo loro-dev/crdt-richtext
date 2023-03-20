@@ -847,10 +847,6 @@ impl Default for TreeRangeMap {
         Self::new()
     }
 }
-#[derive(Clone, Default, Debug)]
-struct Buffer {
-    changes: Vec<isize>,
-}
 
 impl HasLength for Elem {
     fn rle_len(&self) -> usize {
@@ -1148,7 +1144,6 @@ struct TreeTrait;
 
 impl BTreeTrait for TreeTrait {
     type Elem = Elem;
-    type WriteBuffer = Buffer;
     type Cache = Elem;
 
     const MAX_LEN: usize = 8;

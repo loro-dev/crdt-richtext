@@ -11,8 +11,6 @@ impl BTreeTrait for RichTreeTrait {
 
     type CacheDiff = CacheDiff;
 
-    type WriteBuffer = ();
-
     const MAX_LEN: usize = 32;
 
     fn calc_cache_internal(
