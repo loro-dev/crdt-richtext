@@ -16,7 +16,7 @@ pub mod utf16;
 
 type AnnIdx = i32;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Elem {
     pub id: OpID,
     pub left: Option<OpID>,
@@ -27,6 +27,21 @@ pub struct Elem {
     pub utf16_len: usize,
     pub status: Status,
     pub anchor_set: ElemAnchorSet,
+}
+
+impl std::fmt::Debug for Elem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Elem")
+            .field("id", &self.id)
+            .field("left", &self.left)
+            .field("right", &self.right)
+            .field("lamport", &self.lamport)
+            .field("string", &std::str::from_utf8(&self.string))
+            .field("utf16_len", &self.utf16_len)
+            .field("status", &self.status)
+            .field("anchor_set", &self.anchor_set)
+            .finish()
+    }
 }
 
 impl Elem {
@@ -90,7 +105,6 @@ impl Elem {
             utf16_len,
             status: self.status,
         };
-        self.right = Some(self.id.inc(start as Counter));
         self.utf16_len -= utf16_len;
         self.string = self.string.slice_clone(..offset);
         right
@@ -264,6 +278,7 @@ impl Mergeable for Elem {
             && self.id.counter + self.atom_len() as Counter == rhs.id.counter
             && self.lamport + self.atom_len() as Lamport == rhs.lamport
             && rhs.left == Some(self.id_last())
+            && self.right == rhs.right
             && self.status == rhs.status
             && self.string.can_merge(&rhs.string)
             && self.anchor_set.can_merge(&rhs.anchor_set)
@@ -315,11 +330,7 @@ impl Sliceable for Elem {
             } else {
                 Some(self.id.inc(start as Counter - 1))
             },
-            right: if end == self.rle_len() {
-                self.right
-            } else {
-                Some(self.id.inc(end as Counter))
-            },
+            right: self.right,
             lamport: self.lamport + start as Lamport,
             string: s,
             utf16_len,

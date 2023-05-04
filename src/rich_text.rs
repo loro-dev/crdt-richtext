@@ -703,7 +703,7 @@ impl RichText {
             ));
             return None;
         }
-        let scan_start = scan_start.unwrap_or_else(|| self.content.first_full_path());
+        let scan_start = scan_start.unwrap();
         let iterator = self.content.iter_range(scan_start..);
         let elt_left_origin = elt.left;
         let elt_right_cursor = elt.right.map(|x| self.find_cursor(x));
@@ -754,10 +754,9 @@ impl RichText {
                 end_offset - offset,
             ));
 
-            let len = end_offset - offset;
             if o_left_origin == elt.left {
                 // we only need to compare the first element's right parent
-                let o_right_cursor = if len == 1 || end_offset == o_slice.elem.rle_len() {
+                let o_right_cursor = if end_offset == o_slice.elem.rle_len() {
                     o_slice.elem.right.map(|x| self.find_cursor(x))
                 } else {
                     let mut q = *o_slice.path();

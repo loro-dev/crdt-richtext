@@ -591,7 +591,7 @@ mod fugue {
         text.insert(1, "2");
         let span = text.content.iter().next().unwrap();
         assert_eq!(span.rle_len(), 1);
-        assert_eq!(span.right.unwrap().counter, 1);
+        assert_eq!(span.right, None);
         let span = text.content.iter().nth(1).unwrap();
         assert_eq!(span.rle_len(), 1);
         assert_eq!(span.right.unwrap().counter, 1);

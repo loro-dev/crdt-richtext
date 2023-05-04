@@ -45,11 +45,21 @@ impl OpContent {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TextInsertOp {
     pub text: BytesSlice,
     pub left: Option<OpID>,
     pub right: Option<OpID>,
+}
+
+impl std::fmt::Debug for TextInsertOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextInsertOp")
+            .field("text", &std::str::from_utf8(&self.text))
+            .field("left", &self.left)
+            .field("right", &self.right)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
