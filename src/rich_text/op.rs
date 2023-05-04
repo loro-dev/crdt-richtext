@@ -197,9 +197,10 @@ impl Mergeable for Op {
             && self.id.counter + self.rle_len() as Counter == rhs.id.counter
             && self.lamport + self.rle_len() as Counter == rhs.lamport
             && match (&self.content, &rhs.content) {
-                (OpContent::Text(left), OpContent::Text(ins)) => {
-                    ins.left == Some(self.id.inc(self.rle_len() as Counter - 1))
-                        && left.text.can_merge(&ins.text)
+                (OpContent::Text(left), OpContent::Text(right)) => {
+                    right.left == Some(self.id.inc(self.rle_len() as Counter - 1))
+                        && right.right == left.right
+                        && left.text.can_merge(&right.text)
                 }
                 (OpContent::Del(a), OpContent::Del(b)) => a.can_merge(b),
                 _ => false,

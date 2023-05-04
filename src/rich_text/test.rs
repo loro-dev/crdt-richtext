@@ -579,4 +579,21 @@ mod fugue {
         let span = other.content.iter().next().unwrap();
         assert_eq!(span.right.unwrap().counter, 2);
     }
+
+    #[test]
+    fn test_merge_split_right() {
+        let mut text = RichText::new(1);
+        text.insert(0, "0");
+        text.insert(1, "1");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.rle_len(), 2);
+        assert!(span.right.is_none());
+        text.insert(1, "2");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.rle_len(), 1);
+        assert_eq!(span.right.unwrap().counter, 1);
+        let span = text.content.iter().nth(1).unwrap();
+        assert_eq!(span.rle_len(), 1);
+        assert_eq!(span.right.unwrap().counter, 1);
+    }
 }

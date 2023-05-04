@@ -67,6 +67,26 @@ impl OpID {
     }
 }
 
+pub(crate) struct IdSpan {
+    id: OpID,
+    len: Counter,
+}
+
+impl IdSpan {
+    pub fn new(id: OpID, len: usize) -> Self {
+        Self {
+            id,
+            len: len as Counter,
+        }
+    }
+
+    pub fn contains(&self, id: OpID) -> bool {
+        self.id.client == id.client
+            && self.id.counter <= id.counter
+            && id.counter < self.id.counter + self.len
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum RangeOp {
     Patch(Patch),

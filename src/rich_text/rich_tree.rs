@@ -21,6 +21,7 @@ pub struct Elem {
     pub id: OpID,
     pub left: Option<OpID>,
     pub right: Option<OpID>,
+    // TODO: remove lamport?
     pub lamport: Lamport,
     pub string: BytesSlice,
     pub utf16_len: usize,
