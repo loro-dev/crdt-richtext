@@ -95,30 +95,60 @@ impl RichText {
         let id = self.next_id();
         let lamport = self.next_lamport();
         if index == 0 {
+            let first_leaf = self.content.first_leaf();
+            let right_origin = self
+                .content
+                .get_node(first_leaf)
+                .elements()
+                .first()
+                .map(|x| x.id);
             self.store
-                .insert_local(OpContent::new_insert(None, slice.clone()));
-            self.content.prepend(Elem::new(id, None, lamport, slice));
+                .insert_local(OpContent::new_insert(None, right_origin, slice.clone()));
+            self.content
+                .prepend(Elem::new(id, None, right_origin, lamport, slice));
             return;
         }
 
         // need to find left op id
         let path = self.find_ideal_insert_pos(index);
-        let mut left = None;
+        let left;
+        let right;
         let op_slice = slice.clone();
+        {
+            // find left and right
+            let mut node = self.content.get_node(path.leaf);
+            let offset = path.offset;
+            let index = path.elem_index;
+            if offset != 0 {
+                left = Some(node.elements()[index].id.inc((offset - 1) as u32));
+            } else {
+                left = Some(node.elements()[index - 1].id_last());
+            }
+            if offset < node.elements()[index].rle_len() {
+                right = Some(node.elements()[index].id.inc(offset as u32));
+            } else if index + 1 < node.elements().len() {
+                right = Some(node.elements()[index + 1].id);
+            } else if let Some(next) = self.content.next_same_level_node(path.leaf) {
+                node = self.content.get_node(next);
+                right = Some(node.elements()[0].id);
+            } else {
+                right = None;
+            }
+        }
+
         self.content.update_leaf(path.leaf, |elements| {
+            // insert new element
             debug_assert!(path.elem_index < elements.len());
             let mut offset = path.offset;
             let mut index = path.elem_index;
             if offset == 0 {
-                // ensure not at the beginning of an element,
-                // it would make us hard to merge and hard to find left
+                // ensure not at the beginning of an element
                 assert!(index > 0);
                 index -= 1;
                 offset = elements[index].rle_len();
             }
 
             if offset == elements[index].rle_len() {
-                left = Some(elements[index].id_last());
                 if can_merge_new_slice(&elements[index], id, lamport, &slice) {
                     // can merge directly
                     elements[index].merge_slice(&slice);
@@ -127,24 +157,17 @@ impl RichText {
                     return (true, cache_diff);
                 }
 
-                elements.insert(
-                    index + 1,
-                    Elem::new(id, Some(elements[index].id_last()), lamport, slice),
-                );
+                elements.insert(index + 1, Elem::new(id, left, right, lamport, slice));
                 self.cursor_map
                     .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
                 return (true, cache_diff);
             }
 
             // need to split element
-            let right = elements[index].split(offset);
-            left = Some(elements[index].id_last());
+            let right_half = elements[index].split(offset);
             elements.splice(
                 index + 1..index + 1,
-                [
-                    Elem::new(id, Some(elements[index].id_last()), lamport, slice),
-                    right,
-                ],
+                [Elem::new(id, left, right, lamport, slice), right_half],
             );
             self.cursor_map
                 .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
@@ -152,7 +175,7 @@ impl RichText {
         });
 
         self.store
-            .insert_local(OpContent::new_insert(left, op_slice));
+            .insert_local(OpContent::new_insert(left, right, op_slice));
     }
 
     /// When user insert text at index, there may be tombstones at the given position.
@@ -640,8 +663,9 @@ impl RichText {
                     let scan_start = self.find_next_cursor_of(text.left);
                     if scan_start.is_none() {
                         // insert to the last
-                        self.content
-                            .push(Elem::new(op.id, text.left, op.lamport, text.text));
+                        self.content.push(Elem::new(
+                            op.id, text.left, text.right, op.lamport, text.text,
+                        ));
                         break 'apply;
                     }
                     let iterator = match scan_start {
@@ -667,11 +691,12 @@ impl RichText {
                     if let Some(before) = before {
                         self.content.insert_by_query_result(
                             before,
-                            Elem::new(op.id, text.left, op.lamport, text.text),
+                            Elem::new(op.id, text.left, text.right, op.lamport, text.text),
                         );
                     } else {
-                        self.content
-                            .push(Elem::new(op.id, text.left, op.lamport, text.text));
+                        self.content.push(Elem::new(
+                            op.id, text.left, text.right, op.lamport, text.text,
+                        ));
                     }
                 }
                 OpContent::Del(del) => {

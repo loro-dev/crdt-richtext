@@ -23,8 +23,12 @@ pub enum OpContent {
 }
 
 impl OpContent {
-    pub fn new_insert(left: Option<OpID>, slice: BytesSlice) -> Self {
-        OpContent::Text(TextInsertOp { text: slice, left })
+    pub fn new_insert(left: Option<OpID>, right: Option<OpID>, slice: BytesSlice) -> Self {
+        OpContent::Text(TextInsertOp {
+            text: slice,
+            left,
+            right,
+        })
     }
 
     pub fn new_delete(mut start: OpID, mut len: i32) -> Self {
@@ -45,6 +49,7 @@ impl OpContent {
 pub struct TextInsertOp {
     pub text: BytesSlice,
     pub left: Option<OpID>,
+    pub right: Option<OpID>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -243,6 +248,11 @@ impl Sliceable for Op {
                         text.left
                     } else {
                         Some(self.id.inc(start as Counter - 1))
+                    },
+                    right: if end == self.rle_len() {
+                        text.right
+                    } else {
+                        Some(self.id.inc(end as Counter))
                     },
                 }),
             },

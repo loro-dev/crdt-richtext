@@ -20,6 +20,7 @@ type AnnIdx = i32;
 pub struct Elem {
     pub id: OpID,
     pub left: Option<OpID>,
+    pub right: Option<OpID>,
     pub lamport: Lamport,
     pub string: BytesSlice,
     pub utf16_len: usize,
@@ -28,10 +29,17 @@ pub struct Elem {
 }
 
 impl Elem {
-    pub fn new(id: OpID, left: Option<OpID>, lamport: Lamport, string: BytesSlice) -> Self {
+    pub fn new(
+        id: OpID,
+        left: Option<OpID>,
+        right: Option<OpID>,
+        lamport: Lamport,
+        string: BytesSlice,
+    ) -> Self {
         Elem {
             id,
             left,
+            right,
             lamport,
             utf16_len: get_utf16_len(&string),
             string,
@@ -75,11 +83,13 @@ impl Elem {
             anchor_set: self.anchor_set.split(),
             id: self.id.inc(start as Counter),
             left: Some(self.id.inc(start as Counter - 1)),
+            right: self.right,
             lamport: self.lamport + start as Lamport,
             string: s,
             utf16_len,
             status: self.status,
         };
+        self.right = Some(self.id.inc(start as Counter));
         self.utf16_len -= utf16_len;
         self.string = self.string.slice_clone(..offset);
         right
@@ -303,6 +313,11 @@ impl Sliceable for Elem {
                 self.left
             } else {
                 Some(self.id.inc(start as Counter - 1))
+            },
+            right: if end == self.rle_len() {
+                self.right
+            } else {
+                Some(self.id.inc(end as Counter))
             },
             lamport: self.lamport + start as Lamport,
             string: s,

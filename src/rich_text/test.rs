@@ -552,3 +552,31 @@ mod annotation {
         assert_eq!(b.get_spans(), text.get_spans());
     }
 }
+
+mod fugue {
+    use super::*;
+
+    #[test]
+    fn test_find_right() {
+        let mut text = RichText::new(1);
+        text.insert(0, "0");
+        text.insert(0, "1");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.right.unwrap().counter, 0);
+        text.insert(0, "2");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.right.unwrap().counter, 1);
+        // before: 210
+        text.insert(2, "3");
+        // after: 2130
+        let span = text.content.iter().nth(2).unwrap();
+        assert_eq!(span.right.unwrap().counter, 0);
+        let mut other = RichText::new(2);
+        other.merge(&text);
+        // before: 2130
+        other.insert(0, "4");
+        // before: 42130
+        let span = other.content.iter().next().unwrap();
+        assert_eq!(span.right.unwrap().counter, 2);
+    }
+}
