@@ -4,8 +4,6 @@ pub use range_map::RangeMap;
 mod range_map;
 #[cfg(feature = "test")]
 pub mod test_utils;
-#[cfg(not(feature = "test"))]
-mod test_utils;
 use range_map::{AnnPosRelativeToInsert, Span};
 
 #[derive(Debug)]
