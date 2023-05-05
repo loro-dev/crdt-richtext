@@ -15,14 +15,14 @@ const __dirname = path.dirname(__filename);
 // node build.mjs release nodejs
 let profile = "dev";
 let profileDir = "debug";
-if (process.argv[0] == "release") {
+if (process.argv[2] == "release") {
   profile = "release";
   profileDir = "release";
 }
 const TARGETS = ["bundler", "nodejs"];
 const startTime = performance.now();
 const WasmDir = resolve(__dirname, "..");
-const WasmFileName = "crdt-richtext-wasm_bg.wasm";
+const WasmFileName = "crdt_richtext_wasm_bg.wasm";
 
 console.log(WasmDir);
 async function build() {
