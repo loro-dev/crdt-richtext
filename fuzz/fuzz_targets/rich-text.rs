@@ -1,5 +1,5 @@
 #![no_main]
-use crdt_range::rich_text::test_utils::{fuzzing, Action};
+use crdt_richtext::rich_text::test_utils::{fuzzing, Action};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|actions: Vec<Action>| { fuzzing(5, actions) });

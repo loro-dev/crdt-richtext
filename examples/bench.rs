@@ -1,7 +1,7 @@
 use std::env;
 
 use arbitrary::{Arbitrary, Unstructured};
-use crdt_range::rich_text::RichText;
+use crdt_richtext::rich_text::RichText;
 use generic_btree::HeapVec;
 use rand::{Rng, SeedableRng};
 

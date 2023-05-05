@@ -1,5 +1,5 @@
 use automerge::get_automerge_actions;
-use crdt_range::rich_text::RichText;
+use crdt_richtext::rich_text::RichText;
 use criterion::{criterion_group, criterion_main, Criterion};
 mod automerge;
 
