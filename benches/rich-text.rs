@@ -4,7 +4,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 mod automerge;
 
 pub fn bench(c: &mut Criterion) {
-    c.bench_function("rich-text automerge", |b| {
+    c.bench_function("automerge", |b| {
         let actions = get_automerge_actions();
         b.iter(|| {
             let mut text = RichText::new(1);
