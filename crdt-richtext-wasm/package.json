@@ -1,0 +1,19 @@
+{
+  "name": "crdt-richtext-wasm",
+  "version": "0.2.8-alpha-2",
+  "description": "",
+  "main": "nodejs/crdt_richtext_wasm.js",
+  "module": "bundler/crdt_richtext_wasm.js",
+  "scripts": {
+    "release": "node ./scripts/build.mjs release",
+    "dev": "node ./scripts/build.mjs dev",
+    "test": "vitest run"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "execa": "^7.1.1",
+    "vitest": "^0.31.0"
+  }
+}
