@@ -3,6 +3,5 @@
   "cSpell.words": ["flamegraph"],
   "rust-analyzer.runnableEnv": {
     "DEBUG": "*"
-  },
-  "deno.enable": true
+  }
 }

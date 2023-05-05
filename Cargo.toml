@@ -22,6 +22,8 @@ bitvec = "1.0.1"
 append-only-bytes = "0.1.5"
 string_cache = "0.8.6"
 smallvec = "1.10.0"
+serde_columnar = "0.2.5"
+serde = { version = "1.0.140", features = ["derive"] }
 
 [dev-dependencies]
 rand = { version = "0.8.5" }

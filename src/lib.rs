@@ -21,10 +21,12 @@ use std::{
     sync::Arc,
 };
 
+use serde::{Deserialize, Serialize};
 use string_cache::DefaultAtom;
 
 pub mod legacy;
 pub mod rich_text;
+pub use rich_text::{vv::VersionVector, RichText};
 mod small_set;
 #[cfg(feature = "test")]
 mod test_utils;
@@ -33,7 +35,7 @@ type Lamport = u32;
 type ClientID = u64;
 type Counter = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct OpID {
     client: ClientID,
     counter: Counter,
@@ -99,18 +101,18 @@ pub enum AnchorType {
     After,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum Behavior {
     /// When calculating the final state, it will keep all the ranges even if they have the same type
     ///
     /// For example, we would like to keep both comments alive even if they have overlapped regions
-    Inclusive,
+    Inclusive = 2,
     /// When calculating the final state, it will merge the ranges that have overlapped regions and have the same type
     ///
     /// For example, [bold 2~5] can be merged with [bold 1~4] to produce [bold 1-5]
-    Merge,
+    Merge = 0,
     /// It will delete the overlapped range that has smaller lamport && has the same type
-    Delete,
+    Delete = 1,
 }
 
 /// If both `move_start_to` and `move_end_to` equal to None, the target range will be deleted

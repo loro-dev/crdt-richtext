@@ -5,7 +5,7 @@
   "main": "nodejs/crdt_richtext_wasm.js",
   "module": "bundler/crdt_richtext_wasm.js",
   "scripts": {
-    "release": "node ./scripts/build.mjs release",
+    "build": "node ./scripts/build.mjs release",
     "dev": "node ./scripts/build.mjs dev",
     "test": "vitest run"
   },
