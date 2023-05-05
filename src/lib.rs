@@ -26,6 +26,7 @@ use string_cache::DefaultAtom;
 pub mod legacy;
 pub mod rich_text;
 mod small_set;
+#[cfg(feature = "test")]
 mod test_utils;
 pub(crate) type InternalString = DefaultAtom;
 type Lamport = u32;
