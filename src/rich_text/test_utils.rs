@@ -122,6 +122,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
         debug_log::group_end!();
     }
 
+    actors[4].text.debug_log(true);
     for i in 0..actors.len() {
         for j in (i + 1)..actors.len() {
             let (a, b) = arref::array_mut_ref!(&mut actors, [i, j]);
@@ -2374,6 +2375,43 @@ mod test {
                     actor: 0,
                     pos: 0,
                     content: 0,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn fuzz_13() {
+        fuzzing(
+            5,
+            vec![
+                Insert {
+                    actor: 4,
+                    pos: 0,
+                    content: 44,
+                },
+                Sync(2, 4),
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+                Sync(0, 4),
+                Insert {
+                    actor: 2,
+                    pos: 2,
+                    content: 2,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 3,
+                    content: 1,
+                },
+                Sync(4, 0),
+                Insert {
+                    actor: 4,
+                    pos: 3,
+                    content: 55,
                 },
             ],
         )
