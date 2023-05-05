@@ -3,9 +3,7 @@ use generic_btree::rle::{HasLength, Mergeable};
 use smallvec::SmallVec;
 use std::{mem::take, sync::Arc};
 
-use crate::{
-    range_map::small_set::SmallSetI32, AnchorType, Annotation, Behavior, InternalString, OpID,
-};
+use crate::{small_set::SmallSetI32, AnchorType, Annotation, Behavior, InternalString, OpID};
 
 use super::rich_tree::{CacheDiff, Elem};
 

@@ -1,3 +1,4 @@
+use crdt_richtext::rich_text::RichText;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(js_name = setPanicHook)]

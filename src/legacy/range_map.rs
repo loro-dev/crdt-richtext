@@ -1,5 +1,4 @@
 use std::{collections::BTreeSet, ops::Range, sync::Arc};
-pub(crate) mod small_set;
 pub mod tree_impl;
 
 use crate::{Annotation, Lamport, OpID};

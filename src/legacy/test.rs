@@ -1,6 +1,8 @@
 #![allow(unsafe_code)]
 use std::time::Instant;
 
+use crate::{legacy::test_utils::Actor, test_utils::make_spans};
+
 use super::*;
 use ctor::ctor;
 
@@ -276,6 +278,11 @@ fn weird_link() {
 
 #[cfg(test)]
 mod failed_tests {
+    use crate::{
+        legacy::test_utils::fuzzing,
+        test_utils::{Action, AnnotationType},
+    };
+
     use super::*;
     use Action::*;
     use AnnotationType::*;

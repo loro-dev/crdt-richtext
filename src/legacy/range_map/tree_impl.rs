@@ -9,10 +9,13 @@ use std::{
     sync::Arc,
 };
 
-use crate::{range_map::AnnPosRelativeToInsert, Annotation, Counter, InternalString, OpID};
+use crate::{
+    legacy::range_map::AnnPosRelativeToInsert, small_set::SmallSetI32, Annotation, Counter,
+    InternalString, OpID,
+};
 use fxhash::{FxHashMap, FxHashSet};
 
-use super::{small_set::SmallSetI32, RangeMap, Span};
+use super::{RangeMap, Span};
 
 type AnnIdx = i32;
 
@@ -1684,7 +1687,7 @@ impl Mergeable for Span {
 mod tree_impl_tests {
     use std::collections::{BTreeSet, HashMap};
 
-    use crate::{range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
+    use crate::{legacy::range_map::AnnPosRelativeToInsert, Anchor, AnchorType};
 
     use super::*;
 
