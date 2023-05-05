@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use append_only_bytes::BytesSlice;
 use fxhash::FxHashMap;
@@ -8,14 +8,14 @@ use crate::{Annotation, ClientID, Counter, Lamport, OpID};
 
 use super::vv::VersionVector;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Op {
     pub id: OpID,
     pub lamport: Lamport,
     pub content: OpContent,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpContent {
     Ann(Arc<Annotation>),
     Text(TextInsertOp),
@@ -51,6 +51,16 @@ pub struct TextInsertOp {
     pub left: Option<OpID>,
     pub right: Option<OpID>,
 }
+
+impl PartialEq for TextInsertOp {
+    fn eq(&self, other: &Self) -> bool {
+        self.text.deref() == other.text.deref()
+            && self.left == other.left
+            && self.right == other.right
+    }
+}
+
+impl Eq for TextInsertOp {}
 
 impl std::fmt::Debug for TextInsertOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

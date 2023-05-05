@@ -7,6 +7,7 @@ use std::{
 
 use append_only_bytes::AppendOnlyBytes;
 
+use fxhash::FxHashMap;
 use generic_btree::{
     rle::{HasLength, Mergeable, Sliceable},
     BTree, MoveEvent, QueryResult,
@@ -21,12 +22,15 @@ use crate::{
 use self::{
     ann::{insert_anchor_to_char, AnchorSetDiff, AnnIdx, AnnManager, Span, StyleCalculator},
     cursor::CursorMap,
+    encoding::{decode, encode},
     op::{Op, OpStore},
     rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, CacheDiff, Elem},
+    vv::VersionVector,
 };
 
 mod ann;
 mod cursor;
+mod encoding;
 mod id_map;
 mod iter;
 mod op;
@@ -35,7 +39,7 @@ mod rich_tree;
 mod test;
 #[cfg(feature = "test")]
 pub mod test_utils;
-mod vv;
+pub mod vv;
 
 pub struct RichText {
     client_id: ClientID,
@@ -599,6 +603,14 @@ impl RichText {
         self.content.root_cache().utf16_len
     }
 
+    pub fn export(&self, vv: &VersionVector) -> Vec<u8> {
+        encode(self.store.export(vv))
+    }
+
+    pub fn import(&mut self, data: &[u8]) {
+        self.import_inner(decode(data));
+    }
+
     pub fn apply(&mut self, mut op: Op) {
         let op = match self.store.can_apply(&op) {
             op::CanApply::Yes => op,
@@ -825,7 +837,17 @@ impl RichText {
     /// Merge data from other data into self
     pub fn merge(&mut self, other: &Self) {
         let vv = self.store.vv();
-        let exported = other.store.export(&vv);
+        let exported = other.export(&vv);
+        let exported = decode(&exported);
+        if cfg!(debug_assertions) || cfg!(feature = "test") {
+            let expected = other.store.export(&vv);
+            assert_eq!(exported, expected);
+        }
+
+        self.import_inner(exported);
+    }
+
+    fn import_inner(&mut self, exported: FxHashMap<ClientID, Vec<Op>>) {
         let mut all_ops = Vec::new();
         for (_, mut ops) in exported {
             all_ops.append(&mut ops);
@@ -834,6 +856,10 @@ impl RichText {
         for op in all_ops {
             self.apply(op);
         }
+    }
+
+    pub fn version(&self) -> VersionVector {
+        self.store.vv()
     }
 
     fn update_elem_in_id_range(
