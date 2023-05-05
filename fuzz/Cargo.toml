@@ -41,3 +41,10 @@ name = "rich-text-apply"
 path = "fuzz_targets/rich-text-apply.rs"
 test = false
 doc = false
+
+
+[[bin]]
+name = "rich-text"
+path = "fuzz_targets/rich-text.rs"
+test = false
+doc = false

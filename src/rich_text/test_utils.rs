@@ -2353,4 +2353,29 @@ mod test {
             ],
         )
     }
+
+    #[test]
+    fn fuzz_12() {
+        fuzzing(
+            3,
+            vec![
+                Insert {
+                    actor: 2,
+                    pos: 0,
+                    content: 2,
+                },
+                Sync(0, 2),
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    content: 1,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
+                },
+            ],
+        )
+    }
 }

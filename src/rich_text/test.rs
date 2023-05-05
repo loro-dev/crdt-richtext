@@ -212,8 +212,8 @@ mod apply {
     fn apply_annotation() {
         let mut a = RichText::new(1);
         let mut b = RichText::new(2);
-        a.insert(0, "12345");
-        b.insert(0, "12345");
+        a.insert(0, "aaa");
+        b.insert(0, "bbb");
         a.annotate(.., bold());
         b.annotate(.., link());
         a.merge(&b);

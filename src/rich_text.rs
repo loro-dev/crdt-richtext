@@ -706,16 +706,11 @@ impl RichText {
         let scan_start = scan_start.unwrap();
         let iterator = self.content.iter_range(scan_start..);
         let elt_left_origin = elt.left;
-        let elt_right_cursor = elt.right.map(|x| self.find_cursor(x));
-        let elt_right_parent = elt_right_cursor.and_then(|x| {
-            if self.find_left_origin(x) == elt_left_origin {
-                Some(x)
-            } else {
-                None
-            }
-        });
+        let elt_right_origin = elt.right;
+        let mut elt_right_parent: Option<Option<QueryResult>> = None; // calc lazily
         let mut visited_id_spans: SmallVec<[IdSpan; 8]> = SmallVec::new();
         let mut left = None;
+        debug_log::debug_dbg!(elt, op.id.client, self.client_id);
         let mut scanning = false;
         for o_slice in iterator {
             // a slice may contains several ops
@@ -755,31 +750,47 @@ impl RichText {
             ));
 
             if o_left_origin == elt.left {
-                // we only need to compare the first element's right parent
-                let o_right_cursor = if end_offset == o_slice.elem.rle_len() {
-                    o_slice.elem.right.map(|x| self.find_cursor(x))
-                } else {
-                    let mut q = *o_slice.path();
-                    q.offset = end_offset;
-                    Some(q)
-                };
-                let o_right_parent = o_right_cursor.and_then(|x| {
-                    if self.find_left_origin(x) == elt_left_origin {
-                        Some(x)
-                    } else {
-                        None
-                    }
-                });
-
-                match self.cmp_right_parent_pos(o_right_parent, elt_right_parent) {
-                    Ordering::Less => {
-                        scanning = true;
-                    }
-                    Ordering::Equal if o_slice.elem.id.client > op.id.client => {
+                let o_right_origin = o_slice.elem.right;
+                if o_right_origin == elt_right_origin {
+                    if o_slice.elem.id.client > op.id.client {
                         break;
-                    }
-                    _ => {
+                    } else {
                         scanning = false;
+                    }
+                } else {
+                    // We only need to compare the first element's right parent.
+                    // And the first element's right parent is the same as the slice's right parent
+                    // because they they share the rightOrigin
+                    let o_right_cursor = o_slice.elem.right.map(|x| self.find_cursor(x));
+                    let o_right_parent = o_right_cursor.and_then(|x| {
+                        if self.find_left_origin(x) == elt_left_origin {
+                            Some(x)
+                        } else {
+                            None
+                        }
+                    });
+
+                    if elt_right_parent.is_none() {
+                        let elt_right_cursor = elt.right.map(|x| self.find_cursor(x));
+                        elt_right_parent = Some(elt_right_cursor.and_then(|x| {
+                            if self.find_left_origin(x) == elt_left_origin {
+                                Some(x)
+                            } else {
+                                None
+                            }
+                        }));
+                    }
+
+                    match self.cmp_right_parent_pos(o_right_parent, elt_right_parent.unwrap()) {
+                        Ordering::Less => {
+                            scanning = true;
+                        }
+                        Ordering::Equal if o_slice.elem.id.client > op.id.client => {
+                            break;
+                        }
+                        _ => {
+                            scanning = false;
+                        }
                     }
                 }
             }
@@ -879,6 +890,7 @@ impl RichText {
     }
 
     fn find_cursor(&self, id: OpID) -> QueryResult {
+        // TODO: this method may use a hint to speed up
         let (insert_leaf, _) = self
             .cursor_map
             .get_insert(id)
