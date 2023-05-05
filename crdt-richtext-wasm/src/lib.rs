@@ -1,5 +1,38 @@
-use crdt_richtext::rich_text::RichText;
+use crdt_richtext::rich_text::RichText as RichTextInner;
 use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+pub struct RichText {
+    inner: RichTextInner,
+}
+
+#[wasm_bindgen]
+impl RichText {
+    #[wasm_bindgen(constructor)]
+    pub fn new(id: u64) -> Self {
+        Self {
+            inner: RichTextInner::new(id),
+        }
+    }
+
+    pub fn insert(&mut self, index: usize, text: &str) {
+        self.inner.insert(index, text);
+    }
+
+    pub fn delete(&mut self, index: usize, length: usize) {
+        self.inner.delete(index..index + length);
+    }
+
+    #[allow(clippy::inherent_to_string)]
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self) -> String {
+        self.inner.to_string()
+    }
+
+    pub fn annotate(&mut self, index: usize, length: usize, annotation: &str) {
+        // self.inner.annotate(index..index + length, annotation);
+    }
+}
 
 #[wasm_bindgen(js_name = setPanicHook)]
 pub fn set_panic_hook() {
