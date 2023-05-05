@@ -103,6 +103,6 @@ fn bench(actions: Vec<TextAction>) {
             }
         }
         // drop(profiler);
-        // text.debug_log()
+        text.debug_log(false)
     }
 }

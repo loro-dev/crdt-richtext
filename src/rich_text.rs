@@ -946,27 +946,30 @@ impl RichText {
     }
 
     #[inline]
+    #[allow(unused)]
     pub(crate) fn check(&self) {
         self.content.check();
     }
 
-    pub fn debug_log(&self) {
+    pub fn debug_log(&self, include_content: bool) {
         println!("Text len = {} (utf16={})", self.len(), self.utf16_len());
         println!("Nodes len = {}", self.content.node_len());
         println!("Op len = {}", self.store.op_len());
-        let mut content_inner = format!("{:#?}", &self.content);
-        const MAX: usize = 100000;
-        if content_inner.len() > MAX {
-            for new_len in MAX.. {
-                if content_inner.is_char_boundary(new_len) {
-                    content_inner.truncate(new_len);
-                    break;
+        if include_content {
+            let mut content_inner = format!("{:#?}", &self.content);
+            const MAX: usize = 100000;
+            if content_inner.len() > MAX {
+                for new_len in MAX.. {
+                    if content_inner.is_char_boundary(new_len) {
+                        content_inner.truncate(new_len);
+                        break;
+                    }
                 }
             }
+            println!("ContentTree = {}", content_inner);
+            // println!("Text = {}", self);
+            println!("Store = {:#?}", &self.store);
         }
-        println!("ContentTree = {}", content_inner);
-        // println!("Text = {}", self);
-        println!("Store = {:#?}", &self.store);
     }
 
     pub fn check_no_mergeable_neighbor(&self) {
@@ -976,7 +979,7 @@ impl RichText {
             let elements = node.elements();
             for i in 0..elements.len() - 1 {
                 if elements[i].can_merge(&elements[i + 1]) {
-                    self.debug_log();
+                    self.debug_log(false);
                     panic!(
                         "Found mergeable neighbor: \n{:#?} \n{:#?}",
                         elements[i],
@@ -987,19 +990,6 @@ impl RichText {
 
             leaf_idx = self.content.next_same_level_node(leaf);
         }
-    }
-}
-
-fn update_elem(
-    elements: &mut Vec<Elem>,
-    index: usize,
-    offset_start: usize,
-    offset_end: usize,
-    f: &mut impl FnMut(&mut Elem),
-) {
-    let (new, _) = elements[index].update(offset_start, offset_end, f);
-    if !new.is_empty() {
-        elements.splice(index + 1..index + 1, new);
     }
 }
 
