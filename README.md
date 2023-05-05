@@ -1,4 +1,7 @@
-# Rust implementation of [Peritext](https://www.inkandswitch.com/peritext/)
+# crdt-richtext
+
+> Rust implementation of [Peritext](https://www.inkandswitch.com/peritext/) and
+> [Fugue](https://arxiv.org/abs/2305.00583)
 
 This Rust crate provides an implementation of Peritext that is optimized for
 performance. This crate uses a separate data structure to store the range
