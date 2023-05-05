@@ -690,6 +690,8 @@ impl RichText {
     }
 
     fn find_right(&mut self, elt: &op::TextInsertOp, op: &Op) -> Option<Option<QueryResult>> {
+        // We use Fugue algorithm here, it has the property of "maximal non-interleaving"
+        // See paper *The Art of the Fugue: Minimizing Interleaving in Collaborative Text Editing*
         let scan_start = self.find_next_cursor_of(elt.left);
         if scan_start.is_none() {
             // insert to the last
