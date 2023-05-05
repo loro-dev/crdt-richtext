@@ -76,11 +76,12 @@ impl RichText {
         fn can_merge_new_slice(
             elem: &Elem,
             id: OpID,
-            lamport: u32,
+            right: Option<OpID>,
             slice: &append_only_bytes::BytesSlice,
         ) -> bool {
             elem.id.client == id.client
                 && elem.id.counter + elem.atom_len() as Counter == id.counter
+                && elem.right == right
                 && !elem.is_dead()
                 && elem.string.can_merge(slice)
         }
@@ -149,7 +150,7 @@ impl RichText {
             }
 
             if offset == elements[index].rle_len() {
-                if can_merge_new_slice(&elements[index], id, lamport, &slice) {
+                if can_merge_new_slice(&elements[index], id, right, &slice) {
                     // can merge directly
                     elements[index].merge_slice(&slice);
                     self.cursor_map
