@@ -23,8 +23,12 @@ pub enum OpContent {
 }
 
 impl OpContent {
-    pub fn new_insert(left: Option<OpID>, slice: BytesSlice) -> Self {
-        OpContent::Text(TextInsertOp { text: slice, left })
+    pub fn new_insert(left: Option<OpID>, right: Option<OpID>, slice: BytesSlice) -> Self {
+        OpContent::Text(TextInsertOp {
+            text: slice,
+            left,
+            right,
+        })
     }
 
     pub fn new_delete(mut start: OpID, mut len: i32) -> Self {
@@ -41,10 +45,21 @@ impl OpContent {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TextInsertOp {
     pub text: BytesSlice,
     pub left: Option<OpID>,
+    pub right: Option<OpID>,
+}
+
+impl std::fmt::Debug for TextInsertOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextInsertOp")
+            .field("text", &std::str::from_utf8(&self.text))
+            .field("left", &self.left)
+            .field("right", &self.right)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -192,9 +207,10 @@ impl Mergeable for Op {
             && self.id.counter + self.rle_len() as Counter == rhs.id.counter
             && self.lamport + self.rle_len() as Counter == rhs.lamport
             && match (&self.content, &rhs.content) {
-                (OpContent::Text(left), OpContent::Text(ins)) => {
-                    ins.left == Some(self.id.inc(self.rle_len() as Counter - 1))
-                        && left.text.can_merge(&ins.text)
+                (OpContent::Text(left), OpContent::Text(right)) => {
+                    right.left == Some(self.id.inc(self.rle_len() as Counter - 1))
+                        && right.right == left.right
+                        && left.text.can_merge(&right.text)
                 }
                 (OpContent::Del(a), OpContent::Del(b)) => a.can_merge(b),
                 _ => false,
@@ -243,6 +259,11 @@ impl Sliceable for Op {
                         text.left
                     } else {
                         Some(self.id.inc(start as Counter - 1))
+                    },
+                    right: if end == self.rle_len() {
+                        text.right
+                    } else {
+                        Some(self.id.inc(end as Counter))
                     },
                 }),
             },

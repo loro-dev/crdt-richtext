@@ -11,7 +11,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.crdt-range]
+[dependencies.crdt-richtext]
 path = ".."
 features = ["test"]
 
@@ -39,5 +39,12 @@ opt-level = 3
 [[bin]]
 name = "rich-text-apply"
 path = "fuzz_targets/rich-text-apply.rs"
+test = false
+doc = false
+
+
+[[bin]]
+name = "rich-text"
+path = "fuzz_targets/rich-text.rs"
 test = false
 doc = false

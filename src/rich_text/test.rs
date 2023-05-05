@@ -212,8 +212,8 @@ mod apply {
     fn apply_annotation() {
         let mut a = RichText::new(1);
         let mut b = RichText::new(2);
-        a.insert(0, "12345");
-        b.insert(0, "12345");
+        a.insert(0, "aaa");
+        b.insert(0, "bbb");
         a.annotate(.., bold());
         b.annotate(.., link());
         a.merge(&b);
@@ -550,5 +550,50 @@ mod annotation {
         let mut b = RichText::new(2);
         b.merge(&text);
         assert_eq!(b.get_spans(), text.get_spans());
+    }
+}
+
+mod fugue {
+    use super::*;
+
+    #[test]
+    fn test_find_right() {
+        let mut text = RichText::new(1);
+        text.insert(0, "0");
+        text.insert(0, "1");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.right.unwrap().counter, 0);
+        text.insert(0, "2");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.right.unwrap().counter, 1);
+        // before: 210
+        text.insert(2, "3");
+        // after: 2130
+        let span = text.content.iter().nth(2).unwrap();
+        assert_eq!(span.right.unwrap().counter, 0);
+        let mut other = RichText::new(2);
+        other.merge(&text);
+        // before: 2130
+        other.insert(0, "4");
+        // before: 42130
+        let span = other.content.iter().next().unwrap();
+        assert_eq!(span.right.unwrap().counter, 2);
+    }
+
+    #[test]
+    fn test_merge_split_right() {
+        let mut text = RichText::new(1);
+        text.insert(0, "0");
+        text.insert(1, "1");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.rle_len(), 2);
+        assert!(span.right.is_none());
+        text.insert(1, "2");
+        let span = text.content.iter().next().unwrap();
+        assert_eq!(span.rle_len(), 1);
+        assert_eq!(span.right, None);
+        let span = text.content.iter().nth(1).unwrap();
+        assert_eq!(span.rle_len(), 1);
+        assert_eq!(span.right.unwrap().counter, 1);
     }
 }

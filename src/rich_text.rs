@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     fmt::Display,
     ops::{Bound, RangeBounds},
     sync::Arc,
@@ -14,7 +15,7 @@ use smallvec::SmallVec;
 
 use crate::{
     rich_text::{ann::insert_anchors_at_same_elem, op::OpContent, rich_tree::utf16::get_utf16_len},
-    Anchor, AnchorType, Annotation, ClientID, Counter, Lamport, OpID, Style,
+    Anchor, AnchorType, Annotation, ClientID, Counter, IdSpan, OpID, Style,
 };
 
 use self::{
@@ -80,7 +81,6 @@ impl RichText {
         ) -> bool {
             elem.id.client == id.client
                 && elem.id.counter + elem.atom_len() as Counter == id.counter
-                && elem.lamport + elem.atom_len() as Lamport == lamport
                 && !elem.is_dead()
                 && elem.string.can_merge(slice)
         }
@@ -95,30 +95,60 @@ impl RichText {
         let id = self.next_id();
         let lamport = self.next_lamport();
         if index == 0 {
+            let first_leaf = self.content.first_leaf();
+            let right_origin = self
+                .content
+                .get_node(first_leaf)
+                .elements()
+                .first()
+                .map(|x| x.id);
             self.store
-                .insert_local(OpContent::new_insert(None, slice.clone()));
-            self.content.prepend(Elem::new(id, None, lamport, slice));
+                .insert_local(OpContent::new_insert(None, right_origin, slice.clone()));
+            self.content
+                .prepend(Elem::new(id, None, right_origin, lamport, slice));
             return;
         }
 
         // need to find left op id
         let path = self.find_ideal_insert_pos(index);
-        let mut left = None;
+        let left;
+        let right;
         let op_slice = slice.clone();
+        {
+            // find left and right
+            let mut node = self.content.get_node(path.leaf);
+            let offset = path.offset;
+            let index = path.elem_index;
+            if offset != 0 {
+                left = Some(node.elements()[index].id.inc((offset - 1) as u32));
+            } else {
+                left = Some(node.elements()[index - 1].id_last());
+            }
+            if offset < node.elements()[index].rle_len() {
+                right = Some(node.elements()[index].id.inc(offset as u32));
+            } else if index + 1 < node.elements().len() {
+                right = Some(node.elements()[index + 1].id);
+            } else if let Some(next) = self.content.next_same_level_node(path.leaf) {
+                node = self.content.get_node(next);
+                right = Some(node.elements()[0].id);
+            } else {
+                right = None;
+            }
+        }
+
         self.content.update_leaf(path.leaf, |elements| {
+            // insert new element
             debug_assert!(path.elem_index < elements.len());
             let mut offset = path.offset;
             let mut index = path.elem_index;
             if offset == 0 {
-                // ensure not at the beginning of an element,
-                // it would make us hard to merge and hard to find left
+                // ensure not at the beginning of an element
                 assert!(index > 0);
                 index -= 1;
                 offset = elements[index].rle_len();
             }
 
             if offset == elements[index].rle_len() {
-                left = Some(elements[index].id_last());
                 if can_merge_new_slice(&elements[index], id, lamport, &slice) {
                     // can merge directly
                     elements[index].merge_slice(&slice);
@@ -127,24 +157,17 @@ impl RichText {
                     return (true, cache_diff);
                 }
 
-                elements.insert(
-                    index + 1,
-                    Elem::new(id, Some(elements[index].id_last()), lamport, slice),
-                );
+                elements.insert(index + 1, Elem::new(id, left, right, lamport, slice));
                 self.cursor_map
                     .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
                 return (true, cache_diff);
             }
 
             // need to split element
-            let right = elements[index].split(offset);
-            left = Some(elements[index].id_last());
+            let right_half = elements[index].split(offset);
             elements.splice(
                 index + 1..index + 1,
-                [
-                    Elem::new(id, Some(elements[index].id_last()), lamport, slice),
-                    right,
-                ],
+                [Elem::new(id, left, right, lamport, slice), right_half],
             );
             self.cursor_map
                 .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
@@ -152,7 +175,7 @@ impl RichText {
         });
 
         self.store
-            .insert_local(OpContent::new_insert(left, op_slice));
+            .insert_local(OpContent::new_insert(left, right, op_slice));
     }
 
     /// When user insert text at index, there may be tombstones at the given position.
@@ -591,7 +614,7 @@ impl RichText {
 
         let op_clone = op.clone();
         'apply: {
-            match op.content {
+            match &op.content {
                 OpContent::Ann(ann) => {
                     let ann_idx = self.ann.register(ann.clone());
                     match ann.range.start.id {
@@ -616,62 +639,42 @@ impl RichText {
                         }
                     }
 
-                    match ann.range.end.id {
-                        Some(end_id) => {
-                            let cursor = self.find_cursor(end_id);
-                            self.content.update_leaf(cursor.leaf, |elements| {
-                                let index = cursor.elem_index;
-                                let offset = cursor.offset;
-                                let type_ = ann.range.end.type_;
-                                let is_start = false;
-                                insert_anchor_to_char(
-                                    elements, index, offset, ann_idx, type_, is_start,
-                                );
-                                (
-                                    true,
-                                    Some(AnchorSetDiff::from_ann(ann_idx, is_start).into()),
-                                )
-                            });
-                        }
-                        None => {}
+                    if let Some(end_id) = ann.range.end.id {
+                        let cursor = self.find_cursor(end_id);
+                        self.content.update_leaf(cursor.leaf, |elements| {
+                            let index = cursor.elem_index;
+                            let offset = cursor.offset;
+                            let type_ = ann.range.end.type_;
+                            let is_start = false;
+                            insert_anchor_to_char(
+                                elements, index, offset, ann_idx, type_, is_start,
+                            );
+                            (
+                                true,
+                                Some(AnchorSetDiff::from_ann(ann_idx, is_start).into()),
+                            )
+                        });
                     }
                 }
                 OpContent::Text(text) => {
-                    let scan_start = self.find_next_cursor_of(text.left);
-                    if scan_start.is_none() {
-                        // insert to the last
-                        self.content
-                            .push(Elem::new(op.id, text.left, op.lamport, text.text));
-                        break 'apply;
-                    }
-                    let iterator = match scan_start {
-                        Some(start) => self.content.iter_range(start..),
-                        None => self.content.iter_range(self.content.first_full_path()..),
+                    let right = match self.find_right(text, &op) {
+                        Some(value) => value,
+                        None => break 'apply,
                     };
 
-                    let mut before = None;
-                    // RGA algorithm
-                    let ord = (op.lamport, op.id.client);
-                    for elem_slice in iterator {
-                        let offset = elem_slice.start.unwrap_or(0);
-                        let elem_ord = (
-                            elem_slice.elem.lamport + offset as Lamport,
-                            elem_slice.elem.id.client,
-                        );
-                        if elem_ord < ord {
-                            before = Some(*elem_slice.path());
-                            break;
-                        }
-                    }
-
-                    if let Some(before) = before {
+                    if let Some(right) = right {
                         self.content.insert_by_query_result(
-                            before,
-                            Elem::new(op.id, text.left, op.lamport, text.text),
+                            right,
+                            Elem::new(op.id, text.left, text.right, op.lamport, text.text.clone()),
                         );
                     } else {
-                        self.content
-                            .push(Elem::new(op.id, text.left, op.lamport, text.text));
+                        self.content.push(Elem::new(
+                            op.id,
+                            text.left,
+                            text.right,
+                            op.lamport,
+                            text.text.clone(),
+                        ));
                     }
                 }
                 OpContent::Del(del) => {
@@ -684,6 +687,138 @@ impl RichText {
         }
 
         self.store.insert(op_clone);
+    }
+
+    fn find_right(&mut self, elt: &op::TextInsertOp, op: &Op) -> Option<Option<QueryResult>> {
+        // We use Fugue algorithm here, it has the property of "maximal non-interleaving"
+        // See paper *The Art of the Fugue: Minimizing Interleaving in Collaborative Text Editing*
+        let scan_start = self.find_next_cursor_of(elt.left);
+        if scan_start.is_none() {
+            // insert to the last
+            self.content.push(Elem::new(
+                op.id,
+                elt.left,
+                elt.right,
+                op.lamport,
+                elt.text.clone(),
+            ));
+            return None;
+        }
+        let scan_start = scan_start.unwrap();
+        let iterator = self.content.iter_range(scan_start..);
+        let elt_left_origin = elt.left;
+        let elt_right_origin = elt.right;
+        let mut elt_right_parent: Option<Option<QueryResult>> = None; // calc lazily
+        let mut visited_id_spans: SmallVec<[IdSpan; 8]> = SmallVec::new();
+        let mut left = None;
+        debug_log::debug_dbg!(elt, op.id.client, self.client_id);
+        let mut scanning = false;
+        for o_slice in iterator {
+            // a slice may contains several ops
+            let offset = o_slice.start.unwrap_or(0);
+            let o_left_origin = if offset == 0 {
+                o_slice.elem.left
+            } else {
+                Some(o_slice.elem.id.inc(offset as u32 - 1))
+            };
+
+            let end_offset = if let Some(right) = elt.right {
+                if o_slice.elem.contains_id(right) {
+                    (right.counter - o_slice.elem.id.counter) as usize
+                } else {
+                    o_slice.elem.rle_len()
+                }
+            } else {
+                o_slice.elem.rle_len()
+            };
+
+            if end_offset == offset {
+                break;
+            }
+            // o.leftOrigin < elt.leftOrigin
+            if o_left_origin != elt.left
+                && (o_left_origin.is_none()
+                    || visited_id_spans
+                        .iter()
+                        .all(|x| !x.contains(o_left_origin.unwrap())))
+            {
+                break;
+            }
+
+            visited_id_spans.push(IdSpan::new(
+                o_slice.elem.id.inc(offset as u32),
+                end_offset - offset,
+            ));
+
+            if o_left_origin == elt.left {
+                let o_right_origin = o_slice.elem.right;
+                if o_right_origin == elt_right_origin {
+                    if o_slice.elem.id.client > op.id.client {
+                        break;
+                    } else {
+                        scanning = false;
+                    }
+                } else {
+                    // We only need to compare the first element's right parent.
+                    // And the first element's right parent is the same as the slice's right parent
+                    // because they they share the rightOrigin
+                    let o_right_cursor = o_slice.elem.right.map(|x| self.find_cursor(x));
+                    let o_right_parent = o_right_cursor.and_then(|x| {
+                        if self.find_left_origin(x) == elt_left_origin {
+                            Some(x)
+                        } else {
+                            None
+                        }
+                    });
+
+                    if elt_right_parent.is_none() {
+                        let elt_right_cursor = elt.right.map(|x| self.find_cursor(x));
+                        elt_right_parent = Some(elt_right_cursor.and_then(|x| {
+                            if self.find_left_origin(x) == elt_left_origin {
+                                Some(x)
+                            } else {
+                                None
+                            }
+                        }));
+                    }
+
+                    match self.cmp_right_parent_pos(o_right_parent, elt_right_parent.unwrap()) {
+                        Ordering::Less => {
+                            scanning = true;
+                        }
+                        Ordering::Equal if o_slice.elem.id.client > op.id.client => {
+                            break;
+                        }
+                        _ => {
+                            scanning = false;
+                        }
+                    }
+                }
+            }
+
+            if !scanning {
+                // set before to the last element
+                let mut path = *o_slice.path();
+                path.offset = end_offset - 1;
+                left = Some(path);
+            }
+        }
+
+        // convert left to right
+        match left {
+            Some(left) => Some(self.content.shift_path_by_one_offset(left)),
+            None => Some(Some(scan_start)),
+        }
+    }
+
+    #[inline]
+    fn cmp_right_parent_pos(&self, a: Option<QueryResult>, b: Option<QueryResult>) -> Ordering {
+        match (a, b) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (Some(a), Some(b)) => self.content.compare_pos(a, b),
+        }
     }
 
     /// Merge data from other data into self
@@ -756,6 +891,7 @@ impl RichText {
     }
 
     fn find_cursor(&self, id: OpID) -> QueryResult {
+        // TODO: this method may use a hint to speed up
         let (insert_leaf, _) = self
             .cursor_map
             .get_insert(id)
@@ -778,40 +914,23 @@ impl RichText {
         }
     }
 
+    fn find_left_origin(&self, cursor: QueryResult) -> Option<OpID> {
+        let offset = cursor.offset;
+        let elem_index = cursor.elem_index;
+        let node = self.content.get_node(cursor.leaf);
+        let elements = node.elements();
+        if offset == 0 {
+            elements[elem_index].left
+        } else {
+            Some(elements[elem_index].id.inc(offset as u32 - 1))
+        }
+    }
+
     fn find_next_cursor_of(&self, id: Option<OpID>) -> Option<QueryResult> {
         match id {
             Some(id) => {
-                let (mut insert_leaf, _) = self
-                    .cursor_map
-                    .get_insert(id)
-                    .expect("Cannot find target id");
-                let mut node = self.content.get_node(insert_leaf);
-                let mut elem_index = 0;
-                let elements = &node.elements();
-                while !elements[elem_index].contains_id(id) {
-                    // if range out of bound, then cursor_map is off
-                    elem_index += 1;
-                }
-
-                // +1 the find the next
-                let mut offset = (id.counter - elements[elem_index].id.counter + 1) as usize;
-                while offset >= elements[elem_index].atom_len() {
-                    offset -= elements[elem_index].atom_len();
-                    elem_index += 1;
-                    if elem_index >= node.elements().len() {
-                        elem_index = 0;
-                        let Some(next_leaf) = self.content.next_same_level_node(insert_leaf) else { return None };
-                        insert_leaf = next_leaf;
-                        node = self.content.get_node(insert_leaf);
-                    }
-                }
-
-                Some(QueryResult {
-                    leaf: insert_leaf,
-                    elem_index,
-                    offset,
-                    found: true,
-                })
+                let cursor = self.find_cursor(id);
+                self.content.shift_path_by_one_offset(cursor)
             }
             None => Some(QueryResult {
                 leaf: self.content.first_leaf(),
@@ -828,27 +947,30 @@ impl RichText {
     }
 
     #[inline]
+    #[allow(unused)]
     pub(crate) fn check(&self) {
         self.content.check();
     }
 
-    pub fn debug_log(&self) {
+    pub fn debug_log(&self, include_content: bool) {
         println!("Text len = {} (utf16={})", self.len(), self.utf16_len());
         println!("Nodes len = {}", self.content.node_len());
         println!("Op len = {}", self.store.op_len());
-        let mut content_inner = format!("{:#?}", &self.content);
-        const MAX: usize = 100000;
-        if content_inner.len() > MAX {
-            for new_len in MAX.. {
-                if content_inner.is_char_boundary(new_len) {
-                    content_inner.truncate(new_len);
-                    break;
+        if include_content {
+            let mut content_inner = format!("{:#?}", &self.content);
+            const MAX: usize = 100000;
+            if content_inner.len() > MAX {
+                for new_len in MAX.. {
+                    if content_inner.is_char_boundary(new_len) {
+                        content_inner.truncate(new_len);
+                        break;
+                    }
                 }
             }
+            println!("ContentTree = {}", content_inner);
+            // println!("Text = {}", self);
+            println!("Store = {:#?}", &self.store);
         }
-        println!("ContentTree = {}", content_inner);
-        // println!("Text = {}", self);
-        println!("Store = {:#?}", &self.store);
     }
 
     pub fn check_no_mergeable_neighbor(&self) {
@@ -858,7 +980,7 @@ impl RichText {
             let elements = node.elements();
             for i in 0..elements.len() - 1 {
                 if elements[i].can_merge(&elements[i + 1]) {
-                    self.debug_log();
+                    self.debug_log(false);
                     panic!(
                         "Found mergeable neighbor: \n{:#?} \n{:#?}",
                         elements[i],
@@ -869,19 +991,6 @@ impl RichText {
 
             leaf_idx = self.content.next_same_level_node(leaf);
         }
-    }
-}
-
-fn update_elem(
-    elements: &mut Vec<Elem>,
-    index: usize,
-    offset_start: usize,
-    offset_end: usize,
-    f: &mut impl FnMut(&mut Elem),
-) {
-    let (new, _) = elements[index].update(offset_start, offset_end, f);
-    if !new.is_empty() {
-        elements.splice(index + 1..index + 1, new);
     }
 }
 

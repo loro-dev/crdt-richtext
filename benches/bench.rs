@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use crdt_range::{Anchor, AnchorRange, AnchorType, Annotation, Behavior, OpID};
+use crdt_richtext::{Anchor, AnchorRange, AnchorType, Annotation, Behavior, OpID};
 use criterion::{criterion_group, criterion_main, Criterion};
 use pprof::flamegraph::{Direction, Options};
 use rand::{Rng, SeedableRng};
@@ -60,7 +60,7 @@ pub fn bench(c: &mut Criterion) {
 }
 
 fn real(c: &mut Criterion) {
-    use crdt_range::{RangeMap, TreeRangeMap};
+    use crdt_richtext::{RangeMap, TreeRangeMap};
     let mut b = c.benchmark_group("real");
     b.bench_function("annotate to 1000 annotations", |b| {
         let guard = PProfGuard::new("target/annotate_flamegraph.svg");
@@ -101,7 +101,7 @@ fn real(c: &mut Criterion) {
 #[cfg(feature = "test")]
 fn fuzz(c: &mut Criterion) {
     use arbitrary::Unstructured;
-    use crdt_range::test_utils::{fuzzing, Action};
+    use crdt_richtext::test_utils::{fuzzing, Action};
     let mut b = c.benchmark_group("fuzz");
     b.bench_function("5 actors 1000 actions", |b| {
         let mut data = rand::rngs::StdRng::seed_from_u64(0);

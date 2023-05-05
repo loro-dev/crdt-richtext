@@ -111,7 +111,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
 pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
     let mut actors = vec![];
     for i in 0..actor_num {
-        actors.push(Actor::new(i + 1));
+        actors.push(Actor::new(i));
     }
 
     for mut action in actions {
@@ -2319,6 +2319,61 @@ mod test {
                     actor: 0,
                     pos: 0,
                     content: 65280,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn fuzz_11() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 22222,
+                },
+                Sync(1, 0),
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 33333,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    content: 44444,
+                },
+                Delete {
+                    actor: 1,
+                    pos: 4,
+                    len: 1,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn fuzz_12() {
+        fuzzing(
+            3,
+            vec![
+                Insert {
+                    actor: 2,
+                    pos: 0,
+                    content: 2,
+                },
+                Sync(0, 2),
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    content: 1,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 0,
                 },
             ],
         )

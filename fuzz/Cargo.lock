@@ -89,7 +89,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "crdt-range"
+name = "crdt-richtext"
 version = "0.1.0"
 dependencies = [
  "append-only-bytes",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "generic-btree"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fxhash",
  "smallvec",
@@ -280,7 +280,7 @@ dependencies = [
 name = "peritext-rs-fuzz"
 version = "0.0.0"
 dependencies = [
- "crdt-range",
+ "crdt-richtext",
  "libfuzzer-sys",
 ]
 
