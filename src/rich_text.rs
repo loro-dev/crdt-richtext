@@ -15,7 +15,7 @@ use smallvec::SmallVec;
 
 use crate::{
     rich_text::{ann::insert_anchors_at_same_elem, op::OpContent, rich_tree::utf16::get_utf16_len},
-    Anchor, AnchorType, Annotation, ClientID, Counter, IdSpan, Lamport, OpID, Style,
+    Anchor, AnchorType, Annotation, ClientID, Counter, IdSpan, OpID, Style,
 };
 
 use self::{
@@ -81,7 +81,6 @@ impl RichText {
         ) -> bool {
             elem.id.client == id.client
                 && elem.id.counter + elem.atom_len() as Counter == id.counter
-                && elem.lamport + elem.atom_len() as Lamport == lamport
                 && !elem.is_dead()
                 && elem.string.can_merge(slice)
         }

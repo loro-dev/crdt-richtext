@@ -21,8 +21,6 @@ pub struct Elem {
     pub id: OpID,
     pub left: Option<OpID>,
     pub right: Option<OpID>,
-    // TODO: remove lamport?
-    pub lamport: Lamport,
     pub string: BytesSlice,
     pub utf16_len: usize,
     pub status: Status,
@@ -35,7 +33,6 @@ impl std::fmt::Debug for Elem {
             .field("id", &self.id)
             .field("left", &self.left)
             .field("right", &self.right)
-            .field("lamport", &self.lamport)
             .field("string", &std::str::from_utf8(&self.string))
             .field("utf16_len", &self.utf16_len)
             .field("status", &self.status)
@@ -56,7 +53,6 @@ impl Elem {
             id,
             left,
             right,
-            lamport,
             utf16_len: get_utf16_len(&string),
             string,
             status: Status::ALIVE,
@@ -100,7 +96,6 @@ impl Elem {
             id: self.id.inc(start as Counter),
             left: Some(self.id.inc(start as Counter - 1)),
             right: self.right,
-            lamport: self.lamport + start as Lamport,
             string: s,
             utf16_len,
             status: self.status,
@@ -276,7 +271,6 @@ impl Mergeable for Elem {
     fn can_merge(&self, rhs: &Self) -> bool {
         self.id.client == rhs.id.client
             && self.id.counter + self.atom_len() as Counter == rhs.id.counter
-            && self.lamport + self.atom_len() as Lamport == rhs.lamport
             && rhs.left == Some(self.id_last())
             && self.right == rhs.right
             && self.status == rhs.status
@@ -293,7 +287,6 @@ impl Mergeable for Elem {
     fn merge_left(&mut self, lhs: &Self) {
         self.id = lhs.id;
         self.left = lhs.left;
-        self.lamport = lhs.lamport;
         let mut string = lhs.string.clone();
         string.try_merge(&self.string).unwrap();
         self.string = string;
@@ -331,7 +324,6 @@ impl Sliceable for Elem {
                 Some(self.id.inc(start as Counter - 1))
             },
             right: self.right,
-            lamport: self.lamport + start as Lamport,
             string: s,
             utf16_len,
             status: self.status,
@@ -363,7 +355,6 @@ impl Sliceable for Elem {
         } else {
             Some(self.id.inc(start as Counter - 1))
         };
-        self.lamport += start as Lamport;
         self.string = self.string.slice_clone(range);
         self.utf16_len = get_utf16_len(&self.string);
     }
