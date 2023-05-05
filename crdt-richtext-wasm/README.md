@@ -1,0 +1,1 @@
+- replace `crdt-richtext-wasm` with your `project-name`
