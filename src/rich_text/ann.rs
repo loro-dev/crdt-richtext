@@ -124,6 +124,14 @@ impl Mergeable for ElemAnchorSet {
     }
 }
 
+macro_rules! extend_if_not_empty {
+    ($a:expr, $b:expr) => {
+        if !$b.is_empty() {
+            $a.extend($b.iter());
+        }
+    };
+}
+
 impl CacheAnchorSet {
     pub fn calc_diff(&self, other: &Self) -> AnchorSetDiff {
         let mut ans: AnchorSetDiff = Default::default();
@@ -171,15 +179,15 @@ impl CacheAnchorSet {
     }
 
     pub fn union_(&mut self, other: &Self) {
-        self.start.extend(other.start.iter());
-        self.end.extend(other.end.iter());
+        extend_if_not_empty!(self.start, other.start);
+        extend_if_not_empty!(self.end, other.end);
     }
 
     pub fn union_elem_set(&mut self, other: &ElemAnchorSet) {
-        self.start.extend(other.start_before.iter());
-        self.start.extend(other.start_after.iter());
-        self.end.extend(other.end_before.iter());
-        self.end.extend(other.end_after.iter());
+        extend_if_not_empty!(self.start, other.start_before);
+        extend_if_not_empty!(self.start, other.start_after);
+        extend_if_not_empty!(self.end, other.end_before);
+        extend_if_not_empty!(self.end, other.end_after);
     }
 }
 
