@@ -59,6 +59,20 @@ pub fn main() {
         println!("Running on automerge dataset");
         let actions = get_automerge_actions();
         bench(actions);
+    } else if args.len() > 1 && args[1].eq_ignore_ascii_case("encode") {
+        println!("Running on automerge dataset");
+        let actions = get_automerge_actions();
+        let mut text = RichText::new(1);
+        for action in actions.iter() {
+            if action.del > 0 {
+                text.delete(action.pos..action.pos + action.del);
+            }
+            if !action.ins.is_empty() {
+                text.insert(action.pos, &action.ins)
+            }
+        }
+        let data = text.export(&Default::default());
+        println!("Size = {}", data.len());
     } else {
         println!("Running on random generated actions 10k");
         let mut rng = rand::rngs::StdRng::seed_from_u64(123);

@@ -4,6 +4,7 @@
     "test_log": "RUST_BACKTRACE=full NEXTEST_FAILURE_OUTPUT=immediate cargo nextest run --features test",
     "fuzz": "cargo fuzz run rich-text",
     "flame": "CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --example bench -- automerge",
+    "example-encode": "cargo run --example bench -- encode",
     "bench": "cargo bench"
   }
 }

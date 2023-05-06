@@ -24,6 +24,7 @@ string_cache = "0.8.6"
 smallvec = "1.10.0"
 serde_columnar = "0.2.5"
 serde = { version = "1.0.140", features = ["derive"] }
+flate2 = "1.0.25"
 
 [dev-dependencies]
 rand = { version = "0.8.5" }
