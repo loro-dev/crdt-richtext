@@ -111,7 +111,8 @@ pub enum Behavior {
     ///
     /// For example, [bold 2~5] can be merged with [bold 1~4] to produce [bold 1-5]
     Merge = 0,
-    /// It will delete the overlapped range that has smaller lamport && has the same type
+    /// It will delete the overlapped range that has smaller lamport && has the same type.
+    /// But it will keep the `Inclusive` type unchanged
     Delete = 1,
 }
 

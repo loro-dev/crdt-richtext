@@ -49,13 +49,13 @@ impl RichText {
             AnnotateType::BoldLike => Style {
                 start_type: crdt_richtext::AnchorType::Before,
                 end_type: crdt_richtext::AnchorType::Before,
-                behavior: crdt_richtext::Behavior::Inclusive,
+                behavior: crdt_richtext::Behavior::Merge,
                 type_: ann_name.into(),
             },
             AnnotateType::LinkLike => Style {
                 start_type: crdt_richtext::AnchorType::Before,
                 end_type: crdt_richtext::AnchorType::After,
-                behavior: crdt_richtext::Behavior::Inclusive,
+                behavior: crdt_richtext::Behavior::Merge,
                 type_: ann_name.into(),
             },
         };
