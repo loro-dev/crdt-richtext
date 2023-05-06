@@ -1,7 +1,8 @@
 {
   "rust-analyzer.cargo.features": ["test"],
-  "cSpell.words": ["flamegraph"],
+  "cSpell.words": ["flamegraph", "unbold"],
   "rust-analyzer.runnableEnv": {
     "DEBUG": "*"
-  }
+  },
+  "deno.enable": false
 }

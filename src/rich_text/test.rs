@@ -397,6 +397,22 @@ mod annotation {
     }
 
     #[test]
+    fn test_simple_unbold() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123");
+        text.annotate(0..1, bold());
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 2);
+        assert_eq!(ans[0].annotations.len(), 1);
+
+        text.annotate(0..1, unbold());
+        let ans = text.iter().collect::<Vec<_>>();
+        assert_eq!(ans.len(), 1);
+        assert_eq!(ans[0].annotations.len(), 0);
+        assert_eq!(&ans[0].text, "123");
+    }
+
+    #[test]
     fn test_unbold() {
         let mut text = RichText::new(1);
         text.insert(0, "123456789");
