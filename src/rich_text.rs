@@ -23,7 +23,7 @@ use self::{
     ann::{insert_anchor_to_char, AnchorSetDiff, AnnIdx, AnnManager, Span, StyleCalculator},
     cursor::CursorMap,
     encoding::{decode, encode},
-    op::{Op, OpStore},
+    op::{DeleteOp, Op, OpStore},
     rich_tree::{
         query::{IndexFinder, IndexType},
         rich_tree_btree_impl::RichTreeTrait,
@@ -673,25 +673,8 @@ impl RichText {
         self.import_inner(decode(data));
     }
 
-    pub fn apply(&mut self, mut op: Op) {
+    fn apply(&mut self, mut op: Op) {
         debug_log::group!("apply op");
-        let op = match self.store.can_apply(&op) {
-            op::CanApply::Yes => op,
-            op::CanApply::Trim(len) => {
-                op.slice_(len as usize..);
-                op
-            }
-            op::CanApply::Pending => {
-                self.pending_ops.push(op);
-                debug_log::group_end!();
-                return;
-            }
-            op::CanApply::Seen => {
-                debug_log::group_end!();
-                return;
-            }
-        };
-
         debug_log::debug_dbg!(&op);
         let op_clone = op.clone();
         'apply: {
@@ -766,7 +749,6 @@ impl RichText {
             }
         }
 
-        self.store.insert(op_clone);
         debug_log::group_end!();
     }
 
@@ -912,15 +894,41 @@ impl RichText {
 
     fn import_inner(&mut self, exported: FxHashMap<ClientID, Vec<Op>>) {
         let mut all_ops = Vec::new();
-        for (_, mut ops) in exported {
-            all_ops.append(&mut ops);
+        for (_, ops) in exported {
+            for mut op in ops {
+                let op = match self.store.can_apply(&op) {
+                    op::CanApply::Yes => op,
+                    op::CanApply::Trim(len) => {
+                        op.slice_(len as usize..);
+                        op
+                    }
+                    op::CanApply::Pending => {
+                        self.pending_ops.push(op);
+                        continue;
+                    }
+                    op::CanApply::Seen => {
+                        continue;
+                    }
+                };
+                self.store.insert(op.clone());
+                all_ops.push(op);
+            }
         }
-        // ordered by causal order
-        all_ops.sort_by(|a, b| match a.lamport.cmp(&b.lamport) {
-            Ordering::Equal => a.rle_len().cmp(&b.rle_len()), // avoid the end of the longer one depending on the shorter one
-            x => x,
-        });
-        for op in all_ops {
+        all_ops.sort_by(|a, b| a.lamport.cmp(&b.lamport));
+
+        // Handling delete ops afterwards can guarantee the causal order.
+        // Otherwise, the delete op may be applied before the insert op
+        // because of the merges of delete ops.
+        let mut deletions = Vec::new();
+        for op in all_ops.iter() {
+            if let OpContent::Del(_) = &op.content {
+                deletions.push(op.clone());
+            } else {
+                self.apply(op.clone());
+            }
+        }
+
+        for op in deletions {
             self.apply(op);
         }
     }
@@ -935,9 +943,11 @@ impl RichText {
         mut len: usize,
         mut f: impl FnMut(&mut Elem),
     ) {
+        // debug_log::group!("update");
         // debug_log::debug_dbg!(id, len);
         // debug_log::debug_dbg!(&self.content);
         // debug_log::debug_dbg!(&self.cursor_map);
+        // debug_log::group_end!();
         while len > 0 {
             let (insert_leaf, mut leaf_del_len) = self.cursor_map.get_insert(id).unwrap();
             leaf_del_len = leaf_del_len.min(len);

@@ -212,7 +212,7 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             debug_log::group!("merge {i}->{j}");
             b.merge(a);
             debug_log::group_end!();
-            assert_eq!(a.text.to_string(), b.text.to_string());
+            assert_eq!(a.text.get_spans(), b.text.get_spans());
         }
     }
 }
@@ -364,6 +364,8 @@ impl Actor {
 
 #[cfg(test)]
 mod test {
+    use crate::legacy::test::minify_error;
+
     use super::*;
     use Action::*;
     use AnnotationType::*;
@@ -2602,13 +2604,62 @@ mod test {
         )
     }
 
-    // #[test]
-    // fn mini() {
-    //     minify_error(
-    //         5,
-    //         actions,
-    //         |n, actions| fuzzing(n as usize, actions.to_vec()),
-    //         |_, x| x.to_vec(),
-    //     );
-    // }
+    #[test]
+    fn fuzz_15() {
+        fuzzing(
+            5,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 38,
+                },
+                Sync(1, 0),
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    content: 256,
+                },
+                Sync(0, 1),
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Sync(1, 0),
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 1,
+                    content: 0,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Sync(0, 1),
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn minimize() {
+        let actions = vec![];
+        minify_error(
+            5,
+            actions,
+            |n, actions| fuzzing(n as usize, actions.to_vec()),
+            |_, x| x.to_vec(),
+        );
+    }
 }
