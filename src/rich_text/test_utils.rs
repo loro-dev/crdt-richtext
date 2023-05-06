@@ -69,6 +69,47 @@ pub fn preprocess_action(actors: &[Actor], action: &mut Action) {
     }
 }
 
+pub fn preprocess_action_utf16(actors: &[Actor], action: &mut Action) {
+    match action {
+        Action::Insert {
+            actor,
+            pos,
+            content: _,
+        } => {
+            *actor %= actors.len() as u8;
+            *pos = (*pos as usize % (actors[*actor as usize].len_utf16() + 1)) as u8;
+        }
+        Action::Delete { actor, pos, len } => {
+            *actor %= actors.len() as u8;
+            *pos = (*pos as usize % (actors[*actor as usize].len_utf16() + 1)) as u8;
+            *len = (*len).min(10);
+            *len %= (actors[*actor as usize].len_utf16().max(*pos as usize + 1) - *pos as usize)
+                .min(255)
+                .max(1) as u8;
+        }
+        Action::Annotate {
+            actor,
+            pos,
+            len,
+            annotation: _,
+        } => {
+            *actor %= actors.len() as u8;
+            *pos = (*pos as usize % (actors[*actor as usize].len_utf16() + 1)) as u8;
+            *len = (*len).min(10);
+            *len %= (actors[*actor as usize].len_utf16().max(*pos as usize + 1) - *pos as usize)
+                .min(255)
+                .max(1) as u8;
+        }
+        Action::Sync(a, b) => {
+            *a %= actors.len() as u8;
+            *b %= actors.len() as u8;
+            if b == a {
+                *b = (*a + 1) % actors.len() as u8;
+            }
+        }
+    }
+}
+
 pub fn apply_action(actors: &mut [Actor], action: Action) {
     match action {
         Action::Insert {
@@ -108,6 +149,46 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
     }
 }
 
+pub fn apply_action_utf16(actors: &mut [Actor], action: Action) {
+    match action {
+        Action::Insert {
+            actor,
+            pos,
+            content,
+        } => {
+            actors[actor as usize].insert_utf16(pos as usize, content.to_string().as_str());
+            // actors[actor as usize].check();
+        }
+        Action::Delete { actor, pos, len } => {
+            if len == 0 {
+                return;
+            }
+
+            actors[actor as usize].delete_utf16(pos as usize, len as usize);
+            // actors[actor as usize].check();
+        }
+        Action::Annotate {
+            actor,
+            pos,
+            len,
+            annotation,
+        } => {
+            if len == 0 {
+                return;
+            }
+
+            actors[actor as usize]
+                .annotate_utf16(pos as usize..pos as usize + len as usize, annotation);
+            // actors[actor as usize].check();
+        }
+        Action::Sync(a, b) => {
+            let (a, b) = arref::array_mut_ref!(actors, [a as usize, b as usize]);
+            a.merge(b);
+            // a.check();
+        }
+    }
+}
+
 pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
     let mut actors = vec![];
     for i in 0..actor_num {
@@ -136,6 +217,34 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
     }
 }
 
+pub fn fuzzing_utf16(actor_num: usize, actions: Vec<Action>) {
+    let mut actors = vec![];
+    for i in 0..actor_num {
+        actors.push(Actor::new(i));
+    }
+
+    for mut action in actions {
+        preprocess_action_utf16(&actors, &mut action);
+        // println!("{:?},", &action);
+        debug_log::group!("{:?},", &action);
+        apply_action_utf16(&mut actors, action);
+        debug_log::group_end!();
+    }
+
+    for i in 0..actors.len() {
+        for j in (i + 1)..actors.len() {
+            let (a, b) = arref::array_mut_ref!(&mut actors, [i, j]);
+            debug_log::group!("merge {i}<-{j}");
+            a.merge(b);
+            debug_log::group_end!();
+            debug_log::group!("merge {i}->{j}");
+            b.merge(a);
+            debug_log::group_end!();
+            assert_eq!(a.text.to_string(), b.text.to_string());
+        }
+    }
+}
+
 impl Actor {
     pub fn new(id: usize) -> Self {
         Self {
@@ -147,15 +256,35 @@ impl Actor {
         self.text.insert(pos, content);
     }
 
+    pub fn insert_utf16(&mut self, pos: usize, as_str: &str) {
+        self.text.insert_utf16(pos, as_str)
+    }
+
     /// this should happen after the op is integrated to the list crdt
     pub fn delete(&mut self, pos: usize, len: usize) {
         self.text.delete(pos..pos + len)
     }
 
-    #[inline(always)]
+    pub fn delete_utf16(&mut self, pos: usize, len: usize) {
+        self.text.delete_utf16(pos..pos + len)
+    }
+
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, type_: AnnotationType) {
+        self._annotate(range, type_, IndexType::Utf8)
+    }
+
+    pub fn annotate_utf16(&mut self, range: impl RangeBounds<usize>, type_: AnnotationType) {
+        self._annotate(range, type_, IndexType::Utf16)
+    }
+
+    fn _annotate(
+        &mut self,
+        range: impl RangeBounds<usize>,
+        type_: AnnotationType,
+        index_type: IndexType,
+    ) {
         match type_ {
-            AnnotationType::Bold => self.text.annotate(
+            AnnotationType::Bold => self.text.annotate_inner(
                 range,
                 Style {
                     start_type: AnchorType::Before,
@@ -163,8 +292,9 @@ impl Actor {
                     behavior: crate::Behavior::Merge,
                     type_: "bold".into(),
                 },
+                index_type,
             ),
-            AnnotationType::Link => self.text.annotate(
+            AnnotationType::Link => self.text.annotate_inner(
                 range,
                 Style {
                     start_type: AnchorType::Before,
@@ -172,8 +302,9 @@ impl Actor {
                     behavior: crate::Behavior::Merge,
                     type_: "link".into(),
                 },
+                index_type,
             ),
-            AnnotationType::Comment => self.text.annotate(
+            AnnotationType::Comment => self.text.annotate_inner(
                 range,
                 Style {
                     start_type: AnchorType::Before,
@@ -181,8 +312,9 @@ impl Actor {
                     behavior: crate::Behavior::Inclusive,
                     type_: "comment".into(),
                 },
+                index_type,
             ),
-            AnnotationType::UnBold => self.text.annotate(
+            AnnotationType::UnBold => self.text.annotate_inner(
                 range,
                 Style {
                     start_type: AnchorType::Before,
@@ -190,8 +322,9 @@ impl Actor {
                     behavior: crate::Behavior::Delete,
                     type_: "bold".into(),
                 },
+                index_type,
             ),
-            AnnotationType::UnLink => self.text.annotate(
+            AnnotationType::UnLink => self.text.annotate_inner(
                 range,
                 Style {
                     start_type: AnchorType::After,
@@ -199,6 +332,7 @@ impl Actor {
                     behavior: crate::Behavior::Delete,
                     type_: "link".into(),
                 },
+                index_type,
             ),
         };
     }
@@ -216,6 +350,11 @@ impl Actor {
     #[allow(unused)]
     fn len(&self) -> usize {
         self.text.len()
+    }
+
+    #[allow(unused)]
+    fn len_utf16(&self) -> usize {
+        self.text.len_utf16()
     }
 
     fn check(&self) {
