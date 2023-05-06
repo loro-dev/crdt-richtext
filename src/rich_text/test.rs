@@ -122,10 +122,27 @@ mod insert {
     #[test]
     fn utf_16() {
         let mut text = RichText::new(1);
-        text.insert(0, "1");
+        // insert
+        text.insert_utf16(0, "你");
         assert_eq!(text.utf16_len(), 1);
-        text.insert(1, "2");
+        text.insert_utf16(1, "好");
         assert_eq!(text.utf16_len(), 2);
+        assert_eq!(&text.to_string(), "你好");
+
+        // annotate
+        text.annotate_utf16(0..1, bold());
+        let spans = text.get_spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].text, "你");
+        text.insert_utf16(1, "k");
+        let spans = text.get_spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].text, "你k");
+        assert_eq!(spans[0].annotations.iter().next().unwrap(), "bold");
+
+        // delete
+        text.delete_utf16(0..2);
+        assert_eq!(&text.to_string(), "好");
     }
 
     #[test]

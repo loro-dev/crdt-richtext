@@ -24,7 +24,11 @@ use self::{
     cursor::CursorMap,
     encoding::{decode, encode},
     op::{Op, OpStore},
-    rich_tree::{query::IndexFinder, rich_tree_btree_impl::RichTreeTrait, CacheDiff, Elem},
+    rich_tree::{
+        query::{IndexFinder, IndexType},
+        rich_tree_btree_impl::RichTreeTrait,
+        CacheDiff, Elem,
+    },
     vv::VersionVector,
 };
 
@@ -72,11 +76,22 @@ impl RichText {
         }
     }
 
+    #[inline]
     fn next_id(&self) -> OpID {
         self.store.next_id()
     }
 
+    #[inline]
+    pub fn insert_utf16(&mut self, index: usize, string: &str) {
+        self.insert_inner(index, string, IndexType::Utf16);
+    }
+
+    #[inline]
     pub fn insert(&mut self, index: usize, string: &str) {
+        self.insert_inner(index, string, IndexType::Utf8);
+    }
+
+    fn insert_inner(&mut self, index: usize, string: &str, index_type: IndexType) {
         fn can_merge_new_slice(
             elem: &Elem,
             id: OpID,
@@ -98,7 +113,6 @@ impl RichText {
             get_utf16_len(&slice) as isize,
         ));
         let id = self.next_id();
-        let lamport = self.next_lamport();
         if index == 0 {
             let first_leaf = self.content.first_leaf();
             let right_origin = self
@@ -110,12 +124,12 @@ impl RichText {
             self.store
                 .insert_local(OpContent::new_insert(None, right_origin, slice.clone()));
             self.content
-                .prepend(Elem::new(id, None, right_origin, lamport, slice));
+                .prepend(Elem::new(id, None, right_origin, slice));
             return;
         }
 
         // need to find left op id
-        let path = self.find_ideal_insert_pos(index);
+        let path = self.find_ideal_insert_pos(index, index_type);
         let left;
         let right;
         let op_slice = slice.clone();
@@ -162,7 +176,7 @@ impl RichText {
                     return (true, cache_diff);
                 }
 
-                elements.insert(index + 1, Elem::new(id, left, right, lamport, slice));
+                elements.insert(index + 1, Elem::new(id, left, right, slice));
                 self.cursor_map
                     .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
                 return (true, cache_diff);
@@ -172,7 +186,7 @@ impl RichText {
             let right_half = elements[index].split(offset);
             elements.splice(
                 index + 1..index + 1,
-                [Elem::new(id, left, right, lamport, slice), right_half],
+                [Elem::new(id, left, right, slice), right_half],
             );
             self.cursor_map
                 .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
@@ -203,8 +217,8 @@ impl RichText {
     ///
     /// - rle_len() includes the length of deleted string
     /// - content_len() does not include the length of deleted string
-    fn find_ideal_insert_pos(&mut self, index: usize) -> QueryResult {
-        let mut path = self.content.query::<IndexFinder>(&index);
+    fn find_ideal_insert_pos(&mut self, index: usize, index_type: IndexType) -> QueryResult {
+        let mut path = self.content.query::<IndexFinder>(&(index, index_type));
         loop {
             let node = self.content.get_node(path.leaf);
 
@@ -246,7 +260,15 @@ impl RichText {
         path
     }
 
+    pub fn delete_utf16(&mut self, range: impl RangeBounds<usize>) {
+        self.delete_inner(range, IndexType::Utf16);
+    }
+
     pub fn delete(&mut self, range: impl RangeBounds<usize>) {
+        self.delete_inner(range, IndexType::Utf8);
+    }
+
+    fn delete_inner(&mut self, range: impl RangeBounds<usize>, index_type: IndexType) {
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
             Bound::Excluded(start) => *start + 1,
@@ -261,8 +283,8 @@ impl RichText {
             return;
         }
 
-        let start_result = self.content.query::<IndexFinder>(&start);
-        let end_result = self.content.query::<IndexFinder>(&end);
+        let start_result = self.content.query::<IndexFinder>(&(start, index_type));
+        let end_result = self.content.query::<IndexFinder>(&(end, index_type));
         let mut deleted = SmallVec::<[(OpID, usize); 4]>::new();
 
         // deletions don't remove things from the tree, they just mark them as dead
@@ -391,7 +413,27 @@ impl RichText {
     ///
     /// Although the arg is a range bound, a `..` range doesn't necessary means the start anchor
     /// and the end anchor is None. Because the range is also depends on the anchor type.
+    pub fn annotate_utf16(&mut self, range: impl RangeBounds<usize>, style: Style) {
+        self.annotate_inner(range, style, IndexType::Utf16)
+    }
+
+    /// Annotate the given range with style.
+    ///
+    /// Under the hood, it will assign anchors to the characters at the given start pos and end pos.
+    /// The range start OpID and end OpID are the OpID of those characters;
+    ///
+    /// Although the arg is a range bound, a `..` range doesn't necessary means the start anchor
+    /// and the end anchor is None. Because the range is also depends on the anchor type.
     pub fn annotate(&mut self, range: impl RangeBounds<usize>, style: Style) {
+        self.annotate_inner(range, style, IndexType::Utf8)
+    }
+
+    fn annotate_inner(
+        &mut self,
+        range: impl RangeBounds<usize>,
+        style: Style,
+        index_type: IndexType,
+    ) {
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
             Bound::Excluded(start) => *start + 1,
@@ -400,29 +442,38 @@ impl RichText {
         let mut inclusive_end = match range.end_bound() {
             Bound::Included(end) => *end,
             Bound::Excluded(end) => *end - 1,
-            Bound::Unbounded => self.len() - 1,
+            Bound::Unbounded => self.len_with(index_type) - 1,
         };
 
         if inclusive_end < start {
             return;
         }
 
-        inclusive_end = inclusive_end.min(self.len() - 1);
+        inclusive_end = inclusive_end.min(self.len_with(index_type) - 1);
         let start = if style.start_type == AnchorType::Before {
-            Some(self.content.query::<IndexFinder>(&start))
+            Some(self.content.query::<IndexFinder>(&(start, index_type)))
         } else if start == 0 {
             None
         } else {
-            Some(self.content.query::<IndexFinder>(&start.saturating_sub(1)))
+            Some(
+                self.content
+                    .query::<IndexFinder>(&(start.saturating_sub(1), index_type)),
+            )
         };
         let inclusive_end = if style.end_type == AnchorType::Before {
-            if inclusive_end + 1 >= self.len() {
+            if inclusive_end + 1 >= self.len_with(index_type) {
                 None
             } else {
-                Some(self.content.query::<IndexFinder>(&(inclusive_end + 1)))
+                Some(
+                    self.content
+                        .query::<IndexFinder>(&(inclusive_end + 1, index_type)),
+                )
             }
         } else {
-            Some(self.content.query::<IndexFinder>(&inclusive_end))
+            Some(
+                self.content
+                    .query::<IndexFinder>(&(inclusive_end, index_type)),
+            )
         };
 
         let start_id = start.map(|start| self.get_id_at_pos(start));
@@ -595,6 +646,17 @@ impl RichText {
         self.content.root_cache().len
     }
 
+    pub fn len_utf16(&self) -> usize {
+        self.content.root_cache().utf16_len
+    }
+
+    fn len_with(&self, index_type: IndexType) -> usize {
+        match index_type {
+            IndexType::Utf8 => self.content.root_cache().len,
+            IndexType::Utf16 => self.content.root_cache().utf16_len,
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -678,14 +740,13 @@ impl RichText {
                     if let Some(right) = right {
                         self.content.insert_by_query_result(
                             right,
-                            Elem::new(op.id, text.left, text.right, op.lamport, text.text.clone()),
+                            Elem::new(op.id, text.left, text.right, text.text.clone()),
                         );
                     } else {
                         self.content.push(Elem::new(
                             op.id,
                             text.left,
                             text.right,
-                            op.lamport,
                             text.text.clone(),
                         ));
                     }
@@ -708,13 +769,8 @@ impl RichText {
         let scan_start = self.find_next_cursor_of(elt.left);
         if scan_start.is_none() {
             // insert to the last
-            self.content.push(Elem::new(
-                op.id,
-                elt.left,
-                elt.right,
-                op.lamport,
-                elt.text.clone(),
-            ));
+            self.content
+                .push(Elem::new(op.id, elt.left, elt.right, elt.text.clone()));
             return None;
         }
         let scan_start = scan_start.unwrap();

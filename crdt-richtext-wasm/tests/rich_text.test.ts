@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { AnnotateType, RichText } from "../nodejs/crdt_richtext_wasm";
+import {
+  AnnotateType,
+  RichText,
+  setPanicHook,
+} from "../nodejs/crdt_richtext_wasm";
 
-describe("rich-text", () => {
-  it("run", () => {
+setPanicHook();
+describe("basic ops", () => {
+  it("insert & merge", () => {
     const text = new RichText(BigInt(1));
     text.insert(0, "123");
     const b = new RichText(BigInt(2));
@@ -27,5 +32,20 @@ describe("rich-text", () => {
       expect(spans[0].text).toBe("1k23");
       expect(spans[0].annotations.size).toBe(0);
     }
+  });
+});
+
+describe("utf16", () => {
+  it("insert", () => {
+    const text = new RichText(BigInt(1));
+    text.insert(0, "你好，世界！");
+    text.insert(2, "呀");
+    expect(text.toString()).toBe("你好呀，世界！");
+    text.annotate(0, 3, "bold", AnnotateType.BoldLike);
+    const spans = text.getAnnSpans();
+    expect(spans.length).toBe(2);
+    expect(spans[0].text).toBe("你好呀");
+    expect(spans[0].annotations.size).toBe(1);
+    expect(spans[1].text.length).toBe(4);
   });
 });
