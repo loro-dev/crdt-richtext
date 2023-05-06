@@ -674,6 +674,7 @@ impl RichText {
     }
 
     pub fn apply(&mut self, mut op: Op) {
+        debug_log::group!("apply op");
         let op = match self.store.can_apply(&op) {
             op::CanApply::Yes => op,
             op::CanApply::Trim(len) => {
@@ -682,11 +683,16 @@ impl RichText {
             }
             op::CanApply::Pending => {
                 self.pending_ops.push(op);
+                debug_log::group_end!();
                 return;
             }
-            op::CanApply::Seen => return,
+            op::CanApply::Seen => {
+                debug_log::group_end!();
+                return;
+            }
         };
 
+        debug_log::debug_dbg!(&op);
         let op_clone = op.clone();
         'apply: {
             match &op.content {
@@ -761,6 +767,7 @@ impl RichText {
         }
 
         self.store.insert(op_clone);
+        debug_log::group_end!();
     }
 
     fn find_right(&mut self, elt: &op::TextInsertOp, op: &Op) -> Option<Option<QueryResult>> {
@@ -780,7 +787,6 @@ impl RichText {
         let mut elt_right_parent: Option<Option<QueryResult>> = None; // calc lazily
         let mut visited_id_spans: SmallVec<[IdSpan; 8]> = SmallVec::new();
         let mut left = None;
-        debug_log::debug_dbg!(elt, op.id.client, self.client_id);
         let mut scanning = false;
         for o_slice in iterator {
             // a slice may contains several ops
@@ -898,6 +904,7 @@ impl RichText {
         if cfg!(debug_assertions) || cfg!(feature = "test") {
             let expected = other.store.export(&vv);
             assert_eq!(exported, expected);
+            debug_log::debug_dbg!(expected);
         }
 
         self.import_inner(exported);
@@ -908,7 +915,11 @@ impl RichText {
         for (_, mut ops) in exported {
             all_ops.append(&mut ops);
         }
-        all_ops.sort_by_key(|x| x.lamport);
+        // ordered by causal order
+        all_ops.sort_by(|a, b| match a.lamport.cmp(&b.lamport) {
+            Ordering::Equal => a.rle_len().cmp(&b.rle_len()), // avoid the end of the longer one depending on the shorter one
+            x => x,
+        });
         for op in all_ops {
             self.apply(op);
         }
@@ -924,9 +935,9 @@ impl RichText {
         mut len: usize,
         mut f: impl FnMut(&mut Elem),
     ) {
-        // dbg!(id, len);
-        // dbg!(&self.content);
-        // dbg!(&self.cursor_map);
+        // debug_log::debug_dbg!(id, len);
+        // debug_log::debug_dbg!(&self.content);
+        // debug_log::debug_dbg!(&self.cursor_map);
         while len > 0 {
             let (insert_leaf, mut leaf_del_len) = self.cursor_map.get_insert(id).unwrap();
             leaf_del_len = leaf_del_len.min(len);

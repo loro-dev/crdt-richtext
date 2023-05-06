@@ -2554,4 +2554,61 @@ mod test {
             ],
         )
     }
+
+    #[test]
+    fn fuzz_14() {
+        fuzzing(
+            5,
+            vec![
+                Insert {
+                    actor: 4,
+                    pos: 0,
+                    content: 0,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 0,
+                    content: 256,
+                },
+                Sync(0, 1),
+                Sync(0, 4),
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 1,
+                    content: 0,
+                },
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+                Sync(0, 1),
+                Delete {
+                    actor: 0,
+                    pos: 0,
+                    len: 1,
+                },
+            ],
+        )
+    }
+
+    // #[test]
+    // fn mini() {
+    //     minify_error(
+    //         5,
+    //         actions,
+    //         |n, actions| fuzzing(n as usize, actions.to_vec()),
+    //         |_, x| x.to_vec(),
+    //     );
+    // }
 }
