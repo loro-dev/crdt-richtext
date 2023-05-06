@@ -42,13 +42,7 @@ impl std::fmt::Debug for Elem {
 }
 
 impl Elem {
-    pub fn new(
-        id: OpID,
-        left: Option<OpID>,
-        right: Option<OpID>,
-        lamport: Lamport,
-        string: BytesSlice,
-    ) -> Self {
+    pub fn new(id: OpID, left: Option<OpID>, right: Option<OpID>, string: BytesSlice) -> Self {
         Elem {
             id,
             left,

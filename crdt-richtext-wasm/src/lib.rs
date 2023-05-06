@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{ops::Deref, panic};
 
 use crdt_richtext::{rich_text::RichText as RichTextInner, Style};
 use js_sys::Object;
@@ -25,11 +25,11 @@ impl RichText {
     }
 
     pub fn insert(&mut self, index: usize, text: &str) {
-        self.inner.insert(index, text);
+        self.inner.insert_utf16(index, text);
     }
 
     pub fn delete(&mut self, index: usize, length: usize) {
-        self.inner.delete(index..index + length);
+        self.inner.delete_utf16(index..index + length);
     }
 
     #[allow(clippy::inherent_to_string)]
@@ -60,7 +60,7 @@ impl RichText {
             },
         };
 
-        self.inner.annotate(index..index + length, style);
+        self.inner.annotate_utf16(index..index + length, style);
     }
 
     #[wasm_bindgen(js_name = "eraseAnn")]
@@ -86,7 +86,7 @@ impl RichText {
             },
         };
 
-        self.inner.annotate(index..index + length, style);
+        self.inner.annotate_utf16(index..index + length, style);
     }
 
     /// @returns {{text: string, annotations: Set<string>}[]}
@@ -133,7 +133,7 @@ pub fn set_panic_hook() {
     //
     // For more details see
     // https://github.com/rustwasm/console_error_panic_hook#readme
-    console_error_panic_hook::set_once();
+    panic::set_hook(Box::new(console_error_panic_hook::hook));
 }
 
 #[wasm_bindgen(typescript_custom_section)]

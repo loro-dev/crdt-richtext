@@ -110,10 +110,6 @@ impl CursorMap {
 
         None
     }
-
-    pub fn iter(&self) {
-        todo!()
-    }
 }
 
 fn listen(event: MoveEvent<Elem>, m: &mut IdMap<Cursor>) {
