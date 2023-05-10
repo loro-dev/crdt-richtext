@@ -310,32 +310,44 @@ impl StyleCalculator {
     }
 
     pub fn apply_node_start(&mut self, anchor_set: &CacheAnchorSet) {
-        for ann in anchor_set.start.iter() {
-            self.0.insert(*ann);
+        if !anchor_set.start.is_empty() {
+            for ann in anchor_set.start.iter() {
+                self.0.insert(*ann);
+            }
         }
     }
 
     pub fn apply_node_end(&mut self, anchor_set: &CacheAnchorSet) {
-        for ann in anchor_set.end.iter() {
-            self.0.remove(ann);
+        if !anchor_set.end.is_empty() {
+            for ann in anchor_set.end.iter() {
+                self.0.remove(ann);
+            }
         }
     }
 
     pub fn apply_start(&mut self, anchor_set: &ElemAnchorSet) {
-        for ann in anchor_set.start_before.iter() {
-            self.0.insert(*ann);
+        if !anchor_set.start_before.is_empty() {
+            for ann in anchor_set.start_before.iter() {
+                self.0.insert(*ann);
+            }
         }
-        for ann in anchor_set.end_before.iter() {
-            self.0.remove(ann);
+        if !anchor_set.end_before.is_empty() {
+            for ann in anchor_set.end_before.iter() {
+                self.0.remove(ann);
+            }
         }
     }
 
     pub fn apply_end(&mut self, anchor_set: &ElemAnchorSet) {
-        for ann in anchor_set.start_after.iter() {
-            self.0.insert(*ann);
+        if !anchor_set.start_after.is_empty() {
+            for ann in anchor_set.start_after.iter() {
+                self.0.insert(*ann);
+            }
         }
-        for ann in anchor_set.end_after.iter() {
-            self.0.remove(ann);
+        if !anchor_set.end_after.is_empty() {
+            for ann in anchor_set.end_after.iter() {
+                self.0.remove(ann);
+            }
         }
     }
 

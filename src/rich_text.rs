@@ -92,6 +92,10 @@ impl RichText {
     }
 
     fn insert_inner(&mut self, index: usize, string: &str, index_type: IndexType) {
+        if string.is_empty() {
+            return;
+        }
+
         fn can_merge_new_slice(
             elem: &Elem,
             id: OpID,
@@ -279,6 +283,7 @@ impl RichText {
             Bound::Excluded(end) => *end,
             Bound::Unbounded => self.len(),
         };
+
         if start == end {
             return;
         }

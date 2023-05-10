@@ -39,6 +39,7 @@ describe("utf16", () => {
   it("insert", () => {
     const text = new RichText(BigInt(1));
     text.insert(0, "你好，世界！");
+    text.insert(0, "");
     text.insert(2, "呀");
     expect(text.toString()).toBe("你好呀，世界！");
     text.annotate(0, 3, "bold", AnnotateType.BoldLike);
@@ -47,5 +48,16 @@ describe("utf16", () => {
     expect(spans[0].text).toBe("你好呀");
     expect(spans[0].annotations.size).toBe(1);
     expect(spans[1].text.length).toBe(4);
+  });
+
+  it("delete", () => {
+    const text = new RichText(BigInt(1));
+    text.insert(0, "你好，世界！");
+    text.delete(0, 0);
+    expect(text.toString()).toBe("你好，世界！");
+    text.delete(0, 1);
+    expect(text.toString()).toBe("好，世界！");
+    text.insert(5, "x");
+    expect(text.toString()).toBe("好，世界！x");
   });
 });

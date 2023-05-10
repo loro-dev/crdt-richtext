@@ -12,7 +12,7 @@ pub(crate) enum IndexType {
 
 struct IndexFinderWithStyles {
     left: usize,
-    style_caculator: StyleCalculator,
+    style_calculator: StyleCalculator,
     index_type: IndexType,
 }
 
@@ -53,10 +53,6 @@ impl Query<RichTreeTrait> for IndexFinder {
 
         let mut last_left = self.left;
         for (i, cache) in child_caches.iter().enumerate() {
-            if cache.cache.len == 0 {
-                continue;
-            }
-
             let cache_len = match self.index_type {
                 IndexType::Utf8 => cache.cache.len,
                 IndexType::Utf16 => cache.cache.utf16_len,
@@ -82,10 +78,6 @@ impl Query<RichTreeTrait> for IndexFinder {
 
         let mut last_left = self.left;
         for (i, cache) in elements.iter().enumerate() {
-            if cache.content_len() == 0 {
-                continue;
-            }
-
             let len = match self.index_type {
                 IndexType::Utf8 => cache.content_len(),
                 IndexType::Utf16 => {
@@ -109,7 +101,6 @@ impl Query<RichTreeTrait> for IndexFinder {
             }
         }
 
-        self.left = last_left;
         FindResult::new_missing(
             elements.len() - 1,
             reset_left_to_utf8(last_left, self.index_type, elements.last().unwrap()),
@@ -125,7 +116,7 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
     fn init(target: &Self::QueryArg) -> Self {
         IndexFinderWithStyles {
             left: target.0,
-            style_caculator: StyleCalculator::default(),
+            style_calculator: StyleCalculator::default(),
             index_type: target.1,
         }
     }
@@ -142,15 +133,11 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
 
         let mut last_left = self.left;
         for (i, cache) in child_caches.iter().enumerate() {
-            if cache.cache.len == 0 {
-                continue;
-            }
-
             let cache_len = match self.index_type {
                 IndexType::Utf8 => cache.cache.len,
                 IndexType::Utf16 => cache.cache.utf16_len,
             };
-            self.style_caculator
+            self.style_calculator
                 .apply_node_start(&cache.cache.anchor_set);
             if self.left >= cache_len {
                 last_left = self.left;
@@ -159,7 +146,8 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                 return FindResult::new_found(i, self.left);
             }
 
-            self.style_caculator.apply_node_end(&cache.cache.anchor_set);
+            self.style_calculator
+                .apply_node_end(&cache.cache.anchor_set);
         }
 
         self.left = last_left;
@@ -174,10 +162,6 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
 
         let mut last_left = self.left;
         for (i, cache) in elements.iter().enumerate() {
-            if cache.content_len() == 0 {
-                continue;
-            }
-
             let len = match self.index_type {
                 IndexType::Utf8 => cache.content_len(),
                 IndexType::Utf16 => {
@@ -188,7 +172,7 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                     }
                 }
             };
-            self.style_caculator.apply_start(&cache.anchor_set);
+            self.style_calculator.apply_start(&cache.anchor_set);
             if self.left >= len {
                 last_left = self.left;
                 self.left -= len;
@@ -199,10 +183,9 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                 );
             }
 
-            self.style_caculator.apply_end(&cache.anchor_set);
+            self.style_calculator.apply_end(&cache.anchor_set);
         }
 
-        self.left = last_left;
         FindResult::new_missing(
             elements.len() - 1,
             reset_left_to_utf8(last_left, self.index_type, elements.last().unwrap()),

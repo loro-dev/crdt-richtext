@@ -1,4 +1,4 @@
-use crate::test_utils::AnnotationType;
+use crate::{test_utils::AnnotationType, InternalString};
 
 use super::*;
 use arbitrary::Arbitrary;
@@ -243,6 +243,80 @@ pub fn fuzzing_utf16(actor_num: usize, actions: Vec<Action>) {
             assert_eq!(a.text.to_string(), b.text.to_string());
         }
     }
+}
+
+pub fn fuzzing_match_str(actions: Vec<Action>) {
+    let word_choices: [InternalString; 8] = [
+        "a".into(),
+        "b".into(),
+        "c".into(),
+        "d".into(),
+        "一".into(),
+        "二".into(),
+        "三".into(),
+        "四".into(),
+    ];
+    let mut actor = Actor::new(1);
+    let mut s: Vec<InternalString> = vec![];
+    for action in actions {
+        if matches!(action, Action::Sync(_, _) | Action::Annotate { .. }) {
+            continue;
+        }
+
+        match action {
+            Action::Insert { pos, content, .. } => {
+                let mut pos = pos as usize;
+                if s.is_empty() {
+                    pos = 0;
+                } else {
+                    pos %= s.len();
+                }
+
+                let content = &word_choices[content as usize % word_choices.len()];
+                s.insert(pos, content.clone());
+                debug_log::group!(
+                    "INSERT pos={} content={} ans={}",
+                    pos,
+                    content,
+                    s.iter().fold(String::new(), |mut left, cur| {
+                        left.push_str(cur);
+                        left
+                    })
+                );
+                actor.insert_utf16(pos, content);
+            }
+            Action::Delete { pos, len, .. } => {
+                let mut pos = pos as usize;
+                if s.is_empty() {
+                    pos = 0;
+                } else {
+                    pos %= s.len();
+                }
+                let len = (len as usize).min(s.len() - pos);
+                s.drain(pos..pos + len);
+                debug_log::group!(
+                    "DELETE pos={} len={} ans={}",
+                    pos,
+                    len,
+                    s.iter().fold(String::new(), |mut left, cur| {
+                        left.push_str(cur);
+                        left
+                    })
+                );
+                actor.delete_utf16(pos, len);
+            }
+            _ => {}
+        }
+
+        debug_log::group_end!();
+    }
+
+    let mut ans = String::new();
+    for span in s {
+        ans.push_str(&span)
+    }
+
+    assert_eq!(&actor.text.to_string(), &ans)
 }
 
 impl Actor {
@@ -2650,6 +2724,48 @@ mod test {
                 },
             ],
         );
+    }
+
+    #[test]
+    fn fuzz_16() {
+        fuzzing_match_str(vec![
+            Insert {
+                actor: 2,
+                pos: 252,
+                content: 54247,
+            },
+            Insert {
+                actor: 252,
+                pos: 231,
+                content: 54042,
+            },
+            Insert {
+                actor: 67,
+                pos: 63,
+                content: 17219,
+            },
+            Insert {
+                actor: 0,
+                pos: 0,
+                content: 17219,
+            },
+            Annotate {
+                actor: 79,
+                pos: 79,
+                len: 79,
+                annotation: Link,
+            },
+            Delete {
+                actor: 79,
+                pos: 79,
+                len: 79,
+            },
+            Delete {
+                actor: 133,
+                pos: 79,
+                len: 79,
+            },
+        ])
     }
 
     #[test]

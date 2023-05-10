@@ -48,3 +48,9 @@ name = "rich-text-utf16"
 path = "fuzz_targets/rich-text-utf16.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "rich-text-match"
+path = "fuzz_targets/rich-text-match.rs"
+test = false
+doc = false

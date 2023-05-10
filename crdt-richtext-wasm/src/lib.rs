@@ -24,12 +24,22 @@ impl RichText {
         }
     }
 
-    pub fn insert(&mut self, index: usize, text: &str) {
+    pub fn insert(&mut self, index: usize, text: &str) -> Result<(), JsError> {
+        if index > self.length() {
+            return Err(JsError::new("index out of range"));
+        }
+
         self.inner.insert_utf16(index, text);
+        Ok(())
     }
 
-    pub fn delete(&mut self, index: usize, length: usize) {
+    pub fn delete(&mut self, index: usize, length: usize) -> Result<(), JsError> {
+        if index + length > self.length() {
+            return Err(JsError::new("index out of range"));
+        }
+
         self.inner.delete_utf16(index..index + length);
+        Ok(())
     }
 
     #[allow(clippy::inherent_to_string)]
@@ -44,7 +54,11 @@ impl RichText {
         length: usize,
         ann_name: &str,
         ann_type: AnnotateType,
-    ) {
+    ) -> Result<(), JsError> {
+        if index + length > self.length() {
+            return Err(JsError::new("index out of range"));
+        }
+
         let style = match ann_type {
             AnnotateType::BoldLike => Style {
                 start_type: crdt_richtext::AnchorType::Before,
@@ -61,6 +75,7 @@ impl RichText {
         };
 
         self.inner.annotate_utf16(index..index + length, style);
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = "eraseAnn")]
@@ -70,7 +85,11 @@ impl RichText {
         length: usize,
         ann_name: &str,
         ann_type: AnnotateType,
-    ) {
+    ) -> Result<(), JsError> {
+        if index + length > self.length() {
+            return Err(JsError::new("index out of range"));
+        }
+
         let style = match ann_type {
             AnnotateType::BoldLike => Style {
                 start_type: crdt_richtext::AnchorType::Before,
@@ -87,6 +106,7 @@ impl RichText {
         };
 
         self.inner.annotate_utf16(index..index + length, style);
+        Ok(())
     }
 
     /// @returns {{text: string, annotations: Set<string>}[]}
@@ -122,6 +142,10 @@ impl RichText {
 
     pub fn import(&mut self, data: &[u8]) {
         self.inner.import(data);
+    }
+
+    pub fn length(&self) -> usize {
+        self.inner.len_utf16()
     }
 }
 
