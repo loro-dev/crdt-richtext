@@ -4,7 +4,10 @@ use core::fmt;
 
 use generic_btree::rle::{HasLength, Mergeable, Sliceable};
 use smallvec::SmallVec;
-use std::str::Chars;
+use std::{
+    ops::{Deref, DerefMut},
+    str::Chars,
+};
 
 use self::{rich_tree_btree_impl::RichTreeTrait, utf16::get_utf16_len};
 
@@ -15,16 +18,34 @@ pub(crate) mod rich_tree_btree_impl;
 pub mod utf16;
 
 type AnnIdx = i32;
-
 #[derive(Clone)]
 pub struct Elem {
+    inner: Box<ElemInner>,
+}
+
+#[derive(Clone)]
+pub struct ElemInner {
     pub id: OpID,
     pub left: Option<OpID>,
     pub right: Option<OpID>,
     pub string: BytesSlice,
     pub utf16_len: u32,
     pub status: Status,
-    pub anchor_set: Box<ElemAnchorSet>,
+    pub anchor_set: ElemAnchorSet,
+}
+
+impl Deref for Elem {
+    type Target = ElemInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for Elem {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 #[test]
@@ -49,13 +70,15 @@ impl std::fmt::Debug for Elem {
 impl Elem {
     pub fn new(id: OpID, left: Option<OpID>, right: Option<OpID>, string: BytesSlice) -> Self {
         Elem {
-            id,
-            left,
-            right,
-            utf16_len: get_utf16_len(&string),
-            string,
-            status: Status::ALIVE,
-            anchor_set: Default::default(),
+            inner: Box::new(ElemInner {
+                id,
+                left,
+                right,
+                utf16_len: get_utf16_len(&string),
+                string,
+                status: Status::ALIVE,
+                anchor_set: Default::default(),
+            }),
         }
     }
 
@@ -91,13 +114,15 @@ impl Elem {
         let s = self.string.slice_clone(offset..);
         let utf16_len = get_utf16_len(&s);
         let right = Self {
-            anchor_set: Box::new(self.anchor_set.split()),
-            id: self.id.inc(start as Counter),
-            left: Some(self.id.inc(start as Counter - 1)),
-            right: self.right,
-            string: s,
-            utf16_len,
-            status: self.status,
+            inner: Box::new(ElemInner {
+                anchor_set: self.anchor_set.split(),
+                id: self.id.inc(start as Counter),
+                left: Some(self.id.inc(start as Counter - 1)),
+                right: self.right,
+                string: s,
+                utf16_len,
+                status: self.status,
+            }),
         };
         self.utf16_len -= utf16_len;
         self.string = self.string.slice_clone(..offset);
@@ -315,17 +340,19 @@ impl Sliceable for Elem {
         let s = self.string.slice_clone(range);
         let utf16_len = get_utf16_len(&s);
         Self {
-            anchor_set: Box::new(self.anchor_set.trim(start != 0, end != self.rle_len())),
-            id: self.id.inc(start as Counter),
-            left: if start == 0 {
-                self.left
-            } else {
-                Some(self.id.inc(start as Counter - 1))
-            },
-            right: self.right,
-            string: s,
-            utf16_len,
-            status: self.status,
+            inner: Box::new(ElemInner {
+                anchor_set: self.anchor_set.trim(start != 0, end != self.rle_len()),
+                id: self.id.inc(start as Counter),
+                left: if start == 0 {
+                    self.left
+                } else {
+                    Some(self.id.inc(start as Counter - 1))
+                },
+                right: self.right,
+                string: s,
+                utf16_len,
+                status: self.status,
+            }),
         }
     }
 
@@ -347,7 +374,9 @@ impl Sliceable for Elem {
             return;
         }
 
-        self.anchor_set.trim_(start != 0, end != self.atom_len());
+        self.inner
+            .anchor_set
+            .trim_(start != 0, end != self.atom_len());
         self.id = self.id.inc(start as Counter);
         self.left = if start == 0 {
             self.left

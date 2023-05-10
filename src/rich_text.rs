@@ -405,7 +405,7 @@ impl RichText {
             let op = self
                 .store
                 .insert_local(OpContent::new_delete(start, len as i32));
-            self.cursor_map.register_del(op);
+            // self.cursor_map.register_del(op);
         }
     }
 
@@ -546,7 +546,7 @@ impl RichText {
 
         // register op to store
         let op = self.store.insert_local(OpContent::new_ann(ann));
-        self.cursor_map.register_ann(op);
+        // self.cursor_map.register_ann(op);
     }
 
     fn annotate_given_range(

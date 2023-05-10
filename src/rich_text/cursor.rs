@@ -19,8 +19,8 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cursor {
     Insert(ArenaIndex),
-    Delete(DeleteOp),
-    Ann(Arc<Annotation>),
+    // Delete(DeleteOp),
+    // Ann(Arc<Annotation>),
 }
 
 #[derive(Debug)]
@@ -47,49 +47,49 @@ impl CursorMap {
         listen(event, &mut self.map.try_lock().unwrap());
     }
 
-    pub fn register_del(&mut self, op: &Op) {
-        let mut map = self.map.try_lock().unwrap();
-        let content = match &op.content {
-            OpContent::Del(del) => del,
-            _ => unreachable!(),
-        };
-        if let Some(mut start) = map.get_last(op.id) {
-            if start.start_counter == op.id.counter {
-                debug_assert!(op.rle_len() > start.len);
-                let Cursor::Delete(del) = &mut start.value else { unreachable!() };
-                debug_assert_eq!(del.start, content.start);
-                del.len = content.len;
-                start.len = op.rle_len();
-                return;
-            } else if start.start_counter + start.len as Counter == op.id.counter {
-                if let Cursor::Delete(del) = &mut start.value {
-                    if del.can_merge(content) {
-                        del.merge_right(content);
-                        start.len += content.rle_len();
-                        return;
-                    }
-                }
-            } else {
-                // TODO: should we check here?
-                return;
-            }
-        }
+    // pub fn register_del(&mut self, op: &Op) {
+    //     let mut map = self.map.try_lock().unwrap();
+    //     let content = match &op.content {
+    //         OpContent::Del(del) => del,
+    //         _ => unreachable!(),
+    //     };
+    //     if let Some(mut start) = map.get_last(op.id) {
+    //         if start.start_counter == op.id.counter {
+    //             debug_assert!(op.rle_len() > start.len);
+    //             let Cursor::Delete(del) = &mut start.value else { unreachable!() };
+    //             debug_assert_eq!(del.start, content.start);
+    //             del.len = content.len;
+    //             start.len = op.rle_len();
+    //             return;
+    //         } else if start.start_counter + start.len as Counter == op.id.counter {
+    //             if let Cursor::Delete(del) = &mut start.value {
+    //                 if del.can_merge(content) {
+    //                     del.merge_right(content);
+    //                     start.len += content.rle_len();
+    //                     return;
+    //                 }
+    //             }
+    //         } else {
+    //             // TODO: should we check here?
+    //             return;
+    //         }
+    //     }
 
-        map.insert(
-            op.id,
-            Cursor::Delete(*content),
-            content.len.unsigned_abs() as usize,
-        );
-    }
+    //     map.insert(
+    //         op.id,
+    //         Cursor::Delete(*content),
+    //         content.len.unsigned_abs() as usize,
+    //     );
+    // }
 
-    pub fn register_ann(&mut self, op: &Op) {
-        let mut map = self.map.try_lock().unwrap();
-        let content = match &op.content {
-            OpContent::Ann(ann) => ann,
-            _ => unreachable!(),
-        };
-        map.insert(op.id, Cursor::Ann(content.clone()), 1);
-    }
+    // pub fn register_ann(&mut self, op: &Op) {
+    //     let mut map = self.map.try_lock().unwrap();
+    //     let content = match &op.content {
+    //         OpContent::Ann(ann) => ann,
+    //         _ => unreachable!(),
+    //     };
+    //     map.insert(op.id, Cursor::Ann(content.clone()), 1);
+    // }
 
     pub fn get_insert(&self, id: OpID) -> Option<(ArenaIndex, usize)> {
         let map = self.map.try_lock().unwrap();
