@@ -23,7 +23,7 @@ use self::{
     ann::{insert_anchor_to_char, AnchorSetDiff, AnnIdx, AnnManager, Span, StyleCalculator},
     cursor::CursorMap,
     encoding::{decode, encode},
-    op::{DeleteOp, Op, OpStore},
+    op::{Op, OpStore},
     rich_tree::{
         query::{IndexFinder, IndexType},
         rich_tree_btree_impl::RichTreeTrait,
@@ -46,7 +46,6 @@ pub mod test_utils;
 pub mod vv;
 
 pub struct RichText {
-    client_id: ClientID,
     bytes: AppendOnlyBytes,
     content: BTree<RichTreeTrait>,
     cursor_map: CursorMap,
@@ -65,7 +64,6 @@ impl RichText {
         let mut content: BTree<RichTreeTrait> = BTree::new();
         content.set_listener(Some(update_fn));
         RichText {
-            client_id,
             bytes: AppendOnlyBytes::new(),
             content,
             cursor_map,
@@ -648,17 +646,17 @@ impl RichText {
     }
 
     pub fn len(&self) -> usize {
-        self.content.root_cache().len
+        self.content.root_cache().len as usize
     }
 
     pub fn len_utf16(&self) -> usize {
-        self.content.root_cache().utf16_len
+        self.content.root_cache().utf16_len as usize
     }
 
     fn len_with(&self, index_type: IndexType) -> usize {
         match index_type {
-            IndexType::Utf8 => self.content.root_cache().len,
-            IndexType::Utf16 => self.content.root_cache().utf16_len,
+            IndexType::Utf8 => self.content.root_cache().len as usize,
+            IndexType::Utf16 => self.content.root_cache().utf16_len as usize,
         }
     }
 
@@ -667,7 +665,7 @@ impl RichText {
     }
 
     pub fn utf16_len(&self) -> usize {
-        self.content.root_cache().utf16_len
+        self.content.root_cache().utf16_len as usize
     }
 
     pub fn export(&self, vv: &VersionVector) -> Vec<u8> {

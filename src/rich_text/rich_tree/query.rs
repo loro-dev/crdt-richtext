@@ -58,9 +58,9 @@ impl Query<RichTreeTrait> for IndexFinder {
                 IndexType::Utf16 => cache.cache.utf16_len,
             };
             // prefer the end of an element
-            if self.left >= cache_len {
+            if self.left >= cache_len as usize {
                 last_left = self.left;
-                self.left -= cache_len;
+                self.left -= cache_len as usize;
             } else {
                 return FindResult::new_found(i, self.left);
             }
@@ -84,7 +84,7 @@ impl Query<RichTreeTrait> for IndexFinder {
                     if cache.status.is_dead() {
                         0
                     } else {
-                        cache.utf16_len
+                        cache.utf16_len as usize
                     }
                 }
             };
@@ -139,9 +139,9 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
             };
             self.style_calculator
                 .apply_node_start(&cache.cache.anchor_set);
-            if self.left >= cache_len {
+            if self.left >= cache_len as usize {
                 last_left = self.left;
-                self.left -= cache_len;
+                self.left -= cache_len as usize;
             } else {
                 return FindResult::new_found(i, self.left);
             }
@@ -168,7 +168,7 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                     if cache.status.is_dead() {
                         0
                     } else {
-                        cache.utf16_len
+                        cache.utf16_len as usize
                     }
                 }
             };
@@ -201,8 +201,8 @@ fn reset_left_to_utf8(left: usize, index_type: IndexType, element: &Elem) -> usi
     match index_type {
         IndexType::Utf8 => left,
         IndexType::Utf16 => {
-            assert!(element.utf16_len >= left);
-            if element.utf16_len == left {
+            assert!(element.utf16_len as usize >= left);
+            if element.utf16_len as usize == left {
                 return element.atom_len();
             }
 
@@ -230,7 +230,7 @@ impl Query<TreeTrait> for AnnotationFinderStart {
             if cache.cache.anchor_set.contains_start(self.target) {
                 return FindResult::new_found(i, 0);
             }
-            self.visited_len += cache.cache.len;
+            self.visited_len += cache.cache.len as usize;
         }
 
         FindResult::new_missing(0, 0)
@@ -274,9 +274,9 @@ impl Query<TreeTrait> for AnnotationFinderEnd {
     ) -> FindResult {
         for (i, cache) in child_caches.iter().enumerate().rev() {
             if cache.cache.anchor_set.contains_end(self.target) {
-                return FindResult::new_found(i, cache.cache.len);
+                return FindResult::new_found(i, cache.cache.len as usize);
             }
-            self.visited_len += cache.cache.len;
+            self.visited_len += cache.cache.len as usize;
         }
 
         FindResult::new_missing(0, 0)

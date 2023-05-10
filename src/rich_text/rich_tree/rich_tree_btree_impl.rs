@@ -75,7 +75,7 @@ impl BTreeTrait for RichTreeTrait {
                     len_diff: len as isize - cache.len as isize,
                     utf16_len_diff: utf16_len as isize - cache.utf16_len as isize,
                 };
-                cache.len = len;
+                cache.len = len as u32;
                 cache.utf16_len = utf16_len;
                 diff
             }

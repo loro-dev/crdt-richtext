@@ -1,10 +1,10 @@
 use super::*;
 
 #[inline(always)]
-pub fn get_utf16_len(bytes: &BytesSlice) -> usize {
+pub fn get_utf16_len(bytes: &BytesSlice) -> u32 {
     let str = bytes_to_str(bytes);
     let utf16 = encode_utf16(str).count();
-    utf16
+    utf16 as u32
 }
 
 pub fn utf16_to_utf8(bytes: &BytesSlice, utf16_index: usize) -> usize {

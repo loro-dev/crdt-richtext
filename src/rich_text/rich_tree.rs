@@ -1,4 +1,4 @@
-use crate::{Counter, Lamport, OpID};
+use crate::{Counter, OpID};
 use append_only_bytes::BytesSlice;
 use core::fmt;
 
@@ -22,9 +22,14 @@ pub struct Elem {
     pub left: Option<OpID>,
     pub right: Option<OpID>,
     pub string: BytesSlice,
-    pub utf16_len: usize,
+    pub utf16_len: u32,
     pub status: Status,
-    pub anchor_set: ElemAnchorSet,
+    pub anchor_set: Box<ElemAnchorSet>,
+}
+
+#[test]
+fn size() {
+    assert_eq!(std::mem::size_of::<Elem>(), 96);
 }
 
 impl std::fmt::Debug for Elem {
@@ -86,7 +91,7 @@ impl Elem {
         let s = self.string.slice_clone(offset..);
         let utf16_len = get_utf16_len(&s);
         let right = Self {
-            anchor_set: self.anchor_set.split(),
+            anchor_set: Box::new(self.anchor_set.split()),
             id: self.id.inc(start as Counter),
             left: Some(self.id.inc(start as Counter - 1)),
             right: self.right,
@@ -310,7 +315,7 @@ impl Sliceable for Elem {
         let s = self.string.slice_clone(range);
         let utf16_len = get_utf16_len(&s);
         Self {
-            anchor_set: self.anchor_set.trim(start != 0, end != self.rle_len()),
+            anchor_set: Box::new(self.anchor_set.trim(start != 0, end != self.rle_len())),
             id: self.id.inc(start as Counter),
             left: if start == 0 {
                 self.left
@@ -381,8 +386,8 @@ impl Status {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Cache {
-    pub len: usize,
-    pub utf16_len: usize,
+    pub len: u32,
+    pub utf16_len: u32,
     pub anchor_set: CacheAnchorSet,
 }
 
@@ -395,8 +400,8 @@ pub(crate) struct CacheDiff {
 
 impl Cache {
     fn apply_diff(&mut self, diff: &CacheDiff) {
-        self.len = (self.len as isize + diff.len_diff) as usize;
-        self.utf16_len = (self.utf16_len as isize + diff.utf16_len_diff) as usize;
+        self.len = (self.len as isize + diff.len_diff) as u32;
+        self.utf16_len = (self.utf16_len as isize + diff.utf16_len_diff) as u32;
         self.anchor_set.apply_diff(&diff.anchor_diff);
     }
 }

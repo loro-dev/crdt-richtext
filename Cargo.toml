@@ -19,7 +19,7 @@ heapless = "0.7.16"
 fxhash = "0.2.1"
 generic-btree = { version = "0.2.0", path = "../generic-btree" }
 bitvec = "1.0.1"
-append-only-bytes = "0.1.5"
+append-only-bytes = { version = "0.1.5", features = ["u32_range"] }
 string_cache = "0.8.6"
 smallvec = "1.10.0"
 serde_columnar = "0.2.5"
