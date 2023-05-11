@@ -105,6 +105,7 @@ impl RichText {
                 && elem.right == right
                 && !elem.is_dead()
                 && elem.string.can_merge(slice)
+                && !elem.has_after_anchor()
         }
 
         let start = self.bytes.len();
@@ -676,10 +677,8 @@ impl RichText {
         self.import_inner(decode(data));
     }
 
-    fn apply(&mut self, mut op: Op) {
+    fn apply(&mut self, op: Op) {
         debug_log::group!("apply op");
-        debug_log::debug_dbg!(&op);
-        let op_clone = op.clone();
         'apply: {
             match &op.content {
                 OpContent::Ann(ann) => {
@@ -889,7 +888,6 @@ impl RichText {
         if cfg!(debug_assertions) || cfg!(feature = "test") {
             let expected = other.store.export(&vv);
             assert_eq!(exported, expected);
-            debug_log::debug_dbg!(expected);
         }
 
         self.import_inner(exported);
@@ -1060,9 +1058,9 @@ impl RichText {
     }
 
     pub fn debug_log(&self, include_content: bool) {
-        println!("Text len = {} (utf16={})", self.len(), self.utf16_len());
-        println!("Nodes len = {}", self.content.node_len());
-        println!("Op len = {}", self.store.op_len());
+        debug_log::debug_log!("Text len = {} (utf16={})", self.len(), self.utf16_len());
+        debug_log::debug_log!("Nodes len = {}", self.content.node_len());
+        debug_log::debug_log!("Op len = {}", self.store.op_len());
         if include_content {
             let mut content_inner = format!("{:#?}", &self.content);
             const MAX: usize = 100000;
@@ -1074,9 +1072,9 @@ impl RichText {
                     }
                 }
             }
-            println!("ContentTree = {}", content_inner);
+            debug_log::debug_log!("ContentTree = {}", content_inner);
             // println!("Text = {}", self);
-            println!("Store = {:#?}", &self.store);
+            debug_log::debug_log!("Store = {:#?}", &self.store);
         }
     }
 

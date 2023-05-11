@@ -47,6 +47,7 @@ describe("utf16", () => {
     expect(spans.length).toBe(2);
     expect(spans[0].text).toBe("你好呀");
     expect(spans[0].annotations.size).toBe(1);
+    expect(spans[0].annotations.has("bold")).toBeTruthy();
     expect(spans[1].text.length).toBe(4);
   });
 

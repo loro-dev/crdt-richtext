@@ -144,6 +144,7 @@ pub fn apply_action(actors: &mut [Actor], action: Action) {
         Action::Sync(a, b) => {
             let (a, b) = arref::array_mut_ref!(actors, [a as usize, b as usize]);
             a.merge(b);
+            a.text.debug_log(true);
             // a.check();
         }
     }
@@ -211,8 +212,8 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
             debug_log::group_end!();
             debug_log::group!("merge {i}->{j}");
             b.merge(a);
-            debug_log::group_end!();
             assert_eq!(a.text.get_spans(), b.text.get_spans());
+            debug_log::group_end!();
         }
     }
 }
@@ -2766,6 +2767,55 @@ mod test {
                 len: 79,
             },
         ])
+    }
+
+    #[test]
+    fn fuzz_17() {
+        fuzzing(
+            2,
+            vec![
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 22222,
+                },
+                Sync(1, 0),
+                Insert {
+                    actor: 0,
+                    pos: 3,
+                    content: 33333,
+                },
+                Insert {
+                    actor: 1,
+                    pos: 3,
+                    content: 111,
+                },
+                Sync(0, 1),
+                Annotate {
+                    actor: 0,
+                    pos: 1,
+                    len: 10,
+                    annotation: Link,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 44444,
+                },
+                Insert {
+                    actor: 0,
+                    pos: 0,
+                    content: 55555,
+                },
+                Sync(1, 0),
+                Sync(0, 1),
+                Insert {
+                    actor: 1,
+                    pos: 21,
+                    content: 6666,
+                },
+            ],
+        )
     }
 
     #[test]
