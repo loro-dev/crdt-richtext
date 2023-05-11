@@ -8,6 +8,9 @@ open-source)
 
 [**📚 See the blog post**](https://loro-dev.notion.site/crdt-richtext-Rust-implementation-of-Peritext-and-Fugue-c49ef2a411c0404196170ac8daf066c0)
 
+_The interface is not yet stable and is subject to changes. Do not use it in
+production._
+
 This Rust crate provides an implementation of Peritext that is optimized for
 performance. This crate uses a separate data structure to store the range
 annotation, decoupled from the underlying list CRDT. This implementation depends
