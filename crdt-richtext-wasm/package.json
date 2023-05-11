@@ -1,6 +1,6 @@
 {
   "name": "crdt-richtext-wasm",
-  "version": "0.2.8-alpha-2",
+  "version": "0.3.0",
   "description": "",
   "main": "nodejs/crdt_richtext_wasm.js",
   "module": "bundler/crdt_richtext_wasm.js",
