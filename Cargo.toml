@@ -9,7 +9,7 @@ description = "Richtext CRDT, Rust implementation of Peritext and Fugue"
 repository = "https://github.com/loro-dev/crdt-richtext"
 authors = ["zxch3n <remch183@outlook.com>"]
 keywords = ["crdt", "p2p", "richtext", "text-editing"]
-include = ["Cargo.toml", "src/**/*.rs"]
+include = ["Cargo.toml", "src/**/*.rs", "benches/**/*.rs", "examples/**/*.rs"]
 documentation = "https://docs.rs/crdt-richtext"
 
 [workspace]
@@ -26,7 +26,7 @@ arref = "0.1.0"
 debug-log = "0.1.4"
 heapless = "0.7.16"
 fxhash = "0.2.1"
-generic-btree = { version = "0.2.0", path = "../generic-btree" }
+generic-btree = { version = "0.3.0" }
 bitvec = "1.0.1"
 append-only-bytes = { version = "0.1.5", features = ["u32_range"] }
 string_cache = "0.8.6"
