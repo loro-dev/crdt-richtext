@@ -6,6 +6,8 @@
 This crate contains a subset of [Loro CRDT](https://loro.dev/)(which is not yet
 open-source)
 
+[**📚 See the blog post**](https://loro-dev.notion.site/crdt-richtext-Rust-implementation-of-Peritext-and-Fugue-c49ef2a411c0404196170ac8daf066c0)
+
 This Rust crate provides an implementation of Peritext that is optimized for
 performance. This crate uses a separate data structure to store the range
 annotation, decoupled from the underlying list CRDT. This implementation depends
