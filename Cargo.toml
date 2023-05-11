@@ -2,6 +2,15 @@
 name = "crdt-richtext"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/loro-dev/crdt-richtext"
+description = "Richtext CRDT, Rust implementation of Peritext and Fugue"
+repository = "https://github.com/loro-dev/crdt-richtext"
+authors = ["zxch3n <remch183@outlook.com>"]
+keywords = ["crdt", "p2p", "richtext", "text-editing"]
+include = ["Cargo.toml", "src/**/*.rs"]
+documentation = "https://docs.rs/crdt-richtext"
 
 [workspace]
 members = ["./crdt-richtext-wasm"]
