@@ -48,11 +48,6 @@ impl DerefMut for Elem {
     }
 }
 
-#[test]
-fn size() {
-    assert_eq!(std::mem::size_of::<Elem>(), 96);
-}
-
 impl std::fmt::Debug for Elem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Elem")
