@@ -624,9 +624,45 @@ mod fugue {
         text.insert(1, "2");
         let span = text.content.iter().next().unwrap();
         assert_eq!(span.rle_len(), 1);
-        assert_eq!(span.right, None);
+        assert!(span.right.is_none());
         let span = text.content.iter().nth(1).unwrap();
         assert_eq!(span.rle_len(), 1);
         assert_eq!(span.right.unwrap().counter, 1);
+    }
+
+    #[test]
+    fn test_backward_interleaving() {
+        let mut a = RichText::new(1);
+        a.insert(0, " ");
+        a.insert(0, "i");
+        a.insert(0, "H");
+        let mut b = RichText::new(2);
+        b.insert(0, "o");
+        a.merge(&b);
+        b.insert(0, "l");
+        a.merge(&b);
+        b.insert(0, "l");
+        a.merge(&b);
+        b.insert(0, "e");
+        a.merge(&b);
+        b.insert(0, "H");
+        a.merge(&b);
+        assert_eq!(&a.to_string(), "Hi Hello");
+    }
+
+    #[test]
+    fn test_forward_interleaving() {
+        let mut a = RichText::new(1);
+        a.insert(0, "H");
+        a.insert(1, "i");
+        a.insert(2, " ");
+        let mut b = RichText::new(2);
+        b.insert(0, "H");
+        b.insert(1, "e");
+        b.insert(2, "l");
+        b.insert(3, "l");
+        b.insert(4, "o");
+        a.merge(&b);
+        assert_eq!(&a.to_string(), "Hi Hello");
     }
 }
