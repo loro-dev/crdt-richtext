@@ -297,6 +297,7 @@ impl From<AnchorSetDiff> for CacheDiff {
             anchor_diff: value,
             len_diff: 0,
             utf16_len_diff: 0,
+            line_break_diff: 0,
         }
     }
 }

@@ -1,6 +1,9 @@
 use generic_btree::{BTreeTrait, FindResult, Query};
 
-use crate::rich_text::{ann::StyleCalculator, rich_tree::utf16::utf16_to_utf8};
+use crate::rich_text::{
+    ann::StyleCalculator,
+    rich_tree::utf16::{line_breaks_to_utf8, utf16_to_utf8},
+};
 
 use super::*;
 
@@ -8,6 +11,7 @@ use super::*;
 pub(crate) enum IndexType {
     Utf8,
     Utf16,
+    LineBreak,
 }
 
 struct IndexFinderWithStyles {
@@ -56,6 +60,7 @@ impl Query<RichTreeTrait> for IndexFinder {
             let cache_len = match self.index_type {
                 IndexType::Utf8 => cache.cache.len,
                 IndexType::Utf16 => cache.cache.utf16_len,
+                IndexType::LineBreak => cache.cache.line_breaks,
             };
             // prefer the end of an element
             if self.left >= cache_len as usize {
@@ -85,6 +90,13 @@ impl Query<RichTreeTrait> for IndexFinder {
                         0
                     } else {
                         cache.utf16_len as usize
+                    }
+                }
+                IndexType::LineBreak => {
+                    if cache.status.is_dead() {
+                        0
+                    } else {
+                        cache.line_breaks as usize
                     }
                 }
             };
@@ -136,6 +148,7 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
             let cache_len = match self.index_type {
                 IndexType::Utf8 => cache.cache.len,
                 IndexType::Utf16 => cache.cache.utf16_len,
+                IndexType::LineBreak => cache.cache.line_breaks,
             };
             self.style_calculator
                 .apply_node_start(&cache.cache.anchor_set);
@@ -169,6 +182,13 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                         0
                     } else {
                         cache.utf16_len as usize
+                    }
+                }
+                IndexType::LineBreak => {
+                    if cache.status.is_dead() {
+                        0
+                    } else {
+                        cache.line_breaks as usize
                     }
                 }
             };
@@ -207,6 +227,14 @@ fn reset_left_to_utf8(left: usize, index_type: IndexType, element: &Elem) -> usi
             }
 
             utf16_to_utf8(&element.string, left)
+        }
+        IndexType::LineBreak => {
+            assert!(element.line_breaks as usize >= left);
+            if element.line_breaks as usize == left {
+                return element.atom_len();
+            }
+
+            line_breaks_to_utf8(&element.string, left)
         }
     }
 }
