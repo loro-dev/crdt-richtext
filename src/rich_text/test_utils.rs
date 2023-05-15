@@ -3,7 +3,8 @@ use crate::{test_utils::AnnotationType, InternalString};
 use super::*;
 use arbitrary::Arbitrary;
 
-pub mod line_breaks;
+mod fuzz_line_breaks;
+pub use fuzz_line_breaks::{fuzzing_line_break, Action as LineBreakFuzzAction};
 
 pub struct Actor {
     text: RichText,

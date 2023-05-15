@@ -1,5 +1,5 @@
 #![no_main]
-use crdt_richtext::rich_text::test_utils::{fuzzing_match_str, Action};
+use crdt_richtext::rich_text::test_utils::{fuzzing_line_break, LineBreakFuzzAction};
 use libfuzzer_sys::fuzz_target;
 
-fuzz_target!(|actions: Vec<Action>| { fuzzing_match_str(actions) });
+fuzz_target!(|actions: Vec<LineBreakFuzzAction>| { fuzzing_line_break(actions) });

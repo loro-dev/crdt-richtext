@@ -165,7 +165,12 @@ impl Query<RichTreeTrait> for LineStartFinder {
 
         for (i, cache) in elements.iter().enumerate() {
             self.style_calculator.apply_start(&cache.anchor_set);
-            if !cache.is_dead() && self.left > cache.line_breaks as usize {
+            if cache.is_dead() {
+                self.style_calculator.apply_end(&cache.anchor_set);
+                continue;
+            }
+
+            if self.left > cache.line_breaks as usize {
                 self.left -= cache.line_breaks as usize;
             } else {
                 return FindResult::new_found(
