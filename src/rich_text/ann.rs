@@ -57,6 +57,7 @@ impl AnnManager {
 /// The annotated text span.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
+    // TODO: use byte slice
     pub text: String,
     pub annotations: FxHashSet<InternalString>,
 }

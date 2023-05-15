@@ -34,24 +34,12 @@ pub fn utf16_to_utf8(bytes: &BytesSlice, utf16_index: usize) -> usize {
     iter.visited
 }
 
-/// convert line_breaks into index in bytes
+/// get the index of nth line start in bytes (in utf8)
 ///
-/// if line_breaks exceed the number of line_breaks in bytes, return the length of bytes
-///
-/// ```no_run
-/// let mut bytes = AppendOnlyBytes::new();
-/// bytes.push_str("abc\ndragon\nzz");
-/// assert_eq!(bytes.len(), 13);
-/// assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 0), 0);
-/// assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 1), 3);
-/// assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 2), 10);
-/// assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 3), 13);
-/// assert_eq!(line_breaks_to_utf8(&bytes.slice(0..0), 0), 0);
-/// assert_eq!(line_breaks_to_utf8(&bytes.slice(0..0), 1), 0);
-/// ```
-pub fn line_breaks_to_utf8(bytes: &BytesSlice, line_breaks: usize) -> usize {
-    if line_breaks == 0 {
-        return 0;
+/// if n exceed the number of lines in bytes, return None
+pub fn line_start_to_utf8(bytes: &BytesSlice, n: usize) -> Option<usize> {
+    if n == 0 {
+        return Some(0);
     }
 
     let str = bytes_to_str(bytes);
@@ -59,13 +47,13 @@ pub fn line_breaks_to_utf8(bytes: &BytesSlice, line_breaks: usize) -> usize {
     for (i, c) in str.chars().enumerate() {
         if c.eq(&'\n') {
             iter_line_breaks += 1;
-            if iter_line_breaks == line_breaks {
-                return i;
+            if iter_line_breaks == n {
+                return Some(i + 1);
             }
         }
     }
 
-    str.len()
+    None
 }
 
 #[inline(always)]
@@ -135,7 +123,7 @@ impl<'a> Iterator for EncodeUtf16<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::line_breaks_to_utf8;
+    use super::line_start_to_utf8;
 
     #[test]
     fn line_breaks() {
@@ -143,11 +131,11 @@ mod test {
         let mut bytes = AppendOnlyBytes::new();
         bytes.push_str("abc\ndragon\nzz");
         assert_eq!(bytes.len(), 13);
-        assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 0), 0);
-        assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 1), 3);
-        assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 2), 10);
-        assert_eq!(line_breaks_to_utf8(&bytes.slice(..), 3), 13);
-        assert_eq!(line_breaks_to_utf8(&bytes.slice(0..0), 0), 0);
-        assert_eq!(line_breaks_to_utf8(&bytes.slice(0..0), 1), 0);
+        assert_eq!(line_start_to_utf8(&bytes.slice(..), 0).unwrap(), 0);
+        assert_eq!(line_start_to_utf8(&bytes.slice(..), 1).unwrap(), 4);
+        assert_eq!(line_start_to_utf8(&bytes.slice(..), 2).unwrap(), 11);
+        assert!(line_start_to_utf8(&bytes.slice(..), 3).is_none());
+        assert_eq!(line_start_to_utf8(&bytes.slice(0..0), 0).unwrap(), 0);
+        assert_eq!(line_start_to_utf8(&bytes.slice(0..0), 1), None);
     }
 }

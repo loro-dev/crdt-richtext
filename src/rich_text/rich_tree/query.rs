@@ -2,7 +2,7 @@ use generic_btree::{BTreeTrait, FindResult, Query};
 
 use crate::rich_text::{
     ann::StyleCalculator,
-    rich_tree::utf16::{line_breaks_to_utf8, utf16_to_utf8},
+    rich_tree::utf16::{line_start_to_utf8, utf16_to_utf8},
 };
 
 use super::*;
@@ -11,7 +11,6 @@ use super::*;
 pub(crate) enum IndexType {
     Utf8,
     Utf16,
-    LineBreak,
 }
 
 struct IndexFinderWithStyles {
@@ -23,6 +22,11 @@ struct IndexFinderWithStyles {
 pub(crate) struct IndexFinder {
     left: usize,
     index_type: IndexType,
+}
+
+pub(crate) struct LineStartFinder {
+    left: usize,
+    pub(crate) style_calculator: StyleCalculator,
 }
 
 struct AnnotationFinderStart {
@@ -52,7 +56,7 @@ impl Query<RichTreeTrait> for IndexFinder {
         child_caches: &[generic_btree::Child<RichTreeTrait>],
     ) -> generic_btree::FindResult {
         if child_caches.is_empty() {
-            return FindResult::new_missing(0, self.left);
+            return FindResult::new_missing(0, 0);
         }
 
         let mut last_left = self.left;
@@ -60,7 +64,6 @@ impl Query<RichTreeTrait> for IndexFinder {
             let cache_len = match self.index_type {
                 IndexType::Utf8 => cache.cache.len,
                 IndexType::Utf16 => cache.cache.utf16_len,
-                IndexType::LineBreak => cache.cache.line_breaks,
             };
             // prefer the end of an element
             if self.left >= cache_len as usize {
@@ -78,7 +81,7 @@ impl Query<RichTreeTrait> for IndexFinder {
     /// should prefer zero len element
     fn find_element(&mut self, _: &Self::QueryArg, elements: &[Elem]) -> generic_btree::FindResult {
         if elements.is_empty() {
-            return FindResult::new_missing(0, self.left);
+            return FindResult::new_missing(0, 0);
         }
 
         let mut last_left = self.left;
@@ -90,13 +93,6 @@ impl Query<RichTreeTrait> for IndexFinder {
                         0
                     } else {
                         cache.utf16_len as usize
-                    }
-                }
-                IndexType::LineBreak => {
-                    if cache.status.is_dead() {
-                        0
-                    } else {
-                        cache.line_breaks as usize
                     }
                 }
             };
@@ -117,6 +113,70 @@ impl Query<RichTreeTrait> for IndexFinder {
             elements.len() - 1,
             reset_left_to_utf8(last_left, self.index_type, elements.last().unwrap()),
         )
+    }
+}
+
+impl Query<RichTreeTrait> for LineStartFinder {
+    type QueryArg = usize;
+
+    fn init(target: &Self::QueryArg) -> Self {
+        LineStartFinder {
+            left: *target,
+            style_calculator: StyleCalculator::default(),
+        }
+    }
+
+    fn find_node(
+        &mut self,
+        _: &Self::QueryArg,
+        child_caches: &[generic_btree::Child<RichTreeTrait>],
+    ) -> generic_btree::FindResult {
+        if self.left == 0 {
+            return FindResult::new_found(0, 0);
+        }
+
+        if child_caches.is_empty() {
+            return FindResult::new_missing(0, 0);
+        }
+
+        for (i, cache) in child_caches.iter().enumerate() {
+            self.style_calculator
+                .apply_node_start(&cache.cache.anchor_set);
+            if self.left > cache.cache.line_breaks as usize {
+                self.left -= cache.cache.line_breaks as usize;
+            } else {
+                return FindResult::new_found(i, self.left);
+            }
+            self.style_calculator
+                .apply_node_end(&cache.cache.anchor_set);
+        }
+
+        FindResult::new_missing(child_caches.len() - 1, self.left)
+    }
+
+    fn find_element(&mut self, _: &Self::QueryArg, elements: &[Elem]) -> generic_btree::FindResult {
+        if self.left == 0 {
+            return FindResult::new_found(0, 0);
+        }
+
+        if elements.is_empty() {
+            return FindResult::new_missing(0, 0);
+        }
+
+        for (i, cache) in elements.iter().enumerate() {
+            self.style_calculator.apply_start(&cache.anchor_set);
+            if !cache.is_dead() && self.left > cache.line_breaks as usize {
+                self.left -= cache.line_breaks as usize;
+            } else {
+                return FindResult::new_found(
+                    i,
+                    line_start_to_utf8(&cache.string, self.left).unwrap(),
+                );
+            }
+            self.style_calculator.apply_end(&cache.anchor_set);
+        }
+
+        FindResult::new_missing(elements.len() - 1, elements.last().unwrap().atom_len())
     }
 }
 
@@ -148,7 +208,6 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
             let cache_len = match self.index_type {
                 IndexType::Utf8 => cache.cache.len,
                 IndexType::Utf16 => cache.cache.utf16_len,
-                IndexType::LineBreak => cache.cache.line_breaks,
             };
             self.style_calculator
                 .apply_node_start(&cache.cache.anchor_set);
@@ -182,13 +241,6 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                         0
                     } else {
                         cache.utf16_len as usize
-                    }
-                }
-                IndexType::LineBreak => {
-                    if cache.status.is_dead() {
-                        0
-                    } else {
-                        cache.line_breaks as usize
                     }
                 }
             };
@@ -227,14 +279,6 @@ fn reset_left_to_utf8(left: usize, index_type: IndexType, element: &Elem) -> usi
             }
 
             utf16_to_utf8(&element.string, left)
-        }
-        IndexType::LineBreak => {
-            assert!(element.line_breaks as usize >= left);
-            if element.line_breaks as usize == left {
-                return element.atom_len();
-            }
-
-            line_breaks_to_utf8(&element.string, left)
         }
     }
 }

@@ -3,6 +3,8 @@ use crate::{test_utils::AnnotationType, InternalString};
 use super::*;
 use arbitrary::Arbitrary;
 
+pub mod line_breaks;
+
 pub struct Actor {
     text: RichText,
 }
