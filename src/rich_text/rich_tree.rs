@@ -59,12 +59,13 @@ impl std::fmt::Debug for Elem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Elem")
             .field("id", &self.id)
-            .field("left", &self.left)
-            .field("right", &self.right)
+            // .field("left", &self.left)
+            // .field("right", &self.right)
             .field("string", &std::str::from_utf8(&self.string))
+            .field("line_breaks", &self.line_breaks)
             .field("utf16_len", &self.utf16_len)
-            .field("status", &self.status)
-            .field("anchor_set", &self.anchor_set)
+            .field("dead", &self.status.is_dead())
+            // .field("anchor_set", &self.anchor_set)
             .finish()
     }
 }
@@ -313,6 +314,7 @@ impl Mergeable for Elem {
     fn merge_right(&mut self, rhs: &Self) {
         self.string.try_merge(&rhs.string).unwrap();
         self.utf16_len += rhs.utf16_len;
+        self.line_breaks += rhs.line_breaks;
         self.anchor_set.merge_right(&rhs.anchor_set);
     }
 
@@ -323,6 +325,7 @@ impl Mergeable for Elem {
         string.try_merge(&self.string).unwrap();
         self.string = string;
         self.utf16_len += lhs.utf16_len;
+        self.line_breaks += lhs.line_breaks;
         self.anchor_set.merge_left(&lhs.anchor_set);
     }
 }
@@ -445,8 +448,8 @@ impl Cache {
     fn apply_diff(&mut self, diff: &CacheDiff) {
         self.len = (self.len as isize + diff.len_diff) as u32;
         self.utf16_len = (self.utf16_len as isize + diff.utf16_len_diff) as u32;
-        self.anchor_set.apply_diff(&diff.anchor_diff);
         self.line_breaks = (self.line_breaks as isize + diff.line_break_diff) as u32;
+        self.anchor_set.apply_diff(&diff.anchor_diff);
     }
 }
 

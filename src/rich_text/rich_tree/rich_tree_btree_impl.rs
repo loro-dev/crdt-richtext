@@ -45,6 +45,7 @@ impl BTreeTrait for RichTreeTrait {
 
                 cache.len = len;
                 cache.utf16_len = utf16_len;
+                cache.line_breaks = line_breaks;
                 Some(diff)
             }
         }
@@ -83,6 +84,7 @@ impl BTreeTrait for RichTreeTrait {
                 };
                 cache.len = len as u32;
                 cache.utf16_len = utf16_len;
+                cache.line_breaks = line_breaks;
                 diff
             }
         }
@@ -92,6 +94,7 @@ impl BTreeTrait for RichTreeTrait {
         diff1.anchor_diff.merge(&diff2.anchor_diff);
         diff1.len_diff += diff2.len_diff;
         diff1.utf16_len_diff += diff2.utf16_len_diff;
+        diff1.line_break_diff += diff2.line_break_diff;
     }
 
     fn insert(

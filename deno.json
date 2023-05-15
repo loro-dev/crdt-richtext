@@ -2,7 +2,8 @@
   "tasks": {
     "test": "RUST_BACKTRACE=full cargo nextest run --features test",
     "test_log": "RUST_BACKTRACE=full NEXTEST_FAILURE_OUTPUT=immediate cargo nextest run --features test",
-    "fuzz": "cargo fuzz run rich-text",
+    "fuzz": "cargo fuzz run rich-text-utf16",
+    "fuzz-match": "cargo fuzz run rich-text-match",
     "flame": "CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --example bench -- automerge",
     "example-encode": "cargo run --example bench -- encode",
     "bench": "cargo bench"

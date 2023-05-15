@@ -85,11 +85,13 @@ impl RichText {
 
     #[inline]
     pub fn insert_utf16(&mut self, index: usize, string: &str) {
+        assert!(index <= self.utf16_len());
         self.insert_inner(index, string, IndexType::Utf16);
     }
 
     #[inline]
     pub fn insert(&mut self, index: usize, string: &str) {
+        assert!(index <= self.len());
         self.insert_inner(index, string, IndexType::Utf8);
     }
 
@@ -286,13 +288,14 @@ impl RichText {
         let end = match range.end_bound() {
             Bound::Included(end) => *end + 1,
             Bound::Excluded(end) => *end,
-            Bound::Unbounded => self.len(),
+            Bound::Unbounded => self.len_with(index_type),
         };
 
         if start == end {
             return;
         }
 
+        assert!(end <= self.len_with(index_type));
         let start_result = self.content.query::<IndexFinder>(&(start, index_type));
         let end_result = self.content.query::<IndexFinder>(&(end, index_type));
         let mut deleted = SmallVec::<[(OpID, usize); 4]>::new();
@@ -395,6 +398,7 @@ impl RichText {
                                 }
                                 len_diff += diff.unwrap().0;
                                 utf16_len_diff += diff.unwrap().1;
+                                line_break_diff += diff.unwrap().2;
                             }
                             start_idx + 1
                         }
@@ -406,6 +410,7 @@ impl RichText {
                     let diff = delete_fn(elem);
                     len_diff += diff.0;
                     utf16_len_diff += diff.1;
+                    line_break_diff += diff.2;
                 }
 
                 let begin = start.saturating_sub(2);

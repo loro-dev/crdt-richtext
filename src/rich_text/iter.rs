@@ -65,8 +65,14 @@ impl<'a> Iterator for Iter<'a> {
             }
 
             let mut leaf = self.text.content.get_node(self.cursor.leaf);
+            let mut is_end_leaf = self.end.map_or(false, |end| end.leaf == self.cursor.leaf);
             loop {
                 while self.cursor.elem_index >= leaf.elements().len() {
+                    if is_end_leaf {
+                        self.done = true;
+                        return pending_return;
+                    }
+
                     // index out of range, find next valid leaf node
                     let next = if let Some(next) =
                         self.text.content.next_same_level_node(self.cursor.leaf)
@@ -78,6 +84,7 @@ impl<'a> Iterator for Iter<'a> {
                     };
                     self.cursor.elem_index = 0;
                     self.cursor.leaf = next;
+                    is_end_leaf = self.end.map_or(false, |end| end.leaf == self.cursor.leaf);
                     leaf = self.text.content.get_node(self.cursor.leaf);
                 }
 
@@ -100,7 +107,7 @@ impl<'a> Iterator for Iter<'a> {
             }
 
             let leaf = leaf;
-            let is_end_leaf = self.end.map_or(false, |end| end.leaf == self.cursor.leaf);
+            let is_end_leaf = is_end_leaf;
             let elem = &leaf.elements()[self.cursor.elem_index];
             let is_end_elem = is_end_leaf
                 && self
