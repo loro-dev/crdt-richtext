@@ -29,7 +29,7 @@ use self::{
     encoding::{decode, encode},
     op::{Op, OpStore},
     rich_tree::{
-        query::{IndexFinder, IndexType},
+        query::{IndexFinder, IndexType, LineStartFinder},
         rich_tree_btree_impl::RichTreeTrait,
         CacheDiff, Elem,
     },
@@ -43,7 +43,7 @@ mod id_map;
 mod iter;
 mod op;
 mod rich_tree;
-#[cfg(test)]
+#[cfg(all(test, feature = "test"))]
 mod test;
 #[cfg(feature = "test")]
 pub mod test_utils;
@@ -675,7 +675,6 @@ impl RichText {
         match index_type {
             IndexType::Utf8 => self.content.root_cache().len as usize,
             IndexType::Utf16 => self.content.root_cache().utf16_len as usize,
-            IndexType::LineBreak => self.content.root_cache().line_breaks as usize,
         }
     }
 
@@ -1114,6 +1113,25 @@ impl RichText {
 
             leaf_idx = self.content.next_same_level_node(leaf);
         }
+    }
+
+    pub fn get_line(&self, line: usize) -> Vec<Span> {
+        let (start, finder) = self
+            .content
+            .query_with_finder_return::<LineStartFinder>(&line);
+        if !start.found {
+            return Vec::new();
+        }
+
+        let end = self.content.query::<LineStartFinder>(&(line + 1));
+        let iter = iter::Iter::new_range(
+            self,
+            start,
+            if end.found { Some(end) } else { None },
+            finder.style_calculator,
+        );
+
+        iter.collect()
     }
 }
 

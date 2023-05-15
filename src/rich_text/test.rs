@@ -667,6 +667,29 @@ mod fugue {
     }
 }
 
+mod get_line {
+    use crate::RichText;
+
+    #[test]
+    fn get_line() {
+        let mut text = RichText::new(1);
+        text.insert(0, "Hello\nWorld\n");
+        assert_eq!(&text.get_line(0)[0].text, "Hello\n");
+        assert_eq!(&text.get_line(1)[0].text, "World\n");
+        assert_eq!(&text.get_line(2)[0].text, "");
+        text.insert(0, "\n");
+        assert_eq!(&text.get_line(0)[0].text, "\n");
+        assert_eq!(&text.get_line(1)[0].text, "Hello\n");
+        assert_eq!(&text.get_line(2)[0].text, "World\n");
+        assert_eq!(&text.get_line(3)[0].text, "");
+        text.insert(0, "xxx");
+        assert_eq!(&text.get_line(0)[0].text, "xxx\n");
+        assert_eq!(&text.get_line(1)[0].text, "Hello\n");
+        assert_eq!(&text.get_line(2)[0].text, "World\n");
+        assert_eq!(&text.get_line(3)[0].text, "");
+    }
+}
+
 mod failed_fuzzing_tests {
     use crate::{
         legacy::test::minify_error,

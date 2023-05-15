@@ -1,7 +1,7 @@
-use std::mem::{take};
+use std::{mem::take, ops::Range};
 
 use fxhash::FxHashSet;
-use generic_btree::{rle::Mergeable, ArenaIndex};
+use generic_btree::{rle::Mergeable, ArenaIndex, QueryResult};
 
 use crate::Behavior;
 
@@ -13,8 +13,8 @@ use super::{
 pub struct Iter<'a> {
     text: &'a RichText,
     style_calc: StyleCalculator,
-    leaf: ArenaIndex,
-    index: usize,
+    cursor: QueryResult,
+    end: Option<QueryResult>,
     pending_return: Option<Span>,
     done: bool,
 }
@@ -25,10 +25,31 @@ impl<'a> Iter<'a> {
         Self {
             style_calc: text.init_styles.clone(),
             text,
-            leaf,
-            index: 0,
+            cursor: QueryResult {
+                leaf,
+                elem_index: 0,
+                offset: 0,
+                found: true,
+            },
             pending_return: None,
             done: false,
+            end: None,
+        }
+    }
+
+    pub(crate) fn new_range(
+        text: &'a RichText,
+        start: QueryResult,
+        end: Option<QueryResult>,
+        style: StyleCalculator,
+    ) -> Self {
+        Self {
+            style_calc: style,
+            text,
+            cursor: start,
+            pending_return: None,
+            done: false,
+            end,
         }
     }
 }
@@ -43,38 +64,48 @@ impl<'a> Iterator for Iter<'a> {
                 return pending_return;
             }
 
-            let mut leaf = self.text.content.get_node(self.leaf);
+            let mut leaf = self.text.content.get_node(self.cursor.leaf);
             loop {
-                while self.index >= leaf.elements().len() {
+                while self.cursor.elem_index >= leaf.elements().len() {
                     // index out of range, find next valid leaf node
-                    let next = if let Some(next) = self.text.content.next_same_level_node(self.leaf)
+                    let next = if let Some(next) =
+                        self.text.content.next_same_level_node(self.cursor.leaf)
                     {
                         next
                     } else {
                         self.done = true;
                         return pending_return;
                     };
-                    self.index = 0;
-                    self.leaf = next;
-                    leaf = self.text.content.get_node(self.leaf);
+                    self.cursor.elem_index = 0;
+                    self.cursor.leaf = next;
+                    leaf = self.text.content.get_node(self.cursor.leaf);
                 }
 
                 let elements = leaf.elements();
 
                 // skip zero len (deleted) elements
-                while self.index < elements.len() && elements[self.index].content_len() == 0 {
+                while self.cursor.elem_index < elements.len()
+                    && elements[self.cursor.elem_index].content_len() == 0
+                {
                     self.style_calc
-                        .apply_start(&elements[self.index].anchor_set);
-                    self.style_calc.apply_end(&elements[self.index].anchor_set);
-                    self.index += 1;
+                        .apply_start(&elements[self.cursor.elem_index].anchor_set);
+                    self.style_calc
+                        .apply_end(&elements[self.cursor.elem_index].anchor_set);
+                    self.cursor.elem_index += 1;
                 }
 
-                if self.index < elements.len() {
+                if self.cursor.elem_index < elements.len() {
                     break;
                 }
             }
 
-            let elem = &leaf.elements()[self.index];
+            let leaf = leaf;
+            let is_end_leaf = self.end.map_or(false, |end| end.leaf == self.cursor.leaf);
+            let elem = &leaf.elements()[self.cursor.elem_index];
+            let is_end_elem = is_end_leaf
+                && self
+                    .end
+                    .map_or(false, |end| end.elem_index == self.cursor.elem_index);
             self.style_calc.apply_start(&elem.anchor_set);
             let annotations: FxHashSet<_> = self
                 .style_calc
@@ -89,11 +120,24 @@ impl<'a> Iterator for Iter<'a> {
                 })
                 .collect();
             self.style_calc.apply_end(&elem.anchor_set);
-            self.index += 1;
+            self.cursor.elem_index += 1;
             let ans = Span {
-                text: std::str::from_utf8(&elem.string).unwrap().to_string(),
+                text: if is_end_elem {
+                    std::str::from_utf8(&elem.string[self.cursor.offset..self.end.unwrap().offset])
+                        .unwrap()
+                        .to_string()
+                } else {
+                    std::str::from_utf8(&elem.string[self.cursor.offset..])
+                        .unwrap()
+                        .to_string()
+                },
                 annotations,
             };
+
+            self.cursor.offset = 0;
+            if is_end_elem {
+                self.done = true;
+            }
 
             if let Some(mut pending) = pending_return {
                 if pending.can_merge(&ans) {
