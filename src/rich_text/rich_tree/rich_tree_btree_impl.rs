@@ -26,10 +26,12 @@ impl BTreeTrait for RichTreeTrait {
             None => {
                 let mut len = 0;
                 let mut utf16_len = 0;
+                let mut line_breaks = 0;
                 let mut anchor_set = CacheAnchorSet::default();
                 for child in caches.iter() {
                     len += child.cache.len;
                     utf16_len += child.cache.utf16_len;
+                    line_breaks += child.cache.line_breaks;
                     anchor_set.union_(&child.cache.anchor_set);
                 }
 
@@ -38,6 +40,7 @@ impl BTreeTrait for RichTreeTrait {
                     anchor_diff,
                     len_diff: len as isize - cache.len as isize,
                     utf16_len_diff: utf16_len as isize - cache.utf16_len as isize,
+                    line_break_diff: line_breaks as isize - cache.line_breaks as isize,
                 };
 
                 cache.len = len;
@@ -60,11 +63,13 @@ impl BTreeTrait for RichTreeTrait {
             None => {
                 let mut len = 0;
                 let mut utf16_len = 0;
+                let mut line_breaks = 0;
                 let mut anchor_set = CacheAnchorSet::default();
                 for child in caches.iter() {
                     if !child.is_dead() {
                         len += child.string.len();
                         utf16_len += child.utf16_len;
+                        line_breaks += child.line_breaks;
                     }
                     anchor_set.union_elem_set(&child.anchor_set);
                 }
@@ -74,6 +79,7 @@ impl BTreeTrait for RichTreeTrait {
                     anchor_diff,
                     len_diff: len as isize - cache.len as isize,
                     utf16_len_diff: utf16_len as isize - cache.utf16_len as isize,
+                    line_break_diff: line_breaks as isize - cache.line_breaks as isize,
                 };
                 cache.len = len as u32;
                 cache.utf16_len = utf16_len;

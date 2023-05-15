@@ -15,7 +15,11 @@ use generic_btree::{
 use smallvec::SmallVec;
 
 use crate::{
-    rich_text::{ann::insert_anchors_at_same_elem, op::OpContent, rich_tree::utf16::get_utf16_len},
+    rich_text::{
+        ann::insert_anchors_at_same_elem,
+        op::OpContent,
+        rich_tree::utf16::{get_utf16_len_and_line_breaks, Utf16LenAndLineBreaks},
+    },
     Anchor, AnchorType, Annotation, ClientID, Counter, IdSpan, OpID, Style,
 };
 
@@ -111,9 +115,11 @@ impl RichText {
         let start = self.bytes.len();
         self.bytes.push_str(string);
         let slice = self.bytes.slice(start..);
+        let Utf16LenAndLineBreaks { utf16, line_breaks } = get_utf16_len_and_line_breaks(&slice);
         let cache_diff = Some(CacheDiff::new_len_diff(
             string.len() as isize,
-            get_utf16_len(&slice) as isize,
+            utf16 as isize,
+            line_breaks as isize,
         ));
         let id = self.next_id();
         if index == 0 {
@@ -295,9 +301,13 @@ impl RichText {
         let mut delete_fn = |elem: &mut Elem| {
             if elem.local_delete() {
                 deleted.push((elem.id, elem.rle_len()));
-                (-(elem.rle_len() as isize), -(elem.utf16_len as isize))
+                (
+                    -(elem.rle_len() as isize),
+                    -(elem.utf16_len as isize),
+                    -(elem.line_breaks as isize),
+                )
             } else {
-                (0, 0)
+                (0, 0, 0)
             }
         };
         self.content.update_with_filter(
@@ -319,7 +329,7 @@ impl RichText {
 
                         let (additions, diff) =
                             elem.update(start_offset, end_offset, &mut delete_fn);
-                        let (len_diff, utf16_len_diff) = diff.unwrap();
+                        let (len_diff, utf16_len_diff, line_break_diff) = diff.unwrap();
                         if !additions.is_empty() {
                             let len = additions.len();
                             slice
@@ -334,7 +344,11 @@ impl RichText {
 
                         return (
                             true,
-                            Some(CacheDiff::new_len_diff(len_diff, utf16_len_diff)),
+                            Some(CacheDiff::new_len_diff(
+                                len_diff,
+                                utf16_len_diff,
+                                line_break_diff,
+                            )),
                         );
                     }
                     _ => {}
@@ -342,6 +356,7 @@ impl RichText {
 
                 let mut len_diff = 0;
                 let mut utf16_len_diff = 0;
+                let mut line_break_diff = 0;
                 let mut end = match slice.end {
                     Some((end_idx, end_offset)) => {
                         if end_offset == 0 {
@@ -355,6 +370,7 @@ impl RichText {
                                 }
                                 len_diff += diff.unwrap().0;
                                 utf16_len_diff += diff.unwrap().1;
+                                line_break_diff += diff.unwrap().2;
                             }
                             end_idx + 1
                         }
@@ -396,17 +412,19 @@ impl RichText {
                 Elem::try_merge_arr(slice.elements, begin, end + 2 - begin);
                 (
                     true,
-                    Some(CacheDiff::new_len_diff(len_diff, utf16_len_diff)),
+                    Some(CacheDiff::new_len_diff(
+                        len_diff,
+                        utf16_len_diff,
+                        line_break_diff,
+                    )),
                 )
             },
             &|cache| cache.len > 0,
         );
 
         for (start, len) in deleted {
-            let op = self
-                .store
+            self.store
                 .insert_local(OpContent::new_delete(start, len as i32));
-            // self.cursor_map.register_del(op);
         }
     }
 
@@ -546,8 +564,7 @@ impl RichText {
         }
 
         // register op to store
-        let op = self.store.insert_local(OpContent::new_ann(ann));
-        // self.cursor_map.register_ann(op);
+        self.store.insert_local(OpContent::new_ann(ann));
     }
 
     fn annotate_given_range(
@@ -658,6 +675,7 @@ impl RichText {
         match index_type {
             IndexType::Utf8 => self.content.root_cache().len as usize,
             IndexType::Utf16 => self.content.root_cache().utf16_len as usize,
+            IndexType::LineBreak => self.content.root_cache().line_breaks as usize,
         }
     }
 

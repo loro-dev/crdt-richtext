@@ -9,7 +9,10 @@ use std::{
     str::Chars,
 };
 
-use self::{rich_tree_btree_impl::RichTreeTrait, utf16::get_utf16_len};
+use self::{
+    rich_tree_btree_impl::RichTreeTrait,
+    utf16::{get_utf16_len_and_line_breaks, Utf16LenAndLineBreaks},
+};
 
 use super::ann::{AnchorSetDiff, CacheAnchorSet, ElemAnchorSet};
 
@@ -30,6 +33,10 @@ pub struct ElemInner {
     pub right: Option<OpID>,
     pub string: BytesSlice,
     pub utf16_len: u32,
+    /**
+     * number of '\n'
+     */
+    pub line_breaks: u32,
     pub status: Status,
     pub anchor_set: ElemAnchorSet,
 }
@@ -64,13 +71,15 @@ impl std::fmt::Debug for Elem {
 
 impl Elem {
     pub fn new(id: OpID, left: Option<OpID>, right: Option<OpID>, string: BytesSlice) -> Self {
+        let Utf16LenAndLineBreaks { utf16, line_breaks } = get_utf16_len_and_line_breaks(&string);
         Elem {
             inner: Box::new(ElemInner {
                 id,
                 left,
                 right,
-                utf16_len: get_utf16_len(&string),
+                utf16_len: utf16,
                 string,
+                line_breaks,
                 status: Status::ALIVE,
                 anchor_set: Default::default(),
             }),
@@ -107,7 +116,7 @@ impl Elem {
         assert!(offset != 0);
         let start = offset;
         let s = self.string.slice_clone(offset..);
-        let utf16_len = get_utf16_len(&s);
+        let Utf16LenAndLineBreaks { utf16, line_breaks } = get_utf16_len_and_line_breaks(&s);
         let right = Self {
             inner: Box::new(ElemInner {
                 anchor_set: self.anchor_set.split(),
@@ -115,11 +124,13 @@ impl Elem {
                 left: Some(self.id.inc(start as Counter - 1)),
                 right: self.right,
                 string: s,
-                utf16_len,
+                utf16_len: utf16,
                 status: self.status,
+                line_breaks,
             }),
         };
-        self.utf16_len -= utf16_len;
+        self.utf16_len -= utf16;
+        self.line_breaks -= line_breaks;
         self.string = self.string.slice_clone(..offset);
         right
     }
@@ -232,7 +243,9 @@ impl Elem {
 
     pub fn merge_slice(&mut self, s: &BytesSlice) {
         self.string.try_merge(s).unwrap();
-        self.utf16_len += get_utf16_len(s);
+        let Utf16LenAndLineBreaks { utf16, line_breaks } = get_utf16_len_and_line_breaks(s);
+        self.utf16_len += utf16;
+        self.line_breaks += line_breaks;
     }
 
     pub fn contains_id(&self, id: OpID) -> bool {
@@ -333,7 +346,7 @@ impl Sliceable for Elem {
             std::ops::Bound::Unbounded => self.atom_len(),
         };
         let s = self.string.slice_clone(range);
-        let utf16_len = get_utf16_len(&s);
+        let Utf16LenAndLineBreaks { utf16, line_breaks } = get_utf16_len_and_line_breaks(&s);
         Self {
             inner: Box::new(ElemInner {
                 anchor_set: self.anchor_set.trim(start != 0, end != self.rle_len()),
@@ -345,7 +358,8 @@ impl Sliceable for Elem {
                 },
                 right: self.right,
                 string: s,
-                utf16_len,
+                utf16_len: utf16,
+                line_breaks,
                 status: self.status,
             }),
         }
@@ -379,7 +393,10 @@ impl Sliceable for Elem {
             Some(self.id.inc(start as Counter - 1))
         };
         self.string = self.string.slice_clone(range);
-        self.utf16_len = get_utf16_len(&self.string);
+        let Utf16LenAndLineBreaks { utf16, line_breaks } =
+            get_utf16_len_and_line_breaks(&self.string);
+        self.utf16_len = utf16;
+        self.line_breaks = line_breaks;
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -413,6 +430,7 @@ pub(crate) struct Cache {
     pub len: u32,
     pub utf16_len: u32,
     pub anchor_set: CacheAnchorSet,
+    pub line_breaks: u32,
 }
 
 #[derive(Default, Debug)]
@@ -420,6 +438,7 @@ pub(crate) struct CacheDiff {
     pub(super) anchor_diff: AnchorSetDiff,
     pub(super) len_diff: isize,
     pub(super) utf16_len_diff: isize,
+    pub(super) line_break_diff: isize,
 }
 
 impl Cache {
@@ -427,15 +446,17 @@ impl Cache {
         self.len = (self.len as isize + diff.len_diff) as u32;
         self.utf16_len = (self.utf16_len as isize + diff.utf16_len_diff) as u32;
         self.anchor_set.apply_diff(&diff.anchor_diff);
+        self.line_breaks = (self.line_breaks as isize + diff.line_break_diff) as u32;
     }
 }
 
 impl CacheDiff {
-    pub fn new_len_diff(diff: isize, utf16_len_diff: isize) -> CacheDiff {
+    pub fn new_len_diff(diff: isize, utf16_len_diff: isize, line_break_diff: isize) -> CacheDiff {
         CacheDiff {
             len_diff: diff,
             utf16_len_diff,
             anchor_diff: Default::default(),
+            line_break_diff,
         }
     }
 }
