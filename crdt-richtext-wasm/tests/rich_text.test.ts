@@ -84,3 +84,38 @@ describe("get line", () => {
     expect(text.getLine(4).length).toBe(0);
   });
 });
+
+describe("Observable", () => {
+  it("basic", () => {
+    const text = new RichText(BigInt(1));
+    let s = "";
+    text.observe((event) => {
+      let index = 0;
+      event.ops.forEach((op: any) => {
+        if (op.insert) {
+          s = s.slice(0, index) + op.insert + s.slice(index);
+          index += op.insert.length;
+        } else if (op.delete) {
+          s = s.slice(0, index) + s.slice(index + op.delete);
+        } else {
+          index += op.retain;
+        }
+      });
+    });
+
+    text.insert(0, "xxx");
+    const b = new RichText(BigInt(2));
+    b.insert(0, "你好，\n世界！");
+    b.insert(1, "你");
+    b.insert(0, "k");
+    text.import(b.export(new Uint8Array()));
+    text.delete(1, 4);
+    b.import(text.export(new Uint8Array()));
+    expect(s).toBe(text.toString());
+    b.annotate({ start: 0, end: 5 }, "bold", 1);
+    b.insert(0, "你好，\n世界！");
+    text.import(b.export(new Uint8Array()));
+    expect(s).toBe(text.toString());
+    expect(s).toBe(b.toString());
+  });
+});

@@ -1,7 +1,9 @@
-use std::{ops::Deref, panic};
+use std::panic;
 
-use crdt_richtext::{rich_text::RichText as RichTextInner, Behavior, Style};
-use js_sys::{Object, Reflect};
+use crdt_richtext::{
+    rich_text::{IndexType, RichText as RichTextInner},
+    Behavior, Style,
+};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -28,9 +30,20 @@ struct AnnRange {
 impl RichText {
     #[wasm_bindgen(constructor)]
     pub fn new(id: u64) -> Self {
-        Self {
-            inner: RichTextInner::new(id),
-        }
+        let mut text = RichTextInner::new(id);
+        text.set_event_index_type(IndexType::Utf16);
+        Self { inner: text }
+    }
+
+    #[wasm_bindgen(skip_typescript)]
+    pub fn observe(&mut self, f: js_sys::Function) {
+        self.inner.observe(Box::new(move |event| {
+            f.call1(
+                &JsValue::NULL,
+                &serde_wasm_bindgen::to_value(event).unwrap(),
+            )
+            .unwrap();
+        }));
     }
 
     pub fn insert(&mut self, index: usize, text: &str) -> Result<(), JsError> {
@@ -218,10 +231,28 @@ export type AnnRange = {
   start: number,
   end: number,
 }
+
 export interface Span {
     insert: string, 
     attributions: Map<string, any>,
 }
+
+export type DeltaItem = {
+    retain: number,
+    attributes?: Map<string, any>,
+} | {
+    insert: string,
+    attributes?: Map<string, any>,
+} | {
+    delete: number,
+};
+
+export interface Event {
+    ops: DeltaItem[], 
+    is_local: boolean,
+    index_type: "Utf8" | "Utf16",
+}
+
 export interface RichText {
   getAnnSpans(): Span[];
   getLine(line: number): Span[];
@@ -229,10 +260,11 @@ export interface RichText {
     range: AnnRange,
     ann_name: string,
     value: null|boolean|number|string|object,
-  )
+  );
   eraseAnn(
     range: AnnRange,
     ann_name: string,
-  )
+  );
+  observe(cb: (event: Event) => void): void;
 }
 "#;
