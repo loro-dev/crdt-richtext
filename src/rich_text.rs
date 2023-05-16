@@ -18,27 +18,36 @@ use crate::{
     rich_text::{
         ann::insert_anchors_at_same_elem,
         op::OpContent,
-        rich_tree::utf16::{get_utf16_len_and_line_breaks, Utf16LenAndLineBreaks},
+        rich_tree::utf16::{bytes_to_str, get_utf16_len_and_line_breaks, Utf16LenAndLineBreaks},
     },
     Anchor, AnchorType, Annotation, ClientID, Counter, IdSpan, OpID, Style,
 };
 
 use self::{
-    ann::{insert_anchor_to_char, AnchorSetDiff, AnnIdx, AnnManager, Span, StyleCalculator},
+    ann::{insert_anchor_to_char, AnchorSetDiff, AnnIdx, AnnManager, StyleCalculator},
     cursor::CursorMap,
+    delta::{compose, DeltaItem},
     encoding::{decode, encode},
     op::{Op, OpStore},
     rich_tree::{
         query::{IndexFinder, IndexType, LineStartFinder},
         rich_tree_btree_impl::RichTreeTrait,
+        utf16::{get_utf16_len, utf16_to_utf8},
         CacheDiff, Elem,
     },
     vv::VersionVector,
 };
 
+pub use ann::Span;
+pub use error::Error;
+pub use event::Event;
+
 mod ann;
 mod cursor;
+mod delta;
 mod encoding;
+mod error;
+mod event;
 mod id_map;
 mod iter;
 mod op;
@@ -48,6 +57,8 @@ mod test;
 #[cfg(feature = "test")]
 pub mod test_utils;
 pub mod vv;
+
+type Listener = Box<dyn FnMut(&Event)>;
 
 pub struct RichText {
     bytes: AppendOnlyBytes,
@@ -59,6 +70,8 @@ pub struct RichText {
     /// this is the styles starting from the very beginning,
     /// which have start anchor of None
     init_styles: StyleCalculator,
+    listeners: Vec<Listener>,
+    event_index_type: IndexType,
 }
 
 impl RichText {
@@ -75,6 +88,28 @@ impl RichText {
             pending_ops: Default::default(),
             ann: AnnManager::new(),
             init_styles: StyleCalculator::default(),
+            listeners: Vec::new(),
+            event_index_type: IndexType::Utf8,
+        }
+    }
+
+    pub fn set_event_index_type(&mut self, index_type: IndexType) {
+        self.event_index_type = index_type;
+    }
+
+    pub fn observe(&mut self, listener: Listener) {
+        self.listeners.push(listener);
+    }
+
+    #[inline(always)]
+    fn has_listener(&self) -> bool {
+        !self.listeners.is_empty()
+    }
+
+    fn emit(&mut self, event: Event) {
+        debug_log::debug_dbg!(&event);
+        for listener in &mut self.listeners {
+            listener(&event);
         }
     }
 
@@ -136,76 +171,87 @@ impl RichText {
                 .insert_local(OpContent::new_insert(None, right_origin, slice.clone()));
             self.content
                 .prepend(Elem::new(id, None, right_origin, slice));
-            return;
-        }
-
-        // need to find left op id
-        let path = self.find_ideal_insert_pos(index, index_type);
-        let left;
-        let right;
-        let op_slice = slice.clone();
-        {
-            // find left and right
-            let mut node = self.content.get_node(path.leaf);
-            let offset = path.offset;
-            let index = path.elem_index;
-            if offset != 0 {
-                left = Some(node.elements()[index].id.inc((offset - 1) as u32));
-            } else {
-                left = Some(node.elements()[index - 1].id_last());
-            }
-            if offset < node.elements()[index].rle_len() {
-                right = Some(node.elements()[index].id.inc(offset as u32));
-            } else if index + 1 < node.elements().len() {
-                right = Some(node.elements()[index + 1].id);
-            } else if let Some(next) = self.content.next_same_level_node(path.leaf) {
-                node = self.content.get_node(next);
-                right = Some(node.elements()[0].id);
-            } else {
-                right = None;
-            }
-        }
-
-        self.content.update_leaf(path.leaf, |elements| {
-            // insert new element
-            debug_assert!(path.elem_index < elements.len());
-            let mut offset = path.offset;
-            let mut index = path.elem_index;
-            if offset == 0 {
-                // ensure not at the beginning of an element
-                assert!(index > 0);
-                index -= 1;
-                offset = elements[index].rle_len();
+        } else {
+            // need to find left op id
+            let path = self.find_ideal_insert_pos(index, index_type);
+            let left;
+            let right;
+            let op_slice = slice.clone();
+            {
+                // find left and right
+                let mut node = self.content.get_node(path.leaf);
+                let offset = path.offset;
+                let index = path.elem_index;
+                if offset != 0 {
+                    left = Some(node.elements()[index].id.inc((offset - 1) as u32));
+                } else {
+                    left = Some(node.elements()[index - 1].id_last());
+                }
+                if offset < node.elements()[index].rle_len() {
+                    right = Some(node.elements()[index].id.inc(offset as u32));
+                } else if index + 1 < node.elements().len() {
+                    right = Some(node.elements()[index + 1].id);
+                } else if let Some(next) = self.content.next_same_level_node(path.leaf) {
+                    node = self.content.get_node(next);
+                    right = Some(node.elements()[0].id);
+                } else {
+                    right = None;
+                }
             }
 
-            if offset == elements[index].rle_len() {
-                if can_merge_new_slice(&elements[index], id, right, &slice) {
-                    // can merge directly
-                    elements[index].merge_slice(&slice);
+            self.content.update_leaf(path.leaf, |elements| {
+                // insert new element
+                debug_assert!(path.elem_index < elements.len());
+                let mut offset = path.offset;
+                let mut index = path.elem_index;
+                if offset == 0 {
+                    // ensure not at the beginning of an element
+                    assert!(index > 0);
+                    index -= 1;
+                    offset = elements[index].rle_len();
+                }
+
+                if offset == elements[index].rle_len() {
+                    if can_merge_new_slice(&elements[index], id, right, &slice) {
+                        // can merge directly
+                        elements[index].merge_slice(&slice);
+                        self.cursor_map
+                            .update(MoveEvent::new_move(path.leaf, &elements[index]));
+                        return (true, cache_diff);
+                    }
+
+                    elements.insert(index + 1, Elem::new(id, left, right, slice));
                     self.cursor_map
-                        .update(MoveEvent::new_move(path.leaf, &elements[index]));
+                        .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
                     return (true, cache_diff);
                 }
 
-                elements.insert(index + 1, Elem::new(id, left, right, slice));
+                // need to split element
+                let right_half = elements[index].split(offset);
+                elements.splice(
+                    index + 1..index + 1,
+                    [Elem::new(id, left, right, slice), right_half],
+                );
                 self.cursor_map
                     .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
-                return (true, cache_diff);
-            }
+                (true, cache_diff)
+            });
 
-            // need to split element
-            let right_half = elements[index].split(offset);
-            elements.splice(
-                index + 1..index + 1,
-                [Elem::new(id, left, right, slice), right_half],
-            );
-            self.cursor_map
-                .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
-            (true, cache_diff)
-        });
+            self.store
+                .insert_local(OpContent::new_insert(left, right, op_slice));
+        }
 
-        self.store
-            .insert_local(OpContent::new_insert(left, right, op_slice));
+        if self.has_listener() {
+            let retain = self.convert_index(index, index_type, self.event_index_type);
+            self.emit(Event {
+                ops: vec![
+                    DeltaItem::retain(retain),
+                    DeltaItem::insert(string.to_owned(), self.event_index_type),
+                ],
+                is_local: true,
+                index_type: self.event_index_type,
+            })
+        }
     }
 
     /// When user insert text at index, there may be tombstones at the given position.
@@ -296,6 +342,19 @@ impl RichText {
         }
 
         assert!(end <= self.len_with(index_type));
+
+        let event = if self.has_listener() {
+            let retain = self.convert_index(start, index_type, self.event_index_type);
+            let end = self.convert_index(end, index_type, self.event_index_type);
+            Some(Event {
+                ops: vec![DeltaItem::retain(retain), DeltaItem::delete(end - retain)],
+                is_local: true,
+                index_type: self.event_index_type,
+            })
+        } else {
+            None
+        };
+
         let start_result = self.content.query::<IndexFinder>(&(start, index_type));
         let end_result = self.content.query::<IndexFinder>(&(end, index_type));
         let mut deleted = SmallVec::<[(OpID, usize); 4]>::new();
@@ -431,6 +490,10 @@ impl RichText {
             self.store
                 .insert_local(OpContent::new_delete(start, len as i32));
         }
+
+        if let Some(event) = event {
+            self.emit(event)
+        }
     }
 
     /// Annotate the given range with style.
@@ -476,6 +539,22 @@ impl RichText {
             return;
         }
 
+        let event = if self.has_listener() {
+            let retain = self.convert_index(start, index_type, self.event_index_type);
+            let end = self.convert_index(inclusive_end + 1, index_type, self.event_index_type);
+            let mut attributes: FxHashMap<_, _> = Default::default();
+            attributes.insert(style.type_.to_string(), style.value.clone());
+            Some(Event {
+                ops: vec![
+                    DeltaItem::retain(retain),
+                    DeltaItem::retain_with_attributes(end - retain, attributes),
+                ],
+                is_local: true,
+                index_type: self.event_index_type,
+            })
+        } else {
+            None
+        };
         inclusive_end = inclusive_end.min(self.len_with(index_type) - 1);
         let start = if style.start_type == AnchorType::Before {
             Some(self.content.query::<IndexFinder>(&(start, index_type)))
@@ -570,6 +649,9 @@ impl RichText {
 
         // register op to store
         self.store.insert_local(OpContent::new_ann(ann));
+        if let Some(event) = event {
+            self.emit(event)
+        }
     }
 
     fn annotate_given_range(
@@ -699,15 +781,23 @@ impl RichText {
         self.import_inner(decode(data));
     }
 
-    fn apply(&mut self, op: Op) {
+    fn apply(&mut self, op: Op) -> Vec<DeltaItem> {
         debug_log::group!("apply op");
+        let mut ans = Vec::new();
+        let has_listener = self.has_listener();
         'apply: {
             match &op.content {
                 OpContent::Ann(ann) => {
                     let ann_idx = self.ann.register(ann.clone());
+                    let mut start = 0;
                     match ann.range.start.id {
                         Some(start_id) => {
                             let cursor = self.find_cursor(start_id);
+                            start = if has_listener {
+                                self.get_index_from_path(cursor, self.event_index_type)
+                            } else {
+                                0
+                            };
                             self.content.update_leaf(cursor.leaf, |elements| {
                                 let index = cursor.elem_index;
                                 let offset = cursor.offset;
@@ -721,14 +811,21 @@ impl RichText {
                                     Some(AnchorSetDiff::from_ann(ann_idx, is_start).into()),
                                 )
                             });
+                            if has_listener {
+                                ans.push(DeltaItem::retain(start));
+                            }
                         }
                         None => {
                             self.init_styles.insert_start(ann_idx);
                         }
                     }
 
+                    let mut end = self.len_with(self.event_index_type);
                     if let Some(end_id) = ann.range.end.id {
                         let cursor = self.find_cursor(end_id);
+                        if has_listener {
+                            end = self.get_index_from_path(cursor, self.event_index_type);
+                        }
                         self.content.update_leaf(cursor.leaf, |elements| {
                             let index = cursor.elem_index;
                             let offset = cursor.offset;
@@ -743,19 +840,48 @@ impl RichText {
                             )
                         });
                     }
+                    if has_listener {
+                        let mut attributes: FxHashMap<_, _> = Default::default();
+                        attributes.insert(ann.type_.to_string(), ann.value.clone());
+                        ans.push(DeltaItem::retain_with_attributes(end - start, attributes));
+                    }
                 }
                 OpContent::Text(text) => {
                     let right = match self.find_right(text, &op) {
                         Some(value) => value,
-                        None => break 'apply,
+                        None => {
+                            // insert to the last
+                            let index = self.len_with(self.event_index_type);
+                            self.content.push(Elem::new(
+                                op.id,
+                                text.left,
+                                text.right,
+                                text.text.clone(),
+                            ));
+                            if has_listener {
+                                ans.push(DeltaItem::retain(index));
+                                ans.push(DeltaItem::insert(
+                                    bytes_to_str(&text.text).to_owned(),
+                                    self.event_index_type,
+                                ));
+                            }
+                            break 'apply;
+                        }
                     };
 
+                    let mut index = 0;
                     if let Some(right) = right {
+                        if has_listener {
+                            index = self.get_index_from_path(right, self.event_index_type);
+                        }
                         self.content.insert_by_query_result(
                             right,
                             Elem::new(op.id, text.left, text.right, text.text.clone()),
                         );
                     } else {
+                        if has_listener {
+                            index = self.len_with(self.event_index_type);
+                        }
                         self.content.push(Elem::new(
                             op.id,
                             text.left,
@@ -763,17 +889,24 @@ impl RichText {
                             text.text.clone(),
                         ));
                     }
+
+                    if has_listener {
+                        ans.push(DeltaItem::retain(index));
+                        ans.push(DeltaItem::insert(
+                            bytes_to_str(&text.text).to_owned(),
+                            self.event_index_type,
+                        ));
+                    }
                 }
                 OpContent::Del(del) => {
                     let del = del.positive();
-                    self.update_elem_in_id_range(del.start, del.len as usize, |elem| {
-                        elem.apply_remote_delete()
-                    })
+                    self.delete_in_id_range(del.start, del.len as usize, &mut ans)
                 }
             }
         }
 
         debug_log::group_end!();
+        ans
     }
 
     fn find_right(&mut self, elt: &op::TextInsertOp, op: &Op) -> Option<Option<QueryResult>> {
@@ -781,9 +914,6 @@ impl RichText {
         // See paper *The Art of the Fugue: Minimizing Interleaving in Collaborative Text Editing*
         let scan_start = self.find_next_cursor_of(elt.left);
         if scan_start.is_none() {
-            // insert to the last
-            self.content
-                .push(Elem::new(op.id, elt.left, elt.right, elt.text.clone()));
             return None;
         }
         let scan_start = scan_start.unwrap();
@@ -943,16 +1073,31 @@ impl RichText {
         // Otherwise, the delete op may be applied before the insert op
         // because of the merges of delete ops.
         let mut deletions = Vec::new();
+        let mut delta = Vec::new();
         for op in all_ops.iter() {
             if let OpContent::Del(_) = &op.content {
                 deletions.push(op.clone());
             } else {
-                self.apply(op.clone());
+                let new_delta = self.apply(op.clone());
+                if self.has_listener() {
+                    delta = compose(delta, new_delta);
+                }
             }
         }
 
         for op in deletions {
-            self.apply(op);
+            let new_delta = self.apply(op);
+            if self.has_listener() {
+                delta = compose(delta, new_delta);
+            }
+        }
+
+        if self.has_listener() {
+            self.emit(Event {
+                ops: delta,
+                is_local: false,
+                index_type: self.event_index_type,
+            })
         }
     }
 
@@ -960,22 +1105,33 @@ impl RichText {
         self.store.vv()
     }
 
-    fn update_elem_in_id_range(
-        &mut self,
-        mut id: OpID,
-        mut len: usize,
-        mut f: impl FnMut(&mut Elem),
-    ) {
+    fn delete_in_id_range(&mut self, mut id: OpID, mut len: usize, ans: &mut Vec<DeltaItem>) {
         // debug_log::group!("update");
         // debug_log::debug_dbg!(id, len);
-        // debug_log::debug_dbg!(&self.content);
+        debug_log::debug_dbg!(&self.content);
         // debug_log::debug_dbg!(&self.cursor_map);
         // debug_log::group_end!();
+        let has_listener = self.has_listener();
         while len > 0 {
             let (insert_leaf, mut leaf_del_len) = self.cursor_map.get_insert(id).unwrap();
             leaf_del_len = leaf_del_len.min(len);
+            // next record retain value
+            let mut retain = if has_listener {
+                self.get_index_from_path(
+                    QueryResult {
+                        leaf: insert_leaf,
+                        elem_index: 0,
+                        offset: 0,
+                        found: true,
+                    },
+                    self.event_index_type,
+                )
+            } else {
+                0
+            };
             let leaf_del_len = leaf_del_len;
             let mut left_len = leaf_del_len;
+            let mut new_delta = Vec::new();
             // Perf: we may optimize this by only update the cache once
             self.content.update_leaf(insert_leaf, |elements| {
                 // dbg!(&elements, leaf_del_len);
@@ -984,6 +1140,8 @@ impl RichText {
                 loop {
                     let elem = &elements[index];
                     if !elem.overlap(id, leaf_del_len) {
+                        let len = elem.content_len_with(self.event_index_type);
+                        retain += len;
                         index += 1;
                         continue;
                     }
@@ -996,7 +1154,20 @@ impl RichText {
                     let end = elem
                         .rle_len()
                         .min((id.counter + leaf_del_len as Counter - elem.id.counter) as usize);
-                    let (new, _) = elements[index].update(offset, end, &mut f);
+                    if has_listener {
+                        let start =
+                            elements[index].slice_len_with(self.event_index_type, 0..offset);
+                        retain += start;
+                        let del_len =
+                            elements[index].slice_len_with(self.event_index_type, offset..end);
+                        let end = elements[index].slice_len_with(self.event_index_type, end..);
+                        new_delta.push(DeltaItem::retain(retain));
+                        new_delta.push(DeltaItem::delete(del_len));
+                        retain = end;
+                    }
+
+                    let (new, _) =
+                        elements[index].update(offset, end, &mut |elem| elem.apply_remote_delete());
                     left_len -= end - offset;
                     if !new.is_empty() {
                         let new_len = new.len();
@@ -1012,6 +1183,8 @@ impl RichText {
                 // TODO: Perf can be optimized by merge the cache diff from f
                 (true, None)
             });
+
+            *ans = compose(ans.clone(), new_delta);
             id.counter += leaf_del_len as Counter;
             len -= leaf_del_len;
         }
@@ -1137,6 +1310,98 @@ impl RichText {
         );
 
         iter.collect()
+    }
+
+    pub fn apply_delta(&mut self, delta: impl Iterator<Item = DeltaItem>, index_type: IndexType) {
+        let mut index = 0;
+        for delta_item in delta {
+            match delta_item {
+                DeltaItem::Retain { retain, attributes } => {
+                    if let Some(attributes) = attributes {
+                        for (key, value) in attributes {
+                            let behavior = if value.is_null() {
+                                crate::Behavior::Delete
+                            } else {
+                                crate::Behavior::Merge
+                            };
+                            self.annotate_inner(
+                                index..index + retain,
+                                Style::new_from_expand(None, key.into(), value, behavior).unwrap(),
+                                index_type,
+                            )
+                        }
+                    }
+
+                    index += retain;
+                }
+                DeltaItem::Insert {
+                    insert, attributes, ..
+                } => {
+                    self.insert_inner(index, &insert, index_type);
+                    let end = match index_type {
+                        IndexType::Utf8 => index + insert.len(),
+                        IndexType::Utf16 => index + get_utf16_len(&insert),
+                    };
+                    if let Some(attributes) = attributes {
+                        for (key, value) in attributes {
+                            let behavior = if value.is_null() {
+                                crate::Behavior::Delete
+                            } else {
+                                crate::Behavior::Merge
+                            };
+                            self.annotate_inner(
+                                index..end,
+                                Style::new_from_expand(None, key.into(), value, behavior).unwrap(),
+                                index_type,
+                            )
+                        }
+                    }
+
+                    index = end;
+                }
+                DeltaItem::Delete { delete } => {
+                    self.delete_inner(index..index + delete, index_type);
+                }
+            }
+        }
+    }
+
+    pub fn convert_index(&self, index: usize, from: IndexType, to: IndexType) -> usize {
+        let path = self.content.query::<IndexFinder>(&(index, from));
+        self.get_index_from_path(path, to)
+    }
+
+    fn get_index_from_path(&self, path: QueryResult, index_type: IndexType) -> usize {
+        let mut count: usize = 0;
+        debug_log::debug_dbg!(path, &self.content);
+        self.content.visit_previous_caches(path, |v| match v {
+            generic_btree::PreviousCache::NodeCache(cache) => {
+                count += match index_type {
+                    IndexType::Utf8 => cache.len,
+                    IndexType::Utf16 => cache.utf16_len,
+                } as usize;
+            }
+            generic_btree::PreviousCache::PrevSiblingElem(elem) => {
+                if !elem.is_dead() {
+                    count += match index_type {
+                        IndexType::Utf8 => elem.content_len(),
+                        IndexType::Utf16 => elem.utf16_len as usize,
+                    };
+                }
+            }
+            generic_btree::PreviousCache::ThisElemAndOffset { elem, offset } => {
+                if !elem.is_dead() {
+                    match index_type {
+                        IndexType::Utf8 => count += utf16_to_utf8(&elem.string, offset),
+                        IndexType::Utf16 => {
+                            count += get_utf16_len_and_line_breaks(&elem.string[..offset]).utf16
+                                as usize;
+                        }
+                    }
+                }
+            }
+        });
+        count
     }
 }
 

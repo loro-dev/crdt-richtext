@@ -21,6 +21,7 @@ use std::{
     sync::Arc,
 };
 
+use rich_text::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use string_cache::DefaultAtom;
@@ -172,6 +173,30 @@ pub struct Style {
 }
 
 impl Style {
+    pub fn new_from_expand(
+        expand: Option<&str>,
+        type_: InternalString,
+        value: Value,
+        behavior: Behavior,
+    ) -> Result<Self, Error> {
+        let (start_type, end_type) = match expand.as_deref() {
+            None => (AnchorType::Before, AnchorType::Before),
+            Some("none") => (AnchorType::Before, AnchorType::After),
+            Some("start") => (AnchorType::After, AnchorType::After),
+            Some("after") => (AnchorType::Before, AnchorType::Before),
+            Some("both") => (AnchorType::After, AnchorType::Before),
+            _ => return Err(Error::InvalidExpand),
+        };
+
+        Ok(Style {
+            start_type,
+            end_type,
+            behavior,
+            type_,
+            value,
+        })
+    }
+
     pub fn new_bold_like(type_: InternalString, value: Value) -> Self {
         Self {
             start_type: AnchorType::Before,

@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use arbitrary::Arbitrary;
 
 use crate::RichText;
@@ -96,11 +98,33 @@ fn apply_to_str(actions: &[Action]) -> String {
 
 pub fn fuzzing_line_break(mut actions: Vec<Action>) {
     let mut rich_text = RichText::new(1);
+    let follower = String::new();
+    let follower_ref = Rc::new(RefCell::new(follower));
+    let follower_bk = Rc::clone(&follower_ref);
+    rich_text.observe(Box::new(move |event| {
+        let mut index = 0;
+        for op in event.ops.iter() {
+            match op {
+                crate::rich_text::delta::DeltaItem::Retain { retain, .. } => {
+                    index += *retain;
+                }
+                crate::rich_text::delta::DeltaItem::Insert { insert, .. } => {
+                    follower_ref.borrow_mut().insert_str(index, insert);
+                    index += insert.len();
+                }
+                crate::rich_text::delta::DeltaItem::Delete { delete } => {
+                    follower_ref.borrow_mut().drain(index..index + *delete);
+                }
+            }
+        }
+    }));
+
     preprocess(&mut actions);
     debug_log::debug_dbg!("actions: {:?}", &actions);
     apply(&mut rich_text, &actions);
     let s = apply_to_str(&actions);
     assert_eq!(rich_text.to_string(), s);
+    assert_eq!(&follower_bk.borrow().as_str(), &s);
     if rich_text.is_empty() {
         assert!(s.is_empty());
         return;
