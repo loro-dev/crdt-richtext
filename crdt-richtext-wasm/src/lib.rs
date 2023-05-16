@@ -1,7 +1,7 @@
-use std::panic;
+use std::{borrow::Borrow, cell::RefCell, panic};
 
 use crdt_richtext::{
-    rich_text::{IndexType, RichText as RichTextInner},
+    rich_text::{DeltaItem, IndexType, RichText as RichTextInner},
     Behavior, Style,
 };
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct RichText {
-    inner: RichTextInner,
+    inner: RefCell<RichTextInner>,
 }
 
 #[wasm_bindgen]
@@ -32,51 +32,49 @@ impl RichText {
     pub fn new(id: u64) -> Self {
         let mut text = RichTextInner::new(id);
         text.set_event_index_type(IndexType::Utf16);
-        Self { inner: text }
+        Self {
+            inner: RefCell::new(text),
+        }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.inner.borrow().id()
     }
 
     #[wasm_bindgen(skip_typescript)]
-    pub fn observe(&mut self, f: js_sys::Function) {
-        self.inner.observe(Box::new(move |event| {
-            f.call1(
-                &JsValue::NULL,
-                &serde_wasm_bindgen::to_value(event).unwrap(),
-            )
-            .unwrap();
+    pub fn observe(&self, f: js_sys::Function) {
+        self.inner.borrow_mut().observe(Box::new(move |event| {
+            let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+            let _ = f.call1(&JsValue::NULL, &event.serialize(&serializer).unwrap());
         }));
     }
 
-    pub fn insert(&mut self, index: usize, text: &str) -> Result<(), JsError> {
+    pub fn insert(&self, index: usize, text: &str) -> Result<(), JsError> {
         if index > self.length() {
             return Err(JsError::new("index out of range"));
         }
 
-        self.inner.insert_utf16(index, text);
+        self.inner.borrow_mut().insert_utf16(index, text);
         Ok(())
     }
 
-    pub fn delete(&mut self, index: usize, length: usize) -> Result<(), JsError> {
+    pub fn delete(&self, index: usize, length: usize) -> Result<(), JsError> {
         if index + length > self.length() {
             return Err(JsError::new("index out of range"));
         }
 
-        self.inner.delete_utf16(index..index + length);
+        self.inner.borrow_mut().delete_utf16(index..index + length);
         Ok(())
     }
 
     #[allow(clippy::inherent_to_string)]
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self) -> String {
-        self.inner.to_string()
+        self.inner.borrow().to_string()
     }
 
     #[wasm_bindgen(skip_typescript)]
-    pub fn annotate(
-        &mut self,
-        range: JsValue,
-        ann_name: &str,
-        value: JsValue,
-    ) -> Result<(), JsError> {
+    pub fn annotate(&self, range: JsValue, ann_name: &str, value: JsValue) -> Result<(), JsError> {
         let range: AnnRange = serde_wasm_bindgen::from_value(range)?;
 
         if range.end > self.length() {
@@ -122,12 +120,14 @@ impl RichText {
             value,
         };
 
-        self.inner.annotate_utf16(range.start..range.end, style);
+        self.inner
+            .borrow_mut()
+            .annotate_utf16(range.start..range.end, style);
         Ok(())
     }
 
     #[wasm_bindgen(js_name = "eraseAnn", skip_typescript)]
-    pub fn erase_ann(&mut self, range: JsValue, ann_name: &str) -> Result<(), JsError> {
+    pub fn erase_ann(&self, range: JsValue, ann_name: &str) -> Result<(), JsError> {
         let range: AnnRange = serde_wasm_bindgen::from_value(range)?;
 
         if range.end > self.length() {
@@ -166,15 +166,18 @@ impl RichText {
             value: serde_json::Value::Null,
         };
 
-        self.inner.annotate_utf16(range.start..range.end, style);
+        self.inner
+            .borrow_mut()
+            .annotate_utf16(range.start..range.end, style);
         Ok(())
     }
 
     #[wasm_bindgen(js_name = "getAnnSpans", skip_typescript)]
     pub fn get_ann_spans(&self) -> Vec<JsValue> {
         let mut ans = Vec::new();
-        for span in self.inner.iter() {
-            ans.push(serde_wasm_bindgen::to_value(&span).unwrap());
+        for span in self.inner.borrow().iter() {
+            let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+            ans.push(span.serialize(&serializer).unwrap());
         }
 
         ans
@@ -183,32 +186,63 @@ impl RichText {
     #[wasm_bindgen(js_name = "getLine", skip_typescript)]
     pub fn get_line(&self, line: usize) -> Vec<JsValue> {
         let mut ans = Vec::new();
-        for span in self.inner.get_line(line) {
-            ans.push(serde_wasm_bindgen::to_value(&span).unwrap());
+        for span in self.inner.borrow().get_line(line) {
+            let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+            ans.push(span.serialize(&serializer).unwrap());
         }
 
         ans
     }
 
+    #[wasm_bindgen(js_name = "sliceString")]
+    pub fn slice_str(&self, start: usize, end: usize) -> String {
+        self.inner.borrow().slice(start..end, IndexType::Utf16)
+    }
+
+    #[wasm_bindgen(js_name = "chatAt")]
+    pub fn char_at(&self, index: usize) -> String {
+        self.inner
+            .borrow()
+            .slice(index..index + 1, IndexType::Utf16)
+    }
+
+    pub fn lines(&self) -> usize {
+        self.inner.borrow().lines()
+    }
+
+    #[wasm_bindgen(js_name = "applyDelta", skip_typescript)]
+    pub fn apply_delta(&self, delta: JsValue) -> Result<(), JsError> {
+        let delta: Vec<DeltaItem> = serde_wasm_bindgen::from_value(delta)?;
+
+        if delta.is_empty() {
+            return Ok(());
+        }
+
+        self.inner
+            .borrow_mut()
+            .apply_delta(delta.into_iter(), IndexType::Utf16);
+        Ok(())
+    }
+
     pub fn version(&self) -> Vec<u8> {
-        self.inner.version().encode()
+        self.inner.borrow().version().encode()
     }
 
     pub fn export(&self, version: &[u8]) -> Vec<u8> {
         if version.is_empty() {
-            self.inner.export(&Default::default())
+            self.inner.borrow().export(&Default::default())
         } else {
             let vv = crdt_richtext::VersionVector::decode(version);
-            self.inner.export(&vv)
+            self.inner.borrow().export(&vv)
         }
     }
 
-    pub fn import(&mut self, data: &[u8]) {
-        self.inner.import(data);
+    pub fn import(&self, data: &[u8]) {
+        self.inner.borrow_mut().import(data);
     }
 
     pub fn length(&self) -> usize {
-        self.inner.len_utf16()
+        self.inner.borrow().len_utf16()
     }
 }
 
@@ -234,17 +268,14 @@ export type AnnRange = {
 
 export interface Span {
     insert: string, 
-    attributions: Map<string, any>,
+    attributes: Record<string, any>,
 }
 
 export type DeltaItem = {
-    retain: number,
-    attributes?: Map<string, any>,
-} | {
-    insert: string,
-    attributes?: Map<string, any>,
-} | {
-    delete: number,
+    retain?: number,
+    insert?: string,
+    delete?: number,
+    attributes?: Record<string, any>,
 };
 
 export interface Event {
@@ -266,5 +297,6 @@ export interface RichText {
     ann_name: string,
   );
   observe(cb: (event: Event) => void): void;
+  applyDelta(delta: DeltaItem[]): void;
 }
 "#;

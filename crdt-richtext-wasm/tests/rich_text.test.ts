@@ -23,8 +23,8 @@ describe("basic ops", () => {
     {
       const spans = text.getAnnSpans();
       expect(spans[0].insert).toBe("1k");
-      expect(spans[0].attributions).toStrictEqual(
-        new Map([["bold", undefined]]),
+      expect(spans[0].attributes).toStrictEqual(
+        { bold: null },
       );
     }
 
@@ -32,7 +32,7 @@ describe("basic ops", () => {
     {
       const spans = text.getAnnSpans();
       expect(spans[0].insert).toBe("1k23");
-      expect(spans[0].attributions.size).toBe(0);
+      expect(Object.keys(spans[0].attributes).length).toBe(0);
     }
   });
 });
@@ -41,6 +41,10 @@ describe("utf16", () => {
   it("insert", () => {
     const text = new RichText(BigInt(1));
     text.insert(0, "你好，世界！");
+    expect(text.chatAt(0)).toBe("你");
+    expect(text.chatAt(1)).toBe("好");
+    expect(text.sliceString(0, 2)).toBe("你好");
+    expect(text.sliceString(3, 5)).toBe("世界");
     text.insert(0, "");
     text.insert(2, "呀");
     expect(text.toString()).toBe("你好呀，世界！");
@@ -48,8 +52,8 @@ describe("utf16", () => {
     const spans = text.getAnnSpans();
     expect(spans.length).toBe(2);
     expect(spans[0].insert).toBe("你好呀");
-    expect(spans[0].attributions.size).toBe(1);
-    expect(spans[0].attributions.has("bold")).toBeTruthy();
+    expect(Object.keys(spans[0].attributes).length).toBe(1);
+    expect("bold" in spans[0].attributes).toBeTruthy();
     expect(spans[1].insert.length).toBe(4);
 
     expect(() => text.annotate({ start: 0, end: 100 }, "bold", null)).toThrow();
@@ -91,14 +95,14 @@ describe("Observable", () => {
     let s = "";
     text.observe((event) => {
       let index = 0;
-      event.ops.forEach((op: any) => {
-        if (op.insert) {
+      event.ops.forEach((op) => {
+        if (op.insert != null) {
           s = s.slice(0, index) + op.insert + s.slice(index);
           index += op.insert.length;
-        } else if (op.delete) {
+        } else if (op.delete != null) {
           s = s.slice(0, index) + s.slice(index + op.delete);
         } else {
-          index += op.retain;
+          index += op.retain!;
         }
       });
     });

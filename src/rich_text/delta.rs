@@ -97,8 +97,16 @@ impl DeltaItem {
     pub fn length(&self) -> usize {
         match self {
             Self::Retain { retain, .. } => *retain,
-            Self::Insert { len, insert, .. } => len.unwrap_or_else(|| get_utf16_len(&insert)),
+            Self::Insert { len, insert, .. } => len.unwrap_or_else(|| get_utf16_len(insert)),
             Self::Delete { delete, .. } => *delete,
+        }
+    }
+
+    pub fn should_remove(&self) -> bool {
+        match self {
+            Self::Retain { retain, .. } => *retain == 0,
+            Self::Insert { .. } => false,
+            Self::Delete { delete, .. } => *delete == 0,
         }
     }
 

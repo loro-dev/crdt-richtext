@@ -26,7 +26,7 @@ use crate::{
 use self::{
     ann::{insert_anchor_to_char, AnchorSetDiff, AnnIdx, AnnManager, StyleCalculator},
     cursor::CursorMap,
-    delta::{compose, DeltaItem},
+    delta::compose,
     encoding::{decode, encode},
     op::{Op, OpStore},
     rich_tree::{
@@ -38,10 +38,11 @@ use self::{
     vv::VersionVector,
 };
 
-pub use rich_tree::query::IndexType;
 pub use ann::Span;
+pub use delta::DeltaItem;
 pub use error::Error;
 pub use event::Event;
+pub use rich_tree::query::IndexType;
 
 mod ann;
 mod cursor;
@@ -94,6 +95,10 @@ impl RichText {
         }
     }
 
+    pub fn id(&self) -> ClientID {
+        self.store.client
+    }
+
     pub fn set_event_index_type(&mut self, index_type: IndexType) {
         self.event_index_type = index_type;
     }
@@ -107,8 +112,9 @@ impl RichText {
         !self.listeners.is_empty()
     }
 
-    fn emit(&mut self, event: Event) {
+    fn emit(&mut self, mut event: Event) {
         debug_log::debug_dbg!(&event);
+        event.ops.retain(|x| !x.should_remove());
         for listener in &mut self.listeners {
             listener(&event);
         }
@@ -1313,12 +1319,51 @@ impl RichText {
         iter.collect()
     }
 
+    pub fn slice(&self, range: impl RangeBounds<usize>, index_type: IndexType) -> String {
+        let start = match range.start_bound() {
+            Bound::Included(&start) => start,
+            Bound::Excluded(&start) => start + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&end) => end + 1,
+            Bound::Excluded(&end) => end,
+            Bound::Unbounded => self.len(),
+        };
+
+        let mut ans = String::with_capacity(end - start);
+        let start = self.content.query::<IndexFinder>(&(start, index_type));
+        let end = self.content.query::<IndexFinder>(&(end, index_type));
+        for span in self.content.iter_range(start..end) {
+            let s = &span.elem.string;
+            ans.push_str(bytes_to_str(
+                &s[span.start.unwrap_or(0)..span.end.unwrap_or(s.len())],
+            ));
+        }
+
+        ans
+    }
+
+    pub fn lines(&self) -> usize {
+        self.content.root_cache().line_breaks as usize + 1
+    }
+
     pub fn apply_delta(&mut self, delta: impl Iterator<Item = DeltaItem>, index_type: IndexType) {
         let mut index = 0;
         for delta_item in delta {
             match delta_item {
                 DeltaItem::Retain { retain, attributes } => {
                     if let Some(attributes) = attributes {
+                        let len = self.len_with(index_type);
+                        // Quill assume there is always line break at the end of the text.
+                        // But crdt-richtext doesn't have this assumption.
+                        // This line break can be formatted by Quill, which might cause out of bound
+                        // error. So we insert a line break if the delta is too short
+                        if index + retain > len {
+                            let new = index + retain - len;
+                            self.insert(self.len(), &"\n".repeat(new));
+                        }
+
                         for (key, value) in attributes {
                             let behavior = if value.is_null() {
                                 crate::Behavior::Delete
