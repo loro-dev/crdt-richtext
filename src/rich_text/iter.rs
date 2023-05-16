@@ -138,7 +138,7 @@ impl<'a> Iterator for Iter<'a> {
                         .unwrap()
                         .to_string()
                 },
-                attributions: annotations,
+                attributes: annotations,
             };
 
             self.cursor.offset = 0;

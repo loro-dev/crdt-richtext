@@ -61,7 +61,7 @@ impl AnnManager {
 pub struct Span {
     // TODO: use byte slice
     pub insert: String,
-    pub attributions: FxHashMap<InternalString, Value>,
+    pub attributes: FxHashMap<InternalString, Value>,
 }
 
 impl Span {
@@ -80,7 +80,7 @@ impl Span {
 
 impl Mergeable for Span {
     fn can_merge(&self, rhs: &Self) -> bool {
-        self.attributions == rhs.attributions
+        self.attributes == rhs.attributes
     }
 
     fn merge_right(&mut self, rhs: &Self) {

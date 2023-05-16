@@ -288,7 +288,7 @@ impl Sliceable for Op {
 
 pub struct OpStore {
     map: FxHashMap<ClientID, Vec<Op>>,
-    client: ClientID,
+    pub(crate) client: ClientID,
     next_lamport: Lamport,
 }
 
