@@ -5,8 +5,24 @@ pub struct Utf16LenAndLineBreaks {
     pub line_breaks: u32,
 }
 
+pub fn get_utf16_len(str: &str) -> usize {
+    if str.is_empty() {
+        return 0;
+    }
+
+    let iter = encode_utf16(str);
+    iter.count()
+}
+
 #[inline(always)]
-pub fn get_utf16_len_and_line_breaks(bytes: &BytesSlice) -> Utf16LenAndLineBreaks {
+pub fn get_utf16_len_and_line_breaks(bytes: &[u8]) -> Utf16LenAndLineBreaks {
+    if bytes.is_empty() {
+        return Utf16LenAndLineBreaks {
+            line_breaks: 0,
+            utf16: 0,
+        };
+    }
+
     let str = bytes_to_str(bytes);
     let mut iter = encode_utf16(str);
     let mut utf16 = 0;
@@ -20,7 +36,7 @@ pub fn get_utf16_len_and_line_breaks(bytes: &BytesSlice) -> Utf16LenAndLineBreak
     }
 }
 
-pub fn utf16_to_utf8(bytes: &BytesSlice, utf16_index: usize) -> usize {
+pub fn utf16_to_utf8(bytes: &[u8], utf16_index: usize) -> usize {
     if utf16_index == 0 {
         return 0;
     }
@@ -60,7 +76,7 @@ pub fn line_start_to_utf8(bytes: &BytesSlice, n: usize) -> Option<usize> {
 }
 
 #[inline(always)]
-fn bytes_to_str(bytes: &BytesSlice) -> &str {
+pub fn bytes_to_str(bytes: &[u8]) -> &str {
     #[allow(unsafe_code)]
     // SAFETY: we are sure the range is valid utf8
     let str = unsafe { std::str::from_utf8_unchecked(&bytes[..]) };

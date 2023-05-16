@@ -729,7 +729,7 @@ mod get_line {
 mod failed_fuzzing_tests {
     use crate::{
         legacy::test::minify_error,
-        rich_text::test_utils::{fuzzing, fuzzing_match_str, Action},
+        rich_text::test_utils::{fuzzing, fuzzing_match_str, fuzzing_utf16, Action},
         test_utils::AnnotationType,
     };
 

@@ -5,11 +5,12 @@ use core::fmt;
 use generic_btree::rle::{HasLength, Mergeable, Sliceable};
 use smallvec::SmallVec;
 use std::{
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, RangeBounds},
     str::Chars,
 };
 
 use self::{
+    query::IndexType,
     rich_tree_btree_impl::RichTreeTrait,
     utf16::{get_utf16_len_and_line_breaks, Utf16LenAndLineBreaks},
 };
@@ -100,6 +101,49 @@ impl Elem {
             0
         } else {
             self.string.len()
+        }
+    }
+
+    pub fn content_len_with(&self, index_type: IndexType) -> usize {
+        if self.status.is_dead() {
+            0
+        } else {
+            match index_type {
+                IndexType::Utf8 => self.string.len(),
+                IndexType::Utf16 => self.utf16_len as usize,
+            }
+        }
+    }
+
+    pub fn slice_len_with(&self, index_type: IndexType, range: impl RangeBounds<usize>) -> usize {
+        if self.status.is_dead() {
+            0
+        } else {
+            let start = match range.start_bound() {
+                std::ops::Bound::Included(&i) => i,
+                std::ops::Bound::Excluded(&i) => i + 1,
+                std::ops::Bound::Unbounded => 0,
+            };
+            let end = match range.end_bound() {
+                std::ops::Bound::Included(&i) => i + 1,
+                std::ops::Bound::Excluded(&i) => i,
+                std::ops::Bound::Unbounded => self.utf16_len as usize,
+            };
+
+            if end == start {
+                return 0;
+            }
+
+            assert!(end > start);
+            match index_type {
+                IndexType::Utf8 => {
+                    assert!(end <= self.atom_len());
+                    end - start
+                }
+                IndexType::Utf16 => {
+                    get_utf16_len_and_line_breaks(&self.string[start..end]).utf16 as usize
+                }
+            }
         }
     }
 

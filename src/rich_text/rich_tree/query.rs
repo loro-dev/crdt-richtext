@@ -1,4 +1,5 @@
 use generic_btree::{BTreeTrait, FindResult, Query};
+use serde::{Deserialize, Serialize};
 
 use crate::rich_text::{
     ann::StyleCalculator,
@@ -7,8 +8,8 @@ use crate::rich_text::{
 
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IndexType {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IndexType {
     Utf8,
     Utf16,
 }

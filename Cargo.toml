@@ -26,7 +26,7 @@ arref = "0.1.0"
 debug-log = "0.1.4"
 heapless = "0.7.16"
 fxhash = "0.2.1"
-generic-btree = { version = "0.3.0" }
+generic-btree = { version = "0.3.1" }
 bitvec = "1.0.1"
 append-only-bytes = { version = "0.1.5", features = ["u32_range"] }
 string_cache = "0.8.6"
@@ -35,6 +35,7 @@ serde_columnar = "0.2.5"
 serde = { version = "1.0.140", features = ["derive"] }
 flate2 = "1.0.25"
 serde_json = "1.0"
+thiserror = "1.0"
 
 [dev-dependencies]
 rand = { version = "0.8.5" }

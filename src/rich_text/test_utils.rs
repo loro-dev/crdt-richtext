@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{test_utils::AnnotationType, InternalString};
 
 use super::*;
@@ -7,7 +9,7 @@ mod fuzz_line_breaks;
 pub use fuzz_line_breaks::{fuzzing_line_break, Action as LineBreakFuzzAction};
 
 pub struct Actor {
-    text: RichText,
+    pub text: RichText,
 }
 
 #[derive(Arbitrary, Clone, Debug, Copy)]
@@ -223,8 +225,36 @@ pub fn fuzzing(actor_num: usize, actions: Vec<Action>) {
 
 pub fn fuzzing_utf16(actor_num: usize, actions: Vec<Action>) {
     let mut actors = vec![];
+    let followers = vec![
+        Rc::new(RefCell::new(String::new())),
+        Rc::new(RefCell::new(String::new())),
+    ];
     for i in 0..actor_num {
-        actors.push(Actor::new(i));
+        if i <= 1 {
+            let mut actor = Actor::new(i);
+            let f = followers[i].clone();
+            actor.text.observe(Box::new(move |event| {
+                let mut index = 0;
+                for op in event.ops.iter() {
+                    match op {
+                        crate::rich_text::delta::DeltaItem::Retain { retain, .. } => {
+                            index += *retain;
+                        }
+                        crate::rich_text::delta::DeltaItem::Insert { insert, .. } => {
+                            f.borrow_mut().insert_str(index, insert);
+                            index += insert.len();
+                        }
+                        crate::rich_text::delta::DeltaItem::Delete { delete } => {
+                            f.borrow_mut().drain(index..index + *delete);
+                        }
+                    }
+                }
+            }));
+
+            actors.push(actor);
+        } else {
+            actors.push(Actor::new(i));
+        }
     }
 
     for mut action in actions {
@@ -244,7 +274,10 @@ pub fn fuzzing_utf16(actor_num: usize, actions: Vec<Action>) {
             debug_log::group!("merge {i}->{j}");
             b.merge(a);
             debug_log::group_end!();
-            assert_eq!(a.text.to_string(), b.text.to_string());
+            assert_eq!(a.text.get_spans(), b.text.get_spans());
+            if i <= 1 {
+                assert_eq!(a.text.to_string(), followers[i].borrow().to_string());
+            }
         }
     }
 }

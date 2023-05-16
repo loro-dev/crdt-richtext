@@ -130,6 +130,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "string_cache",
+ "thiserror",
 ]
 
 [[package]]
@@ -241,9 +242,9 @@ dependencies = [
 
 [[package]]
 name = "generic-btree"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c588f9ff7833f13f571f57c727bb8297461c21218ea11920a9631d22da274f"
+checksum = "ff012c9d64685dc26c5ebac85b7e56a29799646a945239db2d91fc3a597de6d8"
 dependencies = [
  "fxhash",
  "smallvec",
