@@ -62,3 +62,20 @@ describe("utf16", () => {
     expect(text.toString()).toBe("好，世界！x");
   });
 });
+
+describe("get line", () => {
+  it("basic", () => {
+    const text = new RichText(BigInt(1));
+    text.insert(0, "你好，\n世界！");
+    expect(text.getLine(0)[0].text).toBe("你好，\n");
+    expect(text.getLine(1)[0].text).toBe("世界！");
+    expect(text.getLine(2).length).toBe(0);
+    expect(text.getLine(3).length).toBe(0);
+    text.insert(0, "\n");
+    expect(text.getLine(0)[0].text).toBe("\n");
+    expect(text.getLine(1)[0].text).toBe("你好，\n");
+    expect(text.getLine(2)[0].text).toBe("世界！");
+    expect(text.getLine(3).length).toBe(0);
+    expect(text.getLine(4).length).toBe(0);
+  });
+});

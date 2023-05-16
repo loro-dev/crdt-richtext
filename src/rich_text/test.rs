@@ -688,6 +688,15 @@ mod get_line {
         assert_eq!(&text.get_line(2)[0].text, "World\n");
         assert_eq!(&text.get_line(3)[0].text, "");
     }
+
+    #[test]
+    fn utf16() {
+        let mut text = RichText::new(1);
+        text.insert(0, "你好，\nWorld\n");
+        assert_eq!(&text.get_line(0)[0].text, "你好，\n");
+        assert_eq!(&text.get_line(1)[0].text, "World\n");
+        assert_eq!(&text.get_line(2)[0].text, "");
+    }
 }
 
 mod failed_fuzzing_tests {

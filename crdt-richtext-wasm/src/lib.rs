@@ -127,6 +127,24 @@ impl RichText {
         ans
     }
 
+    /// @returns {{text: string, annotations: Set<string>}[]}
+    #[wasm_bindgen(js_name = "getLine", skip_typescript)]
+    pub fn get_line(&self, line: usize) -> Vec<Object> {
+        let mut ans = Vec::new();
+        for span in self.inner.get_line(line) {
+            let obj = js_sys::Object::new();
+            let set = js_sys::Set::new(&JsValue::undefined());
+            for ann in span.annotations {
+                set.add(&ann.deref().into());
+            }
+            js_sys::Reflect::set(&obj, &"text".into(), &span.text.into()).unwrap();
+            js_sys::Reflect::set(&obj, &"annotations".into(), &set).unwrap();
+            ans.push(obj);
+        }
+
+        ans
+    }
+
     pub fn version(&self) -> Vec<u8> {
         self.inner.version().encode()
     }
@@ -162,7 +180,12 @@ pub fn set_panic_hook() {
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_APPEND_CONTENT: &'static str = r#"
+export interface Span {
+    text: string, 
+    annotations: Set<string>,
+}
 export interface RichText {
-  getAnnSpans(): {text: string, annotations: Set<string>}[];
+  getAnnSpans(): Span[];
+  getLine(line: number): Span[];
 }
 "#;
