@@ -52,7 +52,7 @@ fn a(n: u64) -> Annotation {
         },
         behavior: Behavior::Merge,
         type_: DefaultAtom::from(""),
-        meta: None,
+        value: serde_json::Value::Null,
     }
 }
 

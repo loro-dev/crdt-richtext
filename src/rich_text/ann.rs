@@ -1,5 +1,7 @@
 use fxhash::{FxHashMap, FxHashSet};
 use generic_btree::rle::{HasLength, Mergeable};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use smallvec::SmallVec;
 use std::{mem::take, sync::Arc};
 
@@ -55,34 +57,34 @@ impl AnnManager {
 }
 
 /// The annotated text span.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
     // TODO: use byte slice
-    pub text: String,
-    pub annotations: FxHashSet<InternalString>,
+    pub insert: String,
+    pub attributions: FxHashMap<InternalString, Value>,
 }
 
 impl Span {
     pub fn len(&self) -> usize {
-        self.text.len()
+        self.insert.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty()
+        self.insert.is_empty()
     }
 
     pub fn as_str(&self) -> &str {
-        &self.text
+        &self.insert
     }
 }
 
 impl Mergeable for Span {
     fn can_merge(&self, rhs: &Self) -> bool {
-        self.annotations == rhs.annotations
+        self.attributions == rhs.attributions
     }
 
     fn merge_right(&mut self, rhs: &Self) {
-        self.text.push_str(&rhs.text);
+        self.insert.push_str(&rhs.insert);
     }
 
     fn merge_left(&mut self, _left: &Self) {

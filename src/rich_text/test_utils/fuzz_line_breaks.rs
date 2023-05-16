@@ -108,7 +108,7 @@ pub fn fuzzing_line_break(mut actions: Vec<Action>) {
     debug_log::debug_dbg!("{:?}", &s);
     rich_text.debug_log(true);
     for (ln, str) in s.split('\n').enumerate() {
-        assert_eq!(&rich_text.get_line(ln)[0].text.trim(), &str);
+        assert_eq!(&rich_text.get_line(ln)[0].insert.trim(), &str);
     }
 }
 

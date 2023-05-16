@@ -1,7 +1,8 @@
 use std::{ops::Deref, panic};
 
-use crdt_richtext::{rich_text::RichText as RichTextInner, Style};
-use js_sys::Object;
+use crdt_richtext::{rich_text::RichText as RichTextInner, Behavior, Style};
+use js_sys::{Object, Reflect};
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -13,6 +14,14 @@ pub struct RichText {
 pub enum AnnotateType {
     BoldLike,
     LinkLike,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AnnRange {
+    start: usize,
+    end: usize,
+    expand: Option<String>,
+    inclusive: Option<bool>,
 }
 
 #[wasm_bindgen]
@@ -48,98 +57,121 @@ impl RichText {
         self.inner.to_string()
     }
 
+    #[wasm_bindgen(skip_typescript)]
     pub fn annotate(
         &mut self,
-        index: usize,
-        length: usize,
+        range: JsValue,
         ann_name: &str,
-        ann_type: AnnotateType,
+        value: JsValue,
     ) -> Result<(), JsError> {
-        if index + length > self.length() {
+        let range: AnnRange = serde_wasm_bindgen::from_value(range)?;
+
+        if range.end > self.length() {
             return Err(JsError::new("index out of range"));
         }
 
-        let style = match ann_type {
-            AnnotateType::BoldLike => Style {
-                start_type: crdt_richtext::AnchorType::Before,
-                end_type: crdt_richtext::AnchorType::Before,
-                behavior: crdt_richtext::Behavior::Merge,
-                type_: ann_name.into(),
-            },
-            AnnotateType::LinkLike => Style {
-                start_type: crdt_richtext::AnchorType::Before,
-                end_type: crdt_richtext::AnchorType::After,
-                behavior: crdt_richtext::Behavior::Merge,
-                type_: ann_name.into(),
-            },
+        let (start_type, end_type) = match range.expand.as_deref() {
+            None => (
+                crdt_richtext::AnchorType::Before,
+                crdt_richtext::AnchorType::Before,
+            ),
+            Some("none") => (
+                crdt_richtext::AnchorType::Before,
+                crdt_richtext::AnchorType::After,
+            ),
+            Some("start") => (
+                crdt_richtext::AnchorType::After,
+                crdt_richtext::AnchorType::After,
+            ),
+            Some("after") => (
+                crdt_richtext::AnchorType::Before,
+                crdt_richtext::AnchorType::Before,
+            ),
+            Some("both") => (
+                crdt_richtext::AnchorType::After,
+                crdt_richtext::AnchorType::Before,
+            ),
+            _ => return Err(JsError::new("invalid expand value")),
         };
 
-        self.inner.annotate_utf16(index..index + length, style);
+        let inclusive = range.inclusive.unwrap_or(false);
+        let value = serde_wasm_bindgen::from_value(value)?;
+
+        let style = Style {
+            start_type,
+            end_type,
+            behavior: if inclusive {
+                Behavior::Inclusive
+            } else {
+                Behavior::Merge
+            },
+            type_: ann_name.into(),
+            value,
+        };
+
+        self.inner.annotate_utf16(range.start..range.end, style);
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = "eraseAnn")]
-    pub fn erase_ann(
-        &mut self,
-        index: usize,
-        length: usize,
-        ann_name: &str,
-        ann_type: AnnotateType,
-    ) -> Result<(), JsError> {
-        if index + length > self.length() {
+    #[wasm_bindgen(js_name = "eraseAnn", skip_typescript)]
+    pub fn erase_ann(&mut self, range: JsValue, ann_name: &str) -> Result<(), JsError> {
+        let range: AnnRange = serde_wasm_bindgen::from_value(range)?;
+
+        if range.end > self.length() {
             return Err(JsError::new("index out of range"));
         }
 
-        let style = match ann_type {
-            AnnotateType::BoldLike => Style {
-                start_type: crdt_richtext::AnchorType::Before,
-                end_type: crdt_richtext::AnchorType::Before,
-                behavior: crdt_richtext::Behavior::Delete,
-                type_: ann_name.into(),
-            },
-            AnnotateType::LinkLike => Style {
-                start_type: crdt_richtext::AnchorType::Before,
-                end_type: crdt_richtext::AnchorType::After,
-                behavior: crdt_richtext::Behavior::Delete,
-                type_: ann_name.into(),
-            },
+        let (start_type, end_type) = match range.expand.as_deref() {
+            None => (
+                crdt_richtext::AnchorType::Before,
+                crdt_richtext::AnchorType::Before,
+            ),
+            Some("none") => (
+                crdt_richtext::AnchorType::Before,
+                crdt_richtext::AnchorType::After,
+            ),
+            Some("start") => (
+                crdt_richtext::AnchorType::After,
+                crdt_richtext::AnchorType::After,
+            ),
+            Some("after") => (
+                crdt_richtext::AnchorType::Before,
+                crdt_richtext::AnchorType::Before,
+            ),
+            Some("both") => (
+                crdt_richtext::AnchorType::After,
+                crdt_richtext::AnchorType::Before,
+            ),
+            _ => return Err(JsError::new("invalid expand value")),
         };
 
-        self.inner.annotate_utf16(index..index + length, style);
+        let style = Style {
+            start_type,
+            end_type,
+            behavior: Behavior::Delete,
+            type_: ann_name.into(),
+            value: serde_json::Value::Null,
+        };
+
+        self.inner.annotate_utf16(range.start..range.end, style);
         Ok(())
     }
 
-    /// @returns {{text: string, annotations: Set<string>}[]}
     #[wasm_bindgen(js_name = "getAnnSpans", skip_typescript)]
-    pub fn get_ann_spans(&self) -> Vec<Object> {
+    pub fn get_ann_spans(&self) -> Vec<JsValue> {
         let mut ans = Vec::new();
         for span in self.inner.iter() {
-            let obj = js_sys::Object::new();
-            let set = js_sys::Set::new(&JsValue::undefined());
-            for ann in span.annotations {
-                set.add(&ann.deref().into());
-            }
-            js_sys::Reflect::set(&obj, &"text".into(), &span.text.into()).unwrap();
-            js_sys::Reflect::set(&obj, &"annotations".into(), &set).unwrap();
-            ans.push(obj);
+            ans.push(serde_wasm_bindgen::to_value(&span).unwrap());
         }
 
         ans
     }
 
-    /// @returns {{text: string, annotations: Set<string>}[]}
     #[wasm_bindgen(js_name = "getLine", skip_typescript)]
-    pub fn get_line(&self, line: usize) -> Vec<Object> {
+    pub fn get_line(&self, line: usize) -> Vec<JsValue> {
         let mut ans = Vec::new();
         for span in self.inner.get_line(line) {
-            let obj = js_sys::Object::new();
-            let set = js_sys::Set::new(&JsValue::undefined());
-            for ann in span.annotations {
-                set.add(&ann.deref().into());
-            }
-            js_sys::Reflect::set(&obj, &"text".into(), &span.text.into()).unwrap();
-            js_sys::Reflect::set(&obj, &"annotations".into(), &set).unwrap();
-            ans.push(obj);
+            ans.push(serde_wasm_bindgen::to_value(&span).unwrap());
         }
 
         ans
@@ -180,12 +212,27 @@ pub fn set_panic_hook() {
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_APPEND_CONTENT: &'static str = r#"
+export type AnnRange = {
+  expand?: 'before' | 'after' | 'both' | 'none'
+  inclusive?: boolean,
+  start: number,
+  end: number,
+}
 export interface Span {
-    text: string, 
-    annotations: Set<string>,
+    insert: string, 
+    attributions: Map<string, any>,
 }
 export interface RichText {
   getAnnSpans(): Span[];
   getLine(line: number): Span[];
+  annotate(
+    range: AnnRange,
+    ann_name: string,
+    value: null|boolean|number|string|object,
+  )
+  eraseAnn(
+    range: AnnRange,
+    ann_name: string,
+  )
 }
 "#;

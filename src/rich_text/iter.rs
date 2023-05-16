@@ -1,6 +1,6 @@
 use std::{mem::take, ops::Range};
 
-use fxhash::FxHashSet;
+use fxhash::{FxHashMap, FxHashSet};
 use generic_btree::{rle::Mergeable, ArenaIndex, QueryResult};
 
 use crate::Behavior;
@@ -114,7 +114,7 @@ impl<'a> Iterator for Iter<'a> {
                     .end
                     .map_or(false, |end| end.elem_index == self.cursor.elem_index);
             self.style_calc.apply_start(&elem.anchor_set);
-            let annotations: FxHashSet<_> = self
+            let annotations: FxHashMap<_, _> = self
                 .style_calc
                 .calc_styles(&self.text.ann)
                 .into_iter()
@@ -122,14 +122,14 @@ impl<'a> Iterator for Iter<'a> {
                     if x.behavior == Behavior::Delete {
                         None
                     } else {
-                        Some(x.type_.clone())
+                        Some((x.type_.clone(), x.value.clone()))
                     }
                 })
                 .collect();
             self.style_calc.apply_end(&elem.anchor_set);
             self.cursor.elem_index += 1;
             let ans = Span {
-                text: if is_end_elem {
+                insert: if is_end_elem {
                     std::str::from_utf8(&elem.string[self.cursor.offset..self.end.unwrap().offset])
                         .unwrap()
                         .to_string()
@@ -138,7 +138,7 @@ impl<'a> Iterator for Iter<'a> {
                         .unwrap()
                         .to_string()
                 },
-                annotations,
+                attributions: annotations,
             };
 
             self.cursor.offset = 0;

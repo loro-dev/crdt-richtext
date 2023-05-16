@@ -18,19 +18,21 @@ describe("basic ops", () => {
   it("bold", () => {
     const text = new RichText(BigInt(2));
     text.insert(0, "123");
-    text.annotate(0, 1, "bold", AnnotateType.BoldLike);
+    text.annotate({ start: 0, end: 1 }, "bold", null);
     text.insert(1, "k");
     {
       const spans = text.getAnnSpans();
-      expect(spans[0].text).toBe("1k");
-      expect(spans[0].annotations).toStrictEqual(new Set(["bold"]));
+      expect(spans[0].insert).toBe("1k");
+      expect(spans[0].attributions).toStrictEqual(
+        new Map([["bold", undefined]]),
+      );
     }
 
-    text.eraseAnn(0, 2, "bold", AnnotateType.BoldLike);
+    text.eraseAnn({ start: 0, end: 2 }, "bold");
     {
       const spans = text.getAnnSpans();
-      expect(spans[0].text).toBe("1k23");
-      expect(spans[0].annotations.size).toBe(0);
+      expect(spans[0].insert).toBe("1k23");
+      expect(spans[0].attributions.size).toBe(0);
     }
   });
 });
@@ -42,13 +44,16 @@ describe("utf16", () => {
     text.insert(0, "");
     text.insert(2, "呀");
     expect(text.toString()).toBe("你好呀，世界！");
-    text.annotate(0, 3, "bold", AnnotateType.BoldLike);
+    text.annotate({ start: 0, end: 3 }, "bold", null);
     const spans = text.getAnnSpans();
     expect(spans.length).toBe(2);
-    expect(spans[0].text).toBe("你好呀");
-    expect(spans[0].annotations.size).toBe(1);
-    expect(spans[0].annotations.has("bold")).toBeTruthy();
-    expect(spans[1].text.length).toBe(4);
+    expect(spans[0].insert).toBe("你好呀");
+    expect(spans[0].attributions.size).toBe(1);
+    expect(spans[0].attributions.has("bold")).toBeTruthy();
+    expect(spans[1].insert.length).toBe(4);
+
+    expect(() => text.annotate({ start: 0, end: 100 }, "bold", null)).toThrow();
+    expect(() => text.annotate({} as any, "bold", null)).toThrow();
   });
 
   it("delete", () => {
@@ -67,14 +72,14 @@ describe("get line", () => {
   it("basic", () => {
     const text = new RichText(BigInt(1));
     text.insert(0, "你好，\n世界！");
-    expect(text.getLine(0)[0].text).toBe("你好，\n");
-    expect(text.getLine(1)[0].text).toBe("世界！");
+    expect(text.getLine(0)[0].insert).toBe("你好，\n");
+    expect(text.getLine(1)[0].insert).toBe("世界！");
     expect(text.getLine(2).length).toBe(0);
     expect(text.getLine(3).length).toBe(0);
     text.insert(0, "\n");
-    expect(text.getLine(0)[0].text).toBe("\n");
-    expect(text.getLine(1)[0].text).toBe("你好，\n");
-    expect(text.getLine(2)[0].text).toBe("世界！");
+    expect(text.getLine(0)[0].insert).toBe("\n");
+    expect(text.getLine(1)[0].insert).toBe("你好，\n");
+    expect(text.getLine(2)[0].insert).toBe("世界！");
     expect(text.getLine(3).length).toBe(0);
     expect(text.getLine(4).length).toBe(0);
   });

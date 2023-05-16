@@ -3,18 +3,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use generic_btree::{
-    rle::{HasLength, Mergeable},
-    ArenaIndex, MoveEvent, MoveListener,
-};
+use generic_btree::{rle::HasLength, ArenaIndex, MoveEvent, MoveListener};
 
-use crate::{Annotation, Counter, OpID};
+use crate::{Counter, OpID};
 
-use super::{
-    id_map::IdMap,
-    op::{DeleteOp, Op, OpContent},
-    rich_tree::Elem,
-};
+use super::{id_map::IdMap, rich_tree::Elem};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cursor {

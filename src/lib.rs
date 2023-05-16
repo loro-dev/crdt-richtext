@@ -22,6 +22,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use string_cache::DefaultAtom;
 
 pub mod legacy;
@@ -126,7 +127,7 @@ pub struct Patch {
     pub lamport: Lamport,
 }
 
-#[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Annotation {
     pub id: OpID,
     /// lamport value of the current range (it may be updated by patch)
@@ -135,7 +136,29 @@ pub struct Annotation {
     pub behavior: Behavior,
     /// "bold", "comment", "italic", etc.
     pub type_: InternalString,
-    pub meta: Option<Vec<u8>>,
+    pub value: Value,
+}
+
+impl PartialOrd for Annotation {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match self.id.partial_cmp(&other.id) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+
+        self.range_lamport.partial_cmp(&other.range_lamport)
+    }
+}
+
+impl Ord for Annotation {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.id.cmp(&other.id) {
+            core::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        self.range_lamport.cmp(&other.range_lamport)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +168,59 @@ pub struct Style {
     pub behavior: Behavior,
     /// "bold", "comment", "italic", etc.
     pub type_: InternalString,
+    pub value: Value,
+}
+
+impl Style {
+    pub fn new_bold_like(type_: InternalString, value: Value) -> Self {
+        Self {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::Before,
+            behavior: Behavior::Merge,
+            type_,
+            value,
+        }
+    }
+
+    pub fn new_erase_bold_like(type_: InternalString) -> Self {
+        Self {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::Before,
+            behavior: Behavior::Delete,
+            type_,
+            value: Value::Null,
+        }
+    }
+
+    pub fn new_link_like(type_: InternalString, value: Value) -> Self {
+        Self {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::After,
+            behavior: Behavior::Merge,
+            type_,
+            value,
+        }
+    }
+
+    pub fn new_erase_link_like(type_: InternalString) -> Self {
+        Self {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::After,
+            behavior: Behavior::Delete,
+            type_,
+            value: Value::Null,
+        }
+    }
+
+    pub fn new_comment_like(type_: InternalString, value: Value) -> Self {
+        Self {
+            start_type: AnchorType::Before,
+            end_type: AnchorType::Before,
+            behavior: Behavior::Inclusive,
+            type_,
+            value,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]

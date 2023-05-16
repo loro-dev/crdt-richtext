@@ -427,7 +427,7 @@ impl Actor {
             range: AnchorRange { start, end },
             behavior,
             type_: type_.into(),
-            meta: None,
+            value: Value::Null,
         };
         debug_log::debug_dbg!(&ann);
         self.range_ops.push(self.range.annotate(ann, range));

@@ -582,7 +582,7 @@ mod test {
             },
             behavior: crate::Behavior::Merge,
             type_: InternalString::from(""),
-            meta: None,
+            value: serde_json::Value::Null,
         }
     }
 

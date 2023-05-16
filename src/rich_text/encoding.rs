@@ -60,7 +60,10 @@ pub(super) struct AnnEncoding {
     #[columnar(strategy = "Rle")]
     is_end_before_anchor: bool,
     behavior: Behavior,
-    type_: u32, // index to ann_types
+    /// index to ann_types_and_values
+    type_: u32,
+    /// index to ann_types_and_values
+    value: u32,
 }
 
 #[columnar(ser, de)]
@@ -78,7 +81,7 @@ struct DocEncoding {
     str: Vec<u8>,
     compressed_str: bool,
     clients: Vec<ClientID>,
-    ann_types: Vec<InternalString>,
+    ann_types_and_values: Vec<InternalString>,
     op_len: Vec<u32>,
     start_counters: Vec<u32>,
 }
@@ -128,7 +131,7 @@ fn to_doc_encoding(mut exported_map: InnerUpdates) -> DocEncoding {
         client_mapping.get_or_insert(*client);
     }
 
-    let mut ann_types_mapping = VecMapping::new();
+    let mut ann_str_mapping = VecMapping::new();
     let mut op_len: Vec<u32> = Vec::new();
     let mut start_counters: Vec<u32> = Vec::new();
     let mut ops = Vec::with_capacity(exported_map.iter().map(|x| x.1.len()).sum());
@@ -168,7 +171,9 @@ fn to_doc_encoding(mut exported_map: InnerUpdates) -> DocEncoding {
                 crate::rich_text::op::OpContent::Ann(ann) => {
                     let start = ann.range.start.id;
                     let end = ann.range.end.id;
-                    let type_ = ann_types_mapping.get_or_insert(ann.type_.clone());
+                    let type_ = ann_str_mapping.get_or_insert(ann.type_.clone());
+                    let value = serde_json::to_string(&ann.value).unwrap();
+                    let value = ann_str_mapping.get_or_insert(value.into());
                     annotations.push(AnnEncoding {
                         start,
                         is_start_before_anchor: ann.range.start.type_ == AnchorType::Before,
@@ -176,6 +181,7 @@ fn to_doc_encoding(mut exported_map: InnerUpdates) -> DocEncoding {
                         is_end_before_anchor: ann.range.end.type_ == AnchorType::Before,
                         behavior: ann.behavior,
                         type_: type_ as u32,
+                        value: value as u32,
                     });
                     OpContentType::Ann
                 }
@@ -210,7 +216,7 @@ fn to_doc_encoding(mut exported_map: InnerUpdates) -> DocEncoding {
         annotations,
         compressed_str,
         clients: client_mapping.vec,
-        ann_types: ann_types_mapping.vec,
+        ann_types_and_values: ann_str_mapping.vec,
         op_len,
         start_counters,
         str,
@@ -306,10 +312,13 @@ fn from_doc_encoding(exported: DocEncoding) -> InnerUpdates {
                     OpContent::Ann(Arc::new(Annotation {
                         range,
                         behavior: ann.behavior,
-                        type_: exported.ann_types[ann.type_ as usize].clone(),
+                        type_: exported.ann_types_and_values[ann.type_ as usize].clone(),
                         id,
                         range_lamport: (op.lamport, id),
-                        meta: None,
+                        value: serde_json::from_str(
+                            &exported.ann_types_and_values[ann.value as usize],
+                        )
+                        .unwrap(),
                     }))
                 }
             };

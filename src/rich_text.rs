@@ -522,7 +522,7 @@ impl RichText {
             },
             behavior: style.behavior,
             type_: style.type_.clone(),
-            meta: None,
+            value: style.value.clone(),
         };
 
         let ann = Arc::new(ann);

@@ -2,6 +2,7 @@ use generic_btree::{
     rle::{HasLength, Mergeable, Sliceable},
     BTree, BTreeTrait, ElemSlice, FindResult, HeapVec, Query, QueryResult, SmallElemVec, StackVec,
 };
+use serde_json::Value;
 use std::{
     collections::BTreeSet,
     mem::take,
@@ -717,7 +718,7 @@ impl TreeRangeMap {
             },
             behavior: crate::Behavior::Delete,
             type_: InternalString::from(""),
-            meta: None,
+            value: Value::Null,
         };
         // Need to make 0 idx unavailable, so insert a placeholder to take the 0 idx.
         let idx_to_ann = vec![Arc::new(placeholder)];
@@ -1731,7 +1732,7 @@ mod tree_impl_tests {
             },
             behavior: crate::Behavior::Merge,
             type_: InternalString::from(""),
-            meta: None,
+            value: Value::Null,
         }
     }
 

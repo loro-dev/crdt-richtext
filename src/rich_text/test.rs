@@ -133,12 +133,12 @@ mod insert {
         text.annotate_utf16(0..1, bold());
         let spans = text.get_spans();
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].text, "你");
+        assert_eq!(spans[0].insert, "你");
         text.insert_utf16(1, "k");
         let spans = text.get_spans();
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].text, "你k");
-        assert_eq!(spans[0].annotations.iter().next().unwrap(), "bold");
+        assert_eq!(spans[0].insert, "你k");
+        assert_eq!(spans[0].attributions.iter().next().unwrap().0, "bold");
 
         // delete
         text.delete_utf16(0..2);
@@ -245,6 +245,7 @@ fn bold() -> Style {
         end_type: AnchorType::Before,
         behavior: crate::Behavior::Merge,
         type_: InternalString::from("bold"),
+        value: serde_json::Value::Null,
     }
 }
 
@@ -254,6 +255,7 @@ fn unbold() -> Style {
         end_type: AnchorType::Before,
         behavior: crate::Behavior::Delete,
         type_: InternalString::from("bold"),
+        value: serde_json::Value::Null,
     }
 }
 
@@ -263,6 +265,7 @@ fn link() -> Style {
         end_type: AnchorType::After,
         behavior: crate::Behavior::Merge,
         type_: InternalString::from("link"),
+        value: serde_json::Value::Null,
     }
 }
 
@@ -272,6 +275,7 @@ fn unlink() -> Style {
         end_type: AnchorType::Before,
         behavior: crate::Behavior::Delete,
         type_: InternalString::from("link"),
+        value: serde_json::Value::Null,
     }
 }
 
@@ -281,6 +285,7 @@ fn expanding_style() -> Style {
         end_type: AnchorType::Before,
         behavior: crate::Behavior::Merge,
         type_: InternalString::from("expand"),
+        value: serde_json::Value::Null,
     }
 }
 
@@ -310,7 +315,7 @@ mod annotation {
         assert_eq!(ans[0].len(), 3);
         assert_eq!(ans[1].len(), 6);
         assert_eq!(ans[0].as_str(), "123");
-        assert!(ans[0].annotations.contains(&"link".into()));
+        assert!(ans[0].attributions.contains_key(&"link".into()));
     }
 
     #[test]
@@ -324,7 +329,7 @@ mod annotation {
         assert_eq!(ans[1].len(), 1);
         assert_eq!(ans[2].len(), 5);
         assert_eq!(ans[1].as_str(), "4");
-        assert!(ans[1].annotations.contains(&"link".into()));
+        assert!(ans[1].attributions.contains_key(&"link".into()));
     }
 
     #[test]
@@ -344,7 +349,7 @@ mod annotation {
         assert_eq!(ans.len(), 1);
         assert_eq!(ans[0].len(), 9);
         assert_eq!(ans[0].as_str(), "123456789");
-        assert!(ans[0].annotations.contains(&"expand".into()));
+        assert!(ans[0].attributions.contains_key(&"expand".into()));
     }
 
     #[test]
@@ -356,18 +361,18 @@ mod annotation {
         assert_eq!(ans.len(), 2);
         assert_eq!(ans[0].len(), 5);
         assert_eq!(ans[1].len(), 4);
-        assert!(ans[0].annotations.contains(&"expand".into()));
+        assert!(ans[0].attributions.contains_key(&"expand".into()));
 
         // should expand
         text.insert(5, "k");
         let ans = text.iter().collect::<Vec<_>>();
         assert_eq!(ans[0].len(), 6);
-        assert!(ans[0].annotations.contains(&"expand".into()));
+        assert!(ans[0].attributions.contains_key(&"expand".into()));
 
         text.delete(3..7);
         let ans = text.iter().collect::<Vec<_>>();
         assert_eq!(ans[0].len(), 3);
-        assert!(ans[0].annotations.contains(&"expand".into()));
+        assert!(ans[0].attributions.contains_key(&"expand".into()));
 
         text.insert(3, "k");
         let ans = text.iter().collect::<Vec<_>>();
@@ -377,7 +382,7 @@ mod annotation {
         text.insert(0, "12");
         let ans = text.iter().collect::<Vec<_>>();
         assert_eq!(ans[0].len(), 2);
-        assert!(ans[0].annotations.contains(&"expand".into()));
+        assert!(ans[0].attributions.contains_key(&"expand".into()));
     }
 
     #[test]
@@ -389,27 +394,27 @@ mod annotation {
             let ans = text.iter().collect::<Vec<_>>();
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].len(), 5);
-            assert_eq!(ans[0].annotations.len(), 0);
+            assert_eq!(ans[0].attributions.len(), 0);
             assert_eq!(ans[1].len(), 4);
-            assert_eq!(ans[1].annotations.len(), 1);
+            assert_eq!(ans[1].attributions.len(), 1);
         }
         text.delete(4..6);
         {
             let ans = text.iter().collect::<Vec<_>>();
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].len(), 4);
-            assert_eq!(ans[0].annotations.len(), 0);
+            assert_eq!(ans[0].attributions.len(), 0);
             assert_eq!(ans[1].len(), 3);
-            assert_eq!(ans[1].annotations.len(), 1);
+            assert_eq!(ans[1].attributions.len(), 1);
         }
         text.insert(7, "k");
         {
             let ans = text.iter().collect::<Vec<_>>();
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].len(), 4);
-            assert_eq!(ans[0].annotations.len(), 0);
+            assert_eq!(ans[0].attributions.len(), 0);
             assert_eq!(ans[1].as_str(), "789k");
-            assert_eq!(ans[1].annotations.len(), 1);
+            assert_eq!(ans[1].attributions.len(), 1);
         }
     }
 
@@ -420,13 +425,13 @@ mod annotation {
         text.annotate(0..1, bold());
         let ans = text.iter().collect::<Vec<_>>();
         assert_eq!(ans.len(), 2);
-        assert_eq!(ans[0].annotations.len(), 1);
+        assert_eq!(ans[0].attributions.len(), 1);
 
         text.annotate(0..1, unbold());
         let ans = text.iter().collect::<Vec<_>>();
         assert_eq!(ans.len(), 1);
-        assert_eq!(ans[0].annotations.len(), 0);
-        assert_eq!(&ans[0].text, "123");
+        assert_eq!(ans[0].attributions.len(), 0);
+        assert_eq!(&ans[0].insert, "123");
     }
 
     #[test]
@@ -439,18 +444,18 @@ mod annotation {
             let ans = text.iter().collect::<Vec<_>>();
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].len(), 3);
-            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[0].attributions.len(), 1);
             assert_eq!(ans[1].len(), 6);
-            assert_eq!(ans[1].annotations.len(), 0);
+            assert_eq!(ans[1].attributions.len(), 0);
         }
         text.insert(3, "k");
         {
             let ans = text.iter().collect::<Vec<_>>();
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].as_str(), "123k");
-            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[0].attributions.len(), 1);
             assert_eq!(ans[1].len(), 6);
-            assert_eq!(ans[1].annotations.len(), 0);
+            assert_eq!(ans[1].attributions.len(), 0);
         }
     }
 
@@ -464,18 +469,18 @@ mod annotation {
             let ans = text.iter().collect::<Vec<_>>();
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].len(), 3);
-            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[0].attributions.len(), 1);
             assert_eq!(ans[1].len(), 6);
-            assert_eq!(ans[1].annotations.len(), 0);
+            assert_eq!(ans[1].attributions.len(), 0);
         }
         text.insert(3, "k");
         {
             let ans = text.iter().collect::<Vec<_>>();
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].as_str(), "123");
-            assert_eq!(ans[0].annotations.len(), 1);
+            assert_eq!(ans[0].attributions.len(), 1);
             assert_eq!(ans[1].len(), 7);
-            assert_eq!(ans[1].annotations.len(), 0);
+            assert_eq!(ans[1].attributions.len(), 0);
         }
     }
 
@@ -490,7 +495,7 @@ mod annotation {
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].len(), 5);
             assert_eq!(ans[1].len(), 4);
-            assert_eq!(ans[0].annotations.len(), 2);
+            assert_eq!(ans[0].attributions.len(), 2);
         }
         text.insert(5, "k");
         {
@@ -499,10 +504,10 @@ mod annotation {
             assert_eq!(ans[0].len(), 5);
             assert_eq!(ans[1].len(), 1);
             assert_eq!(ans[2].len(), 4);
-            assert!(ans[0].annotations.contains(&"link".into()));
-            assert!(ans[0].annotations.contains(&"bold".into()));
-            assert!(ans[1].annotations.contains(&"bold".into()));
-            assert!(ans[2].annotations.is_empty());
+            assert!(ans[0].attributions.contains_key(&"link".into()));
+            assert!(ans[0].attributions.contains_key(&"bold".into()));
+            assert!(ans[1].attributions.contains_key(&"bold".into()));
+            assert!(ans[2].attributions.is_empty());
         }
     }
 
@@ -518,9 +523,9 @@ mod annotation {
             assert_eq!(ans.len(), 2);
             assert_eq!(ans[0].len(), 3);
             assert_eq!(ans[1].len(), 2);
-            assert!(ans[0].annotations.contains(&"link".into()));
-            assert!(ans[0].annotations.contains(&"bold".into()));
-            assert!(ans[1].annotations.is_empty());
+            assert!(ans[0].attributions.contains_key(&"link".into()));
+            assert!(ans[0].attributions.contains_key(&"bold".into()));
+            assert!(ans[1].attributions.is_empty());
         }
     }
 
@@ -533,8 +538,8 @@ mod annotation {
         text.insert(4, "k");
         let spans = text.get_spans();
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].text, "1234k");
-        assert!(spans[0].annotations.contains(&"bold".into()));
+        assert_eq!(spans[0].insert, "1234k");
+        assert!(spans[0].attributions.contains_key(&"bold".into()));
     }
 
     #[test]
@@ -546,9 +551,9 @@ mod annotation {
         text.insert(4, "k");
         let spans = text.get_spans();
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].text, "1234");
-        assert!(spans[0].annotations.contains(&"link".into()));
-        assert!(spans[1].annotations.is_empty());
+        assert_eq!(spans[0].insert, "1234");
+        assert!(spans[0].attributions.contains_key(&"link".into()));
+        assert!(spans[1].attributions.is_empty());
     }
 
     #[test]
@@ -565,14 +570,14 @@ mod annotation {
         assert_eq!(text.to_string().as_str(), "1234k789");
         let spans = text.get_spans();
         assert_eq!(spans.len(), 3);
-        assert_eq!(spans[0].text, "1234");
-        assert!(spans[0].annotations.contains(&"link".into()));
-        assert!(spans[0].annotations.contains(&"bold".into()));
-        assert_eq!(spans[1].text, "k");
-        assert!(!spans[1].annotations.contains(&"link".into()));
-        assert!(spans[1].annotations.contains(&"bold".into()));
-        assert_eq!(spans[2].text, "789");
-        assert!(spans[2].annotations.is_empty());
+        assert_eq!(spans[0].insert, "1234");
+        assert!(spans[0].attributions.contains_key(&"link".into()));
+        assert!(spans[0].attributions.contains_key(&"bold".into()));
+        assert_eq!(spans[1].insert, "k");
+        assert!(!spans[1].attributions.contains_key(&"link".into()));
+        assert!(spans[1].attributions.contains_key(&"bold".into()));
+        assert_eq!(spans[2].insert, "789");
+        assert!(spans[2].attributions.is_empty());
     }
 
     #[test]
@@ -583,6 +588,28 @@ mod annotation {
         let mut b = RichText::new(2);
         b.merge(&text);
         assert_eq!(b.get_spans(), text.get_spans());
+    }
+
+    #[test]
+    fn annotate_with_value() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(
+            0..5,
+            Style::new_bold_like("test".into(), serde_json::Value::Number(18.into())),
+        );
+        {
+            let spans = text.get_spans();
+            let v = spans[0].attributions.get(&"test".into()).unwrap();
+            assert_eq!(v.as_u64().unwrap(), 18);
+        }
+        let mut b = RichText::new(2);
+        b.merge(&text);
+        {
+            let spans = b.get_spans();
+            let v = spans[0].attributions.get(&"test".into()).unwrap();
+            assert_eq!(v.as_u64().unwrap(), 18);
+        }
     }
 }
 
@@ -674,28 +701,28 @@ mod get_line {
     fn get_line() {
         let mut text = RichText::new(1);
         text.insert(0, "Hello\nWorld\n");
-        assert_eq!(&text.get_line(0)[0].text, "Hello\n");
-        assert_eq!(&text.get_line(1)[0].text, "World\n");
-        assert_eq!(&text.get_line(2)[0].text, "");
+        assert_eq!(&text.get_line(0)[0].insert, "Hello\n");
+        assert_eq!(&text.get_line(1)[0].insert, "World\n");
+        assert_eq!(&text.get_line(2)[0].insert, "");
         text.insert(0, "\n");
-        assert_eq!(&text.get_line(0)[0].text, "\n");
-        assert_eq!(&text.get_line(1)[0].text, "Hello\n");
-        assert_eq!(&text.get_line(2)[0].text, "World\n");
-        assert_eq!(&text.get_line(3)[0].text, "");
+        assert_eq!(&text.get_line(0)[0].insert, "\n");
+        assert_eq!(&text.get_line(1)[0].insert, "Hello\n");
+        assert_eq!(&text.get_line(2)[0].insert, "World\n");
+        assert_eq!(&text.get_line(3)[0].insert, "");
         text.insert(0, "xxx");
-        assert_eq!(&text.get_line(0)[0].text, "xxx\n");
-        assert_eq!(&text.get_line(1)[0].text, "Hello\n");
-        assert_eq!(&text.get_line(2)[0].text, "World\n");
-        assert_eq!(&text.get_line(3)[0].text, "");
+        assert_eq!(&text.get_line(0)[0].insert, "xxx\n");
+        assert_eq!(&text.get_line(1)[0].insert, "Hello\n");
+        assert_eq!(&text.get_line(2)[0].insert, "World\n");
+        assert_eq!(&text.get_line(3)[0].insert, "");
     }
 
     #[test]
     fn utf16() {
         let mut text = RichText::new(1);
         text.insert(0, "你好，\nWorld\n");
-        assert_eq!(&text.get_line(0)[0].text, "你好，\n");
-        assert_eq!(&text.get_line(1)[0].text, "World\n");
-        assert_eq!(&text.get_line(2)[0].text, "");
+        assert_eq!(&text.get_line(0)[0].insert, "你好，\n");
+        assert_eq!(&text.get_line(1)[0].insert, "World\n");
+        assert_eq!(&text.get_line(2)[0].insert, "");
     }
 }
 
