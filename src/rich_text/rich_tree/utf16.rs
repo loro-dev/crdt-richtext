@@ -43,14 +43,17 @@ pub fn line_start_to_utf8(bytes: &BytesSlice, n: usize) -> Option<usize> {
     }
 
     let str = bytes_to_str(bytes);
+    let mut visited_bytes = 0;
     let mut iter_line_breaks = 0;
-    for (i, c) in str.chars().enumerate() {
+    for c in str.chars() {
         if c.eq(&'\n') {
             iter_line_breaks += 1;
             if iter_line_breaks == n {
-                return Some(i + 1);
+                return Some(visited_bytes + 1);
             }
         }
+
+        visited_bytes += c.len_utf8();
     }
 
     None
