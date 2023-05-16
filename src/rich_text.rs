@@ -30,7 +30,7 @@ use self::{
     encoding::{decode, encode},
     op::{Op, OpStore},
     rich_tree::{
-        query::{IndexFinder, IndexType, LineStartFinder},
+        query::{IndexFinder, LineStartFinder},
         rich_tree_btree_impl::RichTreeTrait,
         utf16::{get_utf16_len, utf16_to_utf8},
         CacheDiff, Elem,
@@ -38,6 +38,7 @@ use self::{
     vv::VersionVector,
 };
 
+pub use rich_tree::query::IndexType;
 pub use ann::Span;
 pub use error::Error;
 pub use event::Event;
