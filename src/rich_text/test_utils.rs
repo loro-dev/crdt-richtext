@@ -398,8 +398,7 @@ impl Actor {
             AnnotationType::Bold => self.text.annotate_inner(
                 range,
                 Style {
-                    start_type: AnchorType::Before,
-                    end_type: AnchorType::Before,
+                    expand: Expand::After,
                     behavior: crate::Behavior::Merge,
                     type_: "bold".into(),
                     value: serde_json::Value::Null,
@@ -409,8 +408,7 @@ impl Actor {
             AnnotationType::Link => self.text.annotate_inner(
                 range,
                 Style {
-                    start_type: AnchorType::Before,
-                    end_type: AnchorType::After,
+                    expand: Expand::None,
                     behavior: crate::Behavior::Merge,
                     type_: "link".into(),
                     value: serde_json::Value::Bool(true),
@@ -420,9 +418,8 @@ impl Actor {
             AnnotationType::Comment => self.text.annotate_inner(
                 range,
                 Style {
-                    start_type: AnchorType::Before,
-                    end_type: AnchorType::After,
-                    behavior: crate::Behavior::Inclusive,
+                    expand: Expand::None,
+                    behavior: crate::Behavior::AllowMultiple,
                     type_: "comment".into(),
                     value: serde_json::Value::String("This is a comment".to_owned()),
                 },
@@ -431,8 +428,7 @@ impl Actor {
             AnnotationType::UnBold => self.text.annotate_inner(
                 range,
                 Style {
-                    start_type: AnchorType::Before,
-                    end_type: AnchorType::Before,
+                    expand: Expand::After,
                     behavior: crate::Behavior::Delete,
                     type_: "bold".into(),
                     value: serde_json::Value::Null,
@@ -442,8 +438,7 @@ impl Actor {
             AnnotationType::UnLink => self.text.annotate_inner(
                 range,
                 Style {
-                    start_type: AnchorType::After,
-                    end_type: AnchorType::Before,
+                    expand: Expand::Both,
                     behavior: crate::Behavior::Delete,
                     type_: "link".into(),
                     value: serde_json::Value::Null,

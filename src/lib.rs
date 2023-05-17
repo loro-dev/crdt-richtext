@@ -108,13 +108,13 @@ pub enum Behavior {
     /// When calculating the final state, it will keep all the ranges even if they have the same type
     ///
     /// For example, we would like to keep both comments alive even if they have overlapped regions
-    Inclusive = 2,
+    AllowMultiple = 2,
     /// When calculating the final state, it will merge the ranges that have overlapped regions and have the same type
     ///
     /// For example, [bold 2~5] can be merged with [bold 1~4] to produce [bold 1-5]
     Merge = 0,
     /// It will delete the overlapped range that has smaller lamport && has the same type.
-    /// But it will keep the `Inclusive` type unchanged
+    /// But it will keep the `AllowMultiple` type unchanged
     Delete = 1,
 }
 
@@ -162,6 +162,7 @@ impl Ord for Annotation {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Expand {
     None,
     Before,
@@ -202,7 +203,7 @@ impl TryFrom<Option<&str>> for Expand {
 }
 
 impl Expand {
-    pub fn infer_from_type_name(type_: &str) -> Self {
+    pub fn infer_insert_expand(type_: &str) -> Self {
         match type_ {
             "comment" => Self::None,
             "header" => Self::None,
@@ -220,12 +221,45 @@ impl Expand {
             _ => Self::After,
         }
     }
+
+    pub fn infer_delete_expand(type_: &str) -> Self {
+        Self::infer_insert_expand(type_).toggle()
+    }
+
+    /// For a target format, the Expand type of insertion is different
+    /// from the Expand type of deletion. This method will convert one
+    // to another.
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::None => Self::Both,
+            Self::Before => Self::Before,
+            Self::After => Self::After,
+            Self::Both => Self::None,
+        }
+    }
+
+    pub fn start_type(self) -> AnchorType {
+        match self {
+            Self::None => AnchorType::Before,
+            Self::Before => AnchorType::After,
+            Self::After => AnchorType::Before,
+            Self::Both => AnchorType::After,
+        }
+    }
+
+    pub fn end_type(self) -> AnchorType {
+        match self {
+            Self::None => AnchorType::After,
+            Self::Before => AnchorType::After,
+            Self::After => AnchorType::Before,
+            Self::Both => AnchorType::Before,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Style {
-    pub start_type: AnchorType,
-    pub end_type: AnchorType,
+    pub expand: Expand,
     pub behavior: Behavior,
     /// "bold", "comment", "italic", etc.
     pub type_: InternalString,
@@ -233,23 +267,14 @@ pub struct Style {
 }
 
 impl Style {
-    pub fn new_from_expand(
+    pub(crate) fn new_from_expand(
         expand: Expand,
         type_: InternalString,
         value: Value,
         behavior: Behavior,
     ) -> Result<Self, Error> {
-        let (start_type, end_type) = match expand.try_into() {
-            Ok(Expand::None) => (AnchorType::Before, AnchorType::After),
-            Ok(Expand::Before) => (AnchorType::After, AnchorType::After),
-            Ok(Expand::After) => (AnchorType::Before, AnchorType::Before),
-            Ok(Expand::Both) => (AnchorType::After, AnchorType::Before),
-            Err(_) => return Err(Error::InvalidExpand),
-        };
-
         Ok(Style {
-            start_type,
-            end_type,
+            expand,
             behavior,
             type_,
             value,
@@ -258,8 +283,7 @@ impl Style {
 
     pub fn new_bold_like(type_: InternalString, value: Value) -> Self {
         Self {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::Before,
+            expand: Expand::After,
             behavior: Behavior::Merge,
             type_,
             value,
@@ -268,8 +292,7 @@ impl Style {
 
     pub fn new_erase_bold_like(type_: InternalString) -> Self {
         Self {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::Before,
+            expand: Expand::After,
             behavior: Behavior::Delete,
             type_,
             value: Value::Null,
@@ -278,8 +301,7 @@ impl Style {
 
     pub fn new_link_like(type_: InternalString, value: Value) -> Self {
         Self {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::After,
+            expand: Expand::None,
             behavior: Behavior::Merge,
             type_,
             value,
@@ -288,8 +310,7 @@ impl Style {
 
     pub fn new_erase_link_like(type_: InternalString) -> Self {
         Self {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::After,
+            expand: Expand::Both,
             behavior: Behavior::Delete,
             type_,
             value: Value::Null,
@@ -298,12 +319,21 @@ impl Style {
 
     pub fn new_comment_like(type_: InternalString, value: Value) -> Self {
         Self {
-            start_type: AnchorType::Before,
-            end_type: AnchorType::Before,
-            behavior: Behavior::Inclusive,
+            expand: Expand::None,
+            behavior: Behavior::AllowMultiple,
             type_,
             value,
         }
+    }
+
+    #[inline(always)]
+    pub fn start_type(&self) -> AnchorType {
+        self.expand.start_type()
+    }
+
+    #[inline(always)]
+    pub fn end_type(&self) -> AnchorType {
+        self.expand.end_type()
     }
 }
 

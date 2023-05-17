@@ -10,7 +10,7 @@ use append_only_bytes::AppendOnlyBytes;
 use fxhash::FxHashMap;
 use generic_btree::{
     rle::{HasLength, Mergeable, Sliceable},
-    BTree, MoveEvent, Query, QueryResult,
+    BTree, MoveEvent, QueryResult,
 };
 use serde_json::Value;
 use smallvec::SmallVec;
@@ -664,7 +664,7 @@ impl RichText {
             None
         };
         inclusive_end = inclusive_end.min(self.len_with(index_type) - 1);
-        let start = if style.start_type == AnchorType::Before {
+        let start = if style.expand.start_type() == AnchorType::Before {
             Some(self.content.query::<IndexFinder>(&(start, index_type)))
         } else if start == 0 {
             None
@@ -674,7 +674,7 @@ impl RichText {
                     .query::<IndexFinder>(&(start.saturating_sub(1), index_type)),
             )
         };
-        let inclusive_end = if style.end_type == AnchorType::Before {
+        let inclusive_end = if style.expand.end_type() == AnchorType::Before {
             if inclusive_end + 1 >= self.len_with(index_type) {
                 None
             } else {
@@ -700,11 +700,11 @@ impl RichText {
             range: crate::AnchorRange {
                 start: Anchor {
                     id: start_id,
-                    type_: style.start_type,
+                    type_: style.expand.start_type(),
                 },
                 end: Anchor {
                     id: end_id,
-                    type_: style.end_type,
+                    type_: style.expand.end_type(),
                 },
             },
             behavior: style.behavior,
@@ -727,7 +727,7 @@ impl RichText {
                         start.elem_index,
                         start.offset,
                         ann_idx,
-                        style.start_type,
+                        style.expand.start_type(),
                         true,
                     );
                     (true, Some(AnchorSetDiff::from_ann(ann_idx, true).into()))
@@ -742,7 +742,7 @@ impl RichText {
                         end.elem_index,
                         end.offset,
                         ann_idx,
-                        style.end_type,
+                        style.end_type(),
                         false,
                     );
                     (true, Some(AnchorSetDiff::from_ann(ann_idx, false).into()))
@@ -780,7 +780,7 @@ impl RichText {
                                 end.elem_index,
                                 end.offset,
                                 ann_idx,
-                                style.end_type,
+                                style.end_type(),
                                 false,
                             );
                         } else {
@@ -791,7 +791,7 @@ impl RichText {
                                 start.elem_index,
                                 start.offset,
                                 ann_idx,
-                                style.start_type,
+                                style.start_type(),
                                 true,
                             );
                         }
@@ -806,8 +806,8 @@ impl RichText {
                                 start.offset,
                                 end.offset,
                                 ann_idx,
-                                style.start_type,
-                                style.end_type,
+                                style.start_type(),
+                                style.end_type(),
                             );
 
                             elements.splice(start.elem_index + 1..start.elem_index + 1, new);
@@ -820,7 +820,7 @@ impl RichText {
                             end.elem_index,
                             end.offset,
                             ann_idx,
-                            style.end_type,
+                            style.end_type(),
                             false,
                         );
                         ann::insert_anchor_to_char(
@@ -828,7 +828,7 @@ impl RichText {
                             start.elem_index,
                             start.offset,
                             ann_idx,
-                            style.start_type,
+                            style.start_type(),
                             true,
                         );
 
@@ -1524,7 +1524,11 @@ impl RichText {
                             self.annotate_inner(
                                 index..index + retain,
                                 Style::new_from_expand(
-                                    Expand::infer_from_type_name(&key),
+                                    if behavior == crate::Behavior::Delete {
+                                        Expand::infer_delete_expand(&key)
+                                    } else {
+                                        Expand::infer_insert_expand(&key)
+                                    },
                                     key.into(),
                                     value,
                                     behavior,
@@ -1562,7 +1566,7 @@ impl RichText {
                             self.annotate_inner(
                                 index..end,
                                 Style::new_from_expand(
-                                    Expand::infer_from_type_name(&key),
+                                    Expand::infer_delete_expand(&key),
                                     key.into(),
                                     Value::Null,
                                     Behavior::Delete,
@@ -1585,7 +1589,7 @@ impl RichText {
                         self.annotate_inner(
                             index..end,
                             Style::new_from_expand(
-                                Expand::infer_from_type_name(&key),
+                                Expand::infer_insert_expand(&key),
                                 key.into(),
                                 value,
                                 behavior,
