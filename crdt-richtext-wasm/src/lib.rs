@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, cell::RefCell, panic};
+use std::{borrow::Borrow, cell::RefCell, collections::HashMap, panic};
 
 use crdt_richtext::{
     rich_text::{DeltaItem, IndexType, RichText as RichTextInner},
@@ -226,6 +226,20 @@ impl RichText {
 
     pub fn version(&self) -> Vec<u8> {
         self.inner.borrow().version().encode()
+    }
+
+    #[wasm_bindgen(js_name = "versionDebugMap")]
+    pub fn version_map(&self) -> Result<JsValue, JsError> {
+        let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+        let v = self
+            .inner
+            .borrow()
+            .version()
+            .vv
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect::<HashMap<String, u32>>();
+        Ok(v.serialize(&serializer)?)
     }
 
     pub fn export(&self, version: &[u8]) -> Vec<u8> {

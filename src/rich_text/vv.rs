@@ -4,9 +4,9 @@ use serde_columnar::to_vec;
 
 use crate::{ClientID, Counter};
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct VersionVector {
-    pub(crate) vv: FxHashMap<ClientID, Counter>,
+    pub vv: FxHashMap<ClientID, Counter>,
 }
 
 #[derive(Serialize, Clone, Copy, Deserialize)]
