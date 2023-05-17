@@ -10,7 +10,7 @@ use append_only_bytes::AppendOnlyBytes;
 use fxhash::FxHashMap;
 use generic_btree::{
     rle::{HasLength, Mergeable, Sliceable},
-    BTree, MoveEvent, QueryResult,
+    BTree, MoveEvent, Query, QueryResult,
 };
 use smallvec::SmallVec;
 
@@ -180,15 +180,15 @@ impl RichText {
                 .prepend(Elem::new(id, None, right_origin, slice));
         } else {
             // need to find left op id
-            let path = self.find_ideal_insert_pos(index, index_type);
+            let path_to_right_origin = self.find_ideal_right_origin(index, index_type);
             let left;
             let right;
             let op_slice = slice.clone();
             {
                 // find left and right
-                let mut node = self.content.get_node(path.leaf);
-                let offset = path.offset;
-                let index = path.elem_index;
+                let mut node = self.content.get_node(path_to_right_origin.leaf);
+                let offset = path_to_right_origin.offset;
+                let index = path_to_right_origin.elem_index;
                 if offset != 0 {
                     left = Some(node.elements()[index].id.inc((offset - 1) as u32));
                 } else {
@@ -198,7 +198,9 @@ impl RichText {
                     right = Some(node.elements()[index].id.inc(offset as u32));
                 } else if index + 1 < node.elements().len() {
                     right = Some(node.elements()[index + 1].id);
-                } else if let Some(next) = self.content.next_same_level_node(path.leaf) {
+                } else if let Some(next) =
+                    self.content.next_same_level_node(path_to_right_origin.leaf)
+                {
                     node = self.content.get_node(next);
                     right = Some(node.elements()[0].id);
                 } else {
@@ -206,43 +208,50 @@ impl RichText {
                 }
             }
 
-            self.content.update_leaf(path.leaf, |elements| {
-                // insert new element
-                debug_assert!(path.elem_index < elements.len());
-                let mut offset = path.offset;
-                let mut index = path.elem_index;
-                if offset == 0 {
-                    // ensure not at the beginning of an element
-                    assert!(index > 0);
-                    index -= 1;
-                    offset = elements[index].rle_len();
-                }
+            self.content
+                .update_leaf(path_to_right_origin.leaf, |elements| {
+                    // insert new element
+                    debug_assert!(path_to_right_origin.elem_index < elements.len());
+                    let mut offset = path_to_right_origin.offset;
+                    let mut index = path_to_right_origin.elem_index;
+                    if offset == 0 {
+                        // ensure not at the beginning of an element
+                        assert!(index > 0);
+                        index -= 1;
+                        offset = elements[index].rle_len();
+                    }
 
-                if offset == elements[index].rle_len() {
-                    if can_merge_new_slice(&elements[index], id, right, &slice) {
-                        // can merge directly
-                        elements[index].merge_slice(&slice);
-                        self.cursor_map
-                            .update(MoveEvent::new_move(path.leaf, &elements[index]));
+                    if offset == elements[index].rle_len() {
+                        if can_merge_new_slice(&elements[index], id, right, &slice) {
+                            // can merge directly
+                            elements[index].merge_slice(&slice);
+                            self.cursor_map.update(MoveEvent::new_move(
+                                path_to_right_origin.leaf,
+                                &elements[index],
+                            ));
+                            return (true, cache_diff);
+                        }
+
+                        elements.insert(index + 1, Elem::new(id, left, right, slice));
+                        self.cursor_map.update(MoveEvent::new_move(
+                            path_to_right_origin.leaf,
+                            &elements[index + 1],
+                        ));
                         return (true, cache_diff);
                     }
 
-                    elements.insert(index + 1, Elem::new(id, left, right, slice));
-                    self.cursor_map
-                        .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
-                    return (true, cache_diff);
-                }
-
-                // need to split element
-                let right_half = elements[index].split(offset);
-                elements.splice(
-                    index + 1..index + 1,
-                    [Elem::new(id, left, right, slice), right_half],
-                );
-                self.cursor_map
-                    .update(MoveEvent::new_move(path.leaf, &elements[index + 1]));
-                (true, cache_diff)
-            });
+                    // need to split element
+                    let right_half = elements[index].split(offset);
+                    elements.splice(
+                        index + 1..index + 1,
+                        [Elem::new(id, left, right, slice), right_half],
+                    );
+                    self.cursor_map.update(MoveEvent::new_move(
+                        path_to_right_origin.leaf,
+                        &elements[index + 1],
+                    ));
+                    (true, cache_diff)
+                });
 
             self.store
                 .insert_local(OpContent::new_insert(left, right, op_slice));
@@ -267,23 +276,61 @@ impl RichText {
     ///
     /// The ideal position is:
     ///
-    /// - Before tombstones with before anchor
-    /// - After tombstones with after anchor
+    /// 1. Before tombstones with new annotation
+    /// 2. Before tombstones with before anchor
+    /// 3. After tombstones with after anchor
     ///
     /// Sometimes the insertion may not have a ideal position for example an after anchor
     /// may exist before a before anchor.
     ///
-    /// The current method is quite straightforward, it will scan from the end backward and stop at
-    /// the first position that is not a tombstone or has an after anchor.
+    /// The current method will scan forward to find the last position that satisfies 1. and 2.
+    /// Then it scans backward to find the first position that satisfies 3.
     ///
     /// The returned result points to the position the new insertion should be at.
     /// It uses the rle_len() rather than the content_len().
     ///
     /// - rle_len() includes the length of deleted string
     /// - content_len() does not include the length of deleted string
-    fn find_ideal_insert_pos(&mut self, index: usize, index_type: IndexType) -> QueryResult {
-        let mut path = self.content.query::<IndexFinder>(&(index, index_type));
+    fn find_ideal_right_origin(&mut self, index: usize, index_type: IndexType) -> QueryResult {
+        assert!(index > 0);
+        let mut path = self.content.query::<IndexFinder>(&(index - 1, index_type));
+        // path may point to a tombstone now
+        path = self.shift_to_next_char(path);
+        'outer: loop {
+            // scan forward to find the last position that satisfies 1. and 2.
+            // after the loop, the path is the rightmost position that satisfies 1. and 2.
+            let node = self.content.get_node(path.leaf);
+            let elem = &node.elements()[path.elem_index];
+            if !elem.is_dead() || elem.anchor_set.has_start_after() {
+                break;
+            }
+
+            let mut new_path = path;
+            new_path.elem_index += 1;
+            new_path.offset = 0;
+            while new_path.elem_index >= node.elements().len() {
+                if let Some(next) = self.content.next_same_level_node(new_path.leaf) {
+                    new_path.leaf = next;
+                    new_path.elem_index = 0;
+                } else {
+                    break 'outer;
+                }
+            }
+            let new_node = if new_path.leaf == path.leaf {
+                node
+            } else {
+                self.content.get_node(new_path.leaf)
+            };
+            let new_elem = &new_node.elements()[new_path.elem_index];
+            if new_elem.anchor_set.has_start_before() {
+                break;
+            } else {
+                path = new_path;
+            }
+        }
+
         loop {
+            // scan backward to find the first position that satisfies 3.
             let node = self.content.get_node(path.leaf);
 
             // avoid offset == 0, as it makes it hard to find `left` for insertion later
@@ -321,6 +368,50 @@ impl RichText {
                 break;
             }
         }
+        path
+    }
+
+    /// Shift the path to the next char, including dead char
+    ///
+    /// NOTE that, the current path may point to the start byte
+    /// of a char (which may take several bytes in fact)
+    fn shift_to_next_char(&self, mut path: QueryResult) -> QueryResult {
+        let mut node = self.content.get_node(path.leaf);
+        let mut elem = &node.elements()[path.elem_index];
+        let mut done = false;
+        loop {
+            while path.offset >= elem.rle_len() {
+                let mut new_path = path;
+                new_path.elem_index += 1;
+                new_path.offset = 0;
+                if new_path.elem_index >= node.elements().len() {
+                    if let Some(next) = self.content.next_same_level_node(new_path.leaf) {
+                        new_path.leaf = next;
+                        new_path.elem_index = 0;
+                    } else {
+                        return path;
+                    }
+                }
+
+                path = new_path;
+                node = self.content.get_node(path.leaf);
+                elem = &node.elements()[path.elem_index];
+            }
+
+            if done {
+                break;
+            }
+
+            if !done {
+                let char = bytes_to_str(&elem.string[path.offset..])
+                    .chars()
+                    .next()
+                    .unwrap();
+                path.offset += char.len_utf8();
+                done = true;
+            }
+        }
+
         path
     }
 

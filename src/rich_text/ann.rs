@@ -193,6 +193,14 @@ impl CacheAnchorSet {
 }
 
 impl ElemAnchorSet {
+    pub fn has_start_before(&self) -> bool {
+        !self.start_before.is_empty()
+    }
+
+    pub fn has_start_after(&self) -> bool {
+        !self.start_after.is_empty()
+    }
+
     pub fn contains_start(&self, ann: AnnIdx) -> (bool, bool) {
         let a = self.start_before.contains(&ann);
         let b = self.start_after.contains(&ann);

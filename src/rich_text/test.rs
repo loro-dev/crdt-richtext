@@ -294,6 +294,8 @@ fn expanding_style() -> Style {
 
 mod annotation {
 
+    use std::dbg;
+
     use super::*;
 
     #[test]
@@ -306,6 +308,24 @@ mod annotation {
         assert_eq!(ans[0].len(), 3);
         assert_eq!(ans[1].len(), 6);
         assert_eq!(ans[0].as_str(), "123");
+    }
+
+    #[test]
+    fn should_not_create_new_ann_from_thin_air() {
+        let mut text = RichText::new(1);
+        text.insert(0, "123456789");
+        text.annotate(3..4, bold());
+        text.annotate(4..5, bold());
+        text.annotate(7..8, bold());
+        text.annotate(2..8, link());
+        text.delete(0..text.len());
+        text.insert(0, "1");
+        text.insert(1, "2");
+        text.insert(2, "3");
+        let spans = text.get_spans();
+        dbg!(&spans);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].attributes.len(), 0);
     }
 
     #[test]
