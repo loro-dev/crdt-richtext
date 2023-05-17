@@ -86,6 +86,13 @@
 </script>
 
 <template>
+  <h2>
+    <a href="https://github.com/loro-dev/crdt-richtext">
+      <img src="./assets/Loro.svg" alt="Loro Logo" class="logo" />
+      Loro crdt-richtext
+    </a>
+  </h2>
+
   <div class="parent">
     <div class="editor">
       <button
@@ -95,7 +102,7 @@
           }
         "
       >
-        online: {{ online[0] }}
+        Editor 0 online: {{ online[0] }}
       </button>
       <div class="version">version: {{ editorVersions[0] }}</div>
       <div ref="editor1" />
@@ -108,7 +115,7 @@
           }
         "
       >
-        online: {{ online[1] }}
+        Editor 1 online: {{ online[1] }}
       </button>
       <div class="version">version: {{ editorVersions[1] }}</div>
       <div ref="editor2" />
@@ -121,7 +128,7 @@
           }
         "
       >
-        online: {{ online[2] }}
+        Editor 2 online: {{ online[2] }}
       </button>
       <div class="version">version: {{ editorVersions[2] }}</div>
       <div ref="editor3" />
@@ -130,11 +137,11 @@
       <button
         @click="
           () => {
-            online[2] = !online[2];
+            online[3] = !online[3];
           }
         "
       >
-        online: {{ online[2] }}
+        Editor 3 online: {{ online[3] }}
       </button>
       <div class="version">version: {{ editorVersions[3] }}</div>
       <div ref="editor4" />
@@ -143,10 +150,26 @@
 </template>
 
 <style scoped>
+  a {
+    color: black;
+    font-weight: 900;
+  }
+
+  h2 {
+    font-weight: 900;
+  }
+
+  .logo {
+    width: 2em;
+    margin-right: 0.5em;
+    vertical-align: -0.5em;
+  }
+
   .editor {
-    margin: 3em 0em;
     width: 400px;
-    max-height: 800px;
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
   }
 
   button {
@@ -161,7 +184,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
-    gap: 3em;
+    gap: 2em 1em;
   }
 
   .version {
