@@ -12,3 +12,5 @@ wasm-size/
 web-test/
 pkg/
 web/
+tests/
+.cargo/

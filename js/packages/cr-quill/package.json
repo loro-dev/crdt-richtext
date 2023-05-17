@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "crdt-richtext-wasm": "file://../../../crdt-richtext-wasm",
+    "crdt-richtext-wasm": "0.4.0",
     "is-equal": "^1.6.4",
     "quill": "^1.3.7",
     "vue": "^3.2.47"
