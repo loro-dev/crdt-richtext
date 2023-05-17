@@ -110,11 +110,11 @@ mod insert {
     fn insert_len() {
         let mut text = RichText::new(1);
         text.insert(0, "123");
-        assert_eq!(&text.slice(1..=2, IndexType::Utf8), "23");
+        assert_eq!(&text.slice_str(1..=2, IndexType::Utf8), "23");
         assert!(text.len() == 3);
         assert!(text.utf16_len() == 3);
         text.insert(0, "的");
-        assert_eq!(&text.slice(0..2, IndexType::Utf16), "的1");
+        assert_eq!(&text.slice_str(0..2, IndexType::Utf16), "的1");
         assert!(text.len() == 6);
         assert!(text.utf16_len() == 4);
         assert_eq!(text.to_string().as_str(), "的123");
@@ -750,13 +750,21 @@ mod get_line {
 }
 
 mod delta {
+    use std::{
+        rc::Rc,
+        sync::atomic::{self, AtomicBool},
+    };
+
     use fxhash::FxHashMap;
     use serde_json::Value;
 
-    use crate::{rich_text::DeltaItem, RichText};
+    use crate::{
+        rich_text::{DeltaItem, IndexType},
+        RichText, Style,
+    };
 
     #[test]
-    fn apply() {
+    fn append_newline_if_no_long_enough() {
         let mut text = RichText::new(1);
         text.insert(0, "测试123");
         let mut attributes: FxHashMap<_, _> = Default::default();
@@ -770,7 +778,121 @@ mod delta {
             crate::rich_text::IndexType::Utf16,
         );
         let spans = text.get_spans();
+        assert_eq!(spans[0].len(), 9);
         assert_eq!(&spans[1].insert, "\n");
+    }
+
+    #[test]
+    fn apply_insert_should_remove_attributes_that_dont_exist() {
+        let mut text = RichText::new(1);
+        text.insert(0, "测试123");
+        text.annotate_utf16(0..2, Style::new_bold_like("a".into(), Value::Bool(true)));
+        text.apply_delta(
+            vec![
+                DeltaItem::retain(1),
+                DeltaItem::insert("k".into(), IndexType::Utf16),
+            ]
+            .into_iter(),
+            IndexType::Utf16,
+        );
+
+        let spans = text.get_spans();
+        // &spans = [
+        //     Span {
+        //         insert: "测",
+        //         attributes: {
+        //             Atom('a' type=inline): Bool(true),
+        //         },
+        //     },
+        //     Span {
+        //         insert: "k",
+        //         attributes: {},
+        //     },
+        //     Span {
+        //         insert: "试",
+        //         attributes: {
+        //             Atom('a' type=inline): Bool(true),
+        //         },
+        //     },
+        //     Span {
+        //         insert: "123",
+        //         attributes: {},
+        //     },
+        // ]
+        assert_eq!(spans.len(), 4);
+        assert_eq!(spans[0].len(), 3);
+        assert!(!spans[0].attributes.is_empty());
+        assert_eq!(spans[1].len(), 1);
+        assert!(spans[1].attributes.is_empty());
+        assert_eq!(spans[2].len(), 3);
+        assert!(!spans[2].attributes.is_empty());
+        assert_eq!(spans[3].len(), 3);
+        assert!(spans[3].attributes.is_empty());
+    }
+
+    #[test]
+    fn delta_event_insert_should_contain_all_attributes_simple() {
+        let mut text = RichText::new(1);
+        text.set_event_index_type(IndexType::Utf16);
+        text.insert(0, "1");
+        text.annotate(0..1, Style::new_bold_like("a".into(), Value::Bool(true)));
+        let invoked = Rc::new(AtomicBool::new(false));
+        let invoked_bk = Rc::clone(&invoked);
+        text.observe(Box::new(move |event| {
+            assert!(event.is_local);
+            assert_eq!(event.index_type, IndexType::Utf16);
+            assert_eq!(event.ops.len(), 2);
+            assert_eq!(
+                event.ops,
+                vec![
+                    DeltaItem::retain(1),
+                    DeltaItem::insert_with_attributes(
+                        "k".into(),
+                        IndexType::Utf16,
+                        vec![("a".into(), Value::Bool(true)),].into_iter().collect()
+                    ),
+                ]
+            );
+            invoked.store(true, atomic::Ordering::SeqCst);
+        }));
+        text.insert(1, "k");
+        let v = invoked_bk.load(atomic::Ordering::SeqCst);
+        assert!(v);
+    }
+
+    #[test]
+    fn delta_event_insert_should_contain_all_attributes() {
+        let mut text = RichText::new(1);
+        text.insert(0, "12345");
+        text.annotate(1..2, Style::new_bold_like("a".into(), Value::Bool(true)));
+        text.annotate(0..4, Style::new_bold_like("b".into(), Value::Bool(true)));
+        let invoked = Rc::new(AtomicBool::new(false));
+        let invoked_bk = Rc::clone(&invoked);
+        text.observe(Box::new(move |event| {
+            assert!(event.is_local);
+            assert_eq!(event.index_type, IndexType::Utf8);
+            assert_eq!(event.ops.len(), 2);
+            assert_eq!(
+                event.ops,
+                vec![
+                    DeltaItem::retain(2),
+                    DeltaItem::insert_with_attributes(
+                        "k".into(),
+                        IndexType::Utf8,
+                        vec![
+                            ("a".into(), Value::Bool(true)),
+                            ("b".into(), Value::Bool(true)),
+                        ]
+                        .into_iter()
+                        .collect()
+                    ),
+                ]
+            );
+            invoked.store(true, atomic::Ordering::SeqCst);
+        }));
+        text.insert(2, "k");
+        let v = invoked_bk.load(atomic::Ordering::SeqCst);
+        assert!(v);
     }
 }
 
