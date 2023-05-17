@@ -8,6 +8,8 @@ open-source)
 
 [**📚 See the blog post**](https://loro-dev.notion.site/crdt-richtext-Rust-implementation-of-Peritext-and-Fugue-c49ef2a411c0404196170ac8daf066c0)
 
+[**🎨 Try online Demo**](https://crdt-richtext-quill-demo.vercel.app/)
+
 _The interface is not yet stable and is subject to changes. Do not use it in
 production._
 
