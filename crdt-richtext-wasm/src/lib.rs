@@ -196,14 +196,14 @@ impl RichText {
 
     #[wasm_bindgen(js_name = "sliceString")]
     pub fn slice_str(&self, start: usize, end: usize) -> String {
-        self.inner.borrow().slice(start..end, IndexType::Utf16)
+        self.inner.borrow().slice_str(start..end, IndexType::Utf16)
     }
 
     #[wasm_bindgen(js_name = "chatAt")]
     pub fn char_at(&self, index: usize) -> String {
         self.inner
             .borrow()
-            .slice(index..index + 1, IndexType::Utf16)
+            .slice_str(index..index + 1, IndexType::Utf16)
     }
 
     pub fn lines(&self) -> usize {

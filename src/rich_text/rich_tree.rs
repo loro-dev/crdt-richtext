@@ -115,6 +115,7 @@ impl Elem {
         }
     }
 
+    /// get the length (in index_type) of self.string[range]
     pub fn slice_len_with(&self, index_type: IndexType, range: impl RangeBounds<usize>) -> usize {
         if self.status.is_dead() {
             0
@@ -127,7 +128,7 @@ impl Elem {
             let end = match range.end_bound() {
                 std::ops::Bound::Included(&i) => i + 1,
                 std::ops::Bound::Excluded(&i) => i,
-                std::ops::Bound::Unbounded => self.utf16_len as usize,
+                std::ops::Bound::Unbounded => self.rle_len(),
             };
 
             if end == start {

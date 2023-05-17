@@ -9,7 +9,7 @@ use super::rich_tree::{
     utf16::{get_utf16_len, utf16_to_utf8},
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum DeltaItem {
     Retain {

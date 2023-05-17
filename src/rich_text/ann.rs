@@ -314,17 +314,21 @@ impl From<AnchorSetDiff> for CacheDiff {
 }
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
-pub struct StyleCalculator(FxHashSet<AnnIdx>);
+pub struct StyleCalculator {
+    inner: FxHashSet<AnnIdx>,
+    cached_start_after: FxHashSet<AnnIdx>,
+    cached_end_after: FxHashSet<AnnIdx>,
+}
 
 impl StyleCalculator {
     pub fn insert_start(&mut self, start: AnnIdx) {
-        self.0.insert(start);
+        self.inner.insert(start);
     }
 
     pub fn apply_node_start(&mut self, anchor_set: &CacheAnchorSet) {
         if !anchor_set.start.is_empty() {
             for ann in anchor_set.start.iter() {
-                self.0.insert(*ann);
+                self.inner.insert(*ann);
             }
         }
     }
@@ -332,7 +336,7 @@ impl StyleCalculator {
     pub fn apply_node_end(&mut self, anchor_set: &CacheAnchorSet) {
         if !anchor_set.end.is_empty() {
             for ann in anchor_set.end.iter() {
-                self.0.remove(ann);
+                self.inner.remove(ann);
             }
         }
     }
@@ -340,12 +344,12 @@ impl StyleCalculator {
     pub fn apply_start(&mut self, anchor_set: &ElemAnchorSet) {
         if !anchor_set.start_before.is_empty() {
             for ann in anchor_set.start_before.iter() {
-                self.0.insert(*ann);
+                self.inner.insert(*ann);
             }
         }
         if !anchor_set.end_before.is_empty() {
             for ann in anchor_set.end_before.iter() {
-                self.0.remove(ann);
+                self.inner.remove(ann);
             }
         }
     }
@@ -353,24 +357,53 @@ impl StyleCalculator {
     pub fn apply_end(&mut self, anchor_set: &ElemAnchorSet) {
         if !anchor_set.start_after.is_empty() {
             for ann in anchor_set.start_after.iter() {
-                self.0.insert(*ann);
+                self.inner.insert(*ann);
             }
         }
         if !anchor_set.end_after.is_empty() {
             for ann in anchor_set.end_after.iter() {
-                self.0.remove(ann);
+                self.inner.remove(ann);
             }
+        }
+    }
+
+    pub fn cache_end(&mut self, anchor_set: &ElemAnchorSet) {
+        if !anchor_set.start_after.is_empty() {
+            for ann in anchor_set.start_after.iter() {
+                self.cached_start_after.insert(*ann);
+            }
+        }
+        if !anchor_set.end_after.is_empty() {
+            for ann in anchor_set.end_after.iter() {
+                self.cached_end_after.insert(*ann);
+            }
+        }
+    }
+
+    pub fn commit_cache(&mut self) {
+        if !self.cached_start_after.is_empty() {
+            for ann in self.cached_start_after.iter() {
+                self.inner.insert(*ann);
+            }
+            self.cached_start_after.clear();
+        }
+
+        if !self.cached_end_after.is_empty() {
+            for ann in self.cached_end_after.iter() {
+                self.inner.remove(ann);
+            }
+            self.cached_end_after.clear();
         }
     }
 
     #[allow(unused)]
     pub fn iter(&self) -> impl Iterator<Item = &AnnIdx> {
-        self.0.iter()
+        self.inner.iter()
     }
 
-    pub fn calc_styles(&self, manager: &AnnManager) -> Vec<Arc<Annotation>> {
+    pub fn calc_styles(&self, manager: &AnnManager) -> impl Iterator<Item = Arc<Annotation>> {
         let mut style_map = FxHashMap::default();
-        for ann in self.0.iter() {
+        for ann in self.inner.iter() {
             let ann = manager.get_ann_by_idx(*ann).unwrap();
             let suffix_to_make_inclusive_work = if ann.behavior == Behavior::Inclusive {
                 Some(ann.id)
@@ -390,7 +423,7 @@ impl StyleCalculator {
                 }
             }
         }
-        style_map.into_iter().map(|(_, (_, ann))| ann).collect()
+        style_map.into_iter().map(|(_, (_, ann))| ann)
     }
 }
 

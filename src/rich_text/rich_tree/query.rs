@@ -14,9 +14,9 @@ pub enum IndexType {
     Utf16,
 }
 
-struct IndexFinderWithStyles {
+pub(crate) struct IndexFinderWithStyles {
     left: usize,
-    style_calculator: StyleCalculator,
+    pub(crate) style_calculator: StyleCalculator,
     index_type: IndexType,
 }
 
@@ -199,7 +199,6 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
         }
     }
 
-    /// should prefer zero len element
     fn find_node(
         &mut self,
         _: &Self::QueryArg,
@@ -215,8 +214,6 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                 IndexType::Utf8 => cache.cache.len,
                 IndexType::Utf16 => cache.cache.utf16_len,
             };
-            self.style_calculator
-                .apply_node_start(&cache.cache.anchor_set);
             if self.left >= cache_len as usize {
                 last_left = self.left;
                 self.left -= cache_len as usize;
@@ -225,6 +222,8 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
             }
 
             self.style_calculator
+                .apply_node_start(&cache.cache.anchor_set);
+            self.style_calculator
                 .apply_node_end(&cache.cache.anchor_set);
         }
 
@@ -232,7 +231,6 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
         FindResult::new_missing(child_caches.len() - 1, last_left)
     }
 
-    /// should prefer zero len element
     fn find_element(&mut self, _: &Self::QueryArg, elements: &[Elem]) -> generic_btree::FindResult {
         if elements.is_empty() {
             return FindResult::new_missing(0, self.left);
@@ -251,6 +249,7 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                 }
             };
             self.style_calculator.apply_start(&cache.anchor_set);
+            self.style_calculator.cache_end(&cache.anchor_set);
             if self.left >= len {
                 last_left = self.left;
                 self.left -= len;
@@ -261,7 +260,7 @@ impl Query<TreeTrait> for IndexFinderWithStyles {
                 );
             }
 
-            self.style_calculator.apply_end(&cache.anchor_set);
+            self.style_calculator.commit_cache();
         }
 
         FindResult::new_missing(

@@ -117,7 +117,6 @@ impl<'a> Iterator for Iter<'a> {
             let annotations: FxHashMap<_, _> = self
                 .style_calc
                 .calc_styles(&self.text.ann)
-                .into_iter()
                 .filter_map(|x| {
                     if x.behavior == Behavior::Delete {
                         None

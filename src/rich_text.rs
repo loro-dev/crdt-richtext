@@ -12,6 +12,7 @@ use generic_btree::{
     rle::{HasLength, Mergeable, Sliceable},
     BTree, MoveEvent, Query, QueryResult,
 };
+use serde_json::Value;
 use smallvec::SmallVec;
 
 use crate::{
@@ -20,7 +21,8 @@ use crate::{
         op::OpContent,
         rich_tree::utf16::{bytes_to_str, get_utf16_len_and_line_breaks, Utf16LenAndLineBreaks},
     },
-    Anchor, AnchorType, Annotation, ClientID, Counter, IdSpan, OpID, Style,
+    Anchor, AnchorType, Annotation, Behavior, ClientID, Counter, IdSpan, InternalString, OpID,
+    Style,
 };
 
 use self::{
@@ -30,7 +32,7 @@ use self::{
     encoding::{decode, encode},
     op::{Op, OpStore},
     rich_tree::{
-        query::{IndexFinder, LineStartFinder},
+        query::{IndexFinder, IndexFinderWithStyles, LineStartFinder},
         rich_tree_btree_impl::RichTreeTrait,
         utf16::{get_utf16_len, utf16_to_utf8},
         CacheDiff, Elem,
@@ -259,10 +261,18 @@ impl RichText {
 
         if self.has_listener() {
             let retain = self.convert_index(index, index_type, self.event_index_type);
+            let annotations = self
+                .get_style_at_position(index, index_type)
+                .map(|(k, v)| (k.to_string(), v))
+                .collect();
             self.emit(Event {
                 ops: vec![
                     DeltaItem::retain(retain),
-                    DeltaItem::insert(string.to_owned(), self.event_index_type),
+                    DeltaItem::insert_with_attributes(
+                        string.to_owned(),
+                        self.event_index_type,
+                        annotations,
+                    ),
                 ],
                 is_local: true,
                 index_type: self.event_index_type,
@@ -957,10 +967,15 @@ impl RichText {
                                 text.text.clone(),
                             ));
                             if has_listener {
+                                let annotations = self
+                                    .get_style_at_position(index, self.event_index_type)
+                                    .map(|(k, v)| (k.to_string(), v))
+                                    .collect();
                                 ans.push(DeltaItem::retain(index));
-                                ans.push(DeltaItem::insert(
+                                ans.push(DeltaItem::insert_with_attributes(
                                     bytes_to_str(&text.text).to_owned(),
                                     self.event_index_type,
+                                    annotations,
                                 ));
                             }
                             break 'apply;
@@ -989,10 +1004,15 @@ impl RichText {
                     }
 
                     if has_listener {
+                        let annotations = self
+                            .get_style_at_position(index, self.event_index_type)
+                            .map(|(k, v)| (k.to_string(), v))
+                            .collect();
                         ans.push(DeltaItem::retain(index));
-                        ans.push(DeltaItem::insert(
+                        ans.push(DeltaItem::insert_with_attributes(
                             bytes_to_str(&text.text).to_owned(),
                             self.event_index_type,
+                            annotations,
                         ));
                     }
                 }
@@ -1410,7 +1430,7 @@ impl RichText {
         iter.collect()
     }
 
-    pub fn slice(&self, range: impl RangeBounds<usize>, index_type: IndexType) -> String {
+    pub fn slice_str(&self, range: impl RangeBounds<usize>, index_type: IndexType) -> String {
         let start = match range.start_bound() {
             Bound::Included(&start) => start,
             Bound::Excluded(&start) => start + 1,
@@ -1419,7 +1439,7 @@ impl RichText {
         let end = match range.end_bound() {
             Bound::Included(&end) => end + 1,
             Bound::Excluded(&end) => end,
-            Bound::Unbounded => self.len(),
+            Bound::Unbounded => self.len_with(index_type),
         };
 
         let mut ans = String::with_capacity(end - start);
@@ -1433,6 +1453,46 @@ impl RichText {
         }
 
         ans
+    }
+
+    pub fn slice(&self, range: impl RangeBounds<usize>, index_type: IndexType) -> Vec<Span> {
+        let start = match range.start_bound() {
+            Bound::Included(&start) => start,
+            Bound::Excluded(&start) => start + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&end) => end + 1,
+            Bound::Excluded(&end) => end,
+            Bound::Unbounded => self.len_with(index_type),
+        };
+
+        let mut ans = Vec::new();
+        let (start, finder) = self
+            .content
+            .query_with_finder_return::<IndexFinderWithStyles>(&(start, index_type));
+        let style = finder.style_calculator;
+        let end = self.content.query::<IndexFinder>(&(end, index_type));
+        for span in iter::Iter::new_range(self, start, Some(end), style) {
+            ans.push(span)
+        }
+
+        ans
+    }
+
+    pub fn get_style_at_position(
+        &self,
+        position: usize,
+        index_type: IndexType,
+    ) -> impl Iterator<Item = (InternalString, Value)> + '_ {
+        let (_, finder) = self
+            .content
+            .query_with_finder_return::<IndexFinderWithStyles>(&(position, index_type));
+
+        finder
+            .style_calculator
+            .calc_styles(&self.ann)
+            .map(|x| (x.type_.clone(), x.value.clone()))
     }
 
     pub fn lines(&self) -> usize {
@@ -1474,24 +1534,53 @@ impl RichText {
                 DeltaItem::Insert {
                     insert, attributes, ..
                 } => {
+                    if insert.is_empty() {
+                        continue;
+                    }
+
                     self.insert_inner(index, &insert, index_type);
                     let end = match index_type {
                         IndexType::Utf8 => index + insert.len(),
                         IndexType::Utf16 => index + get_utf16_len(&insert),
                     };
-                    if let Some(attributes) = attributes {
-                        for (key, value) in attributes {
-                            let behavior = if value.is_null() {
-                                crate::Behavior::Delete
-                            } else {
-                                crate::Behavior::Merge
-                            };
+
+                    let span = self
+                        .slice(index..index + 1, index_type)
+                        .into_iter()
+                        .next()
+                        .unwrap();
+                    let inserted_attributes = span.attributes;
+                    let attributes = attributes.unwrap_or_default();
+                    for key in inserted_attributes.keys() {
+                        if !attributes.contains_key(&key.to_string()) {
                             self.annotate_inner(
                                 index..end,
-                                Style::new_from_expand(None, key.into(), value, behavior).unwrap(),
+                                Style::new_from_expand(
+                                    None,
+                                    key.into(),
+                                    Value::Null,
+                                    Behavior::Delete,
+                                )
+                                .unwrap(),
                                 index_type,
                             )
                         }
+                    }
+
+                    for (key, value) in attributes {
+                        let behavior = if value.is_null() {
+                            crate::Behavior::Delete
+                        } else {
+                            crate::Behavior::Merge
+                        };
+                        if inserted_attributes.get(&key.as_str().into()) == Some(&value) {
+                            continue;
+                        }
+                        self.annotate_inner(
+                            index..end,
+                            Style::new_from_expand(None, key.into(), value, behavior).unwrap(),
+                            index_type,
+                        )
                     }
 
                     index = end;
