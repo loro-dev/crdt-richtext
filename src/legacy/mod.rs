@@ -19,7 +19,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
     }
 
     /// Insert a new span of text into the range. It's used to sync
-    /// List Crdt insert ops.  
+    /// List Crdt insert ops.
     ///
     /// It will only generate new RangeOp(Patches) when inserting new
     /// text locally and there are annotations attached to the tombstones
@@ -343,7 +343,7 @@ impl<R: RangeMap + Debug> CrdtRange<R> {
                 HashMap::new();
             for a in std::mem::take(&mut span.annotations) {
                 if let Some(x) = annotations.get_mut(&a.type_) {
-                    if a.behavior == Behavior::Inclusive {
+                    if a.behavior == Behavior::AllowMultiple {
                         x.1.push(a);
                     } else if a.range_lamport > x.0 {
                         *x = (a.range_lamport, vec![a]);

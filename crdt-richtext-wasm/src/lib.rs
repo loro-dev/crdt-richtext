@@ -1,8 +1,8 @@
-use std::{borrow::Borrow, cell::RefCell, collections::HashMap, panic};
+use std::{cell::RefCell, collections::HashMap, panic};
 
 use crdt_richtext::{
     rich_text::{DeltaItem, IndexType, RichText as RichTextInner},
-    Behavior, Style,
+    Behavior, Expand, Style,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -81,38 +81,18 @@ impl RichText {
             return Err(JsError::new("index out of range"));
         }
 
-        let (start_type, end_type) = match range.expand.as_deref() {
-            None => (
-                crdt_richtext::AnchorType::Before,
-                crdt_richtext::AnchorType::Before,
-            ),
-            Some("none") => (
-                crdt_richtext::AnchorType::Before,
-                crdt_richtext::AnchorType::After,
-            ),
-            Some("start") => (
-                crdt_richtext::AnchorType::After,
-                crdt_richtext::AnchorType::After,
-            ),
-            Some("after") => (
-                crdt_richtext::AnchorType::Before,
-                crdt_richtext::AnchorType::Before,
-            ),
-            Some("both") => (
-                crdt_richtext::AnchorType::After,
-                crdt_richtext::AnchorType::Before,
-            ),
-            _ => return Err(JsError::new("invalid expand value")),
-        };
-
+        let expand: Expand = range
+            .expand
+            .as_deref()
+            .try_into()
+            .map_err(|_| JsError::new("invalid expand value"))?;
         let inclusive = range.inclusive.unwrap_or(false);
         let value = serde_wasm_bindgen::from_value(value)?;
 
         let style = Style {
-            start_type,
-            end_type,
+            expand,
             behavior: if inclusive {
-                Behavior::Inclusive
+                Behavior::AllowMultiple
             } else {
                 Behavior::Merge
             },
@@ -126,6 +106,7 @@ impl RichText {
         Ok(())
     }
 
+    /// TODO: Doc the behavior of expand
     #[wasm_bindgen(js_name = "eraseAnn", skip_typescript)]
     pub fn erase_ann(&self, range: JsValue, ann_name: &str) -> Result<(), JsError> {
         let range: AnnRange = serde_wasm_bindgen::from_value(range)?;
@@ -134,33 +115,17 @@ impl RichText {
             return Err(JsError::new("index out of range"));
         }
 
-        let (start_type, end_type) = match range.expand.as_deref() {
-            None => (
-                crdt_richtext::AnchorType::Before,
-                crdt_richtext::AnchorType::Before,
-            ),
-            Some("none") => (
-                crdt_richtext::AnchorType::Before,
-                crdt_richtext::AnchorType::After,
-            ),
-            Some("start") => (
-                crdt_richtext::AnchorType::After,
-                crdt_richtext::AnchorType::After,
-            ),
-            Some("after") => (
-                crdt_richtext::AnchorType::Before,
-                crdt_richtext::AnchorType::Before,
-            ),
-            Some("both") => (
-                crdt_richtext::AnchorType::After,
-                crdt_richtext::AnchorType::Before,
-            ),
-            _ => return Err(JsError::new("invalid expand value")),
-        };
+        let expand: Expand = range
+            .expand
+            .as_deref()
+            .try_into()
+            .map_err(|_| JsError::new("invalid expand value"))?;
+        // We expect user use the expand type of insertion, as it's most intuitive.
+        // So we need to toggle it to make it work for deletion
+        let expand = expand.toggle();
 
         let style = Style {
-            start_type,
-            end_type,
+            expand,
             behavior: Behavior::Delete,
             type_: ann_name.into(),
             value: serde_json::Value::Null,
@@ -281,7 +246,7 @@ export type AnnRange = {
 }
 
 export interface Span {
-    insert: string, 
+    insert: string,
     attributes: Record<string, any>,
 }
 
@@ -293,7 +258,7 @@ export type DeltaItem = {
 };
 
 export interface Event {
-    ops: DeltaItem[], 
+    ops: DeltaItem[],
     is_local: boolean,
     index_type: "Utf8" | "Utf16",
 }

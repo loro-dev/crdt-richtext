@@ -1,7 +1,7 @@
-use std::{mem::take, ops::Range};
+use std::mem::take;
 
-use fxhash::{FxHashMap, FxHashSet};
-use generic_btree::{rle::Mergeable, ArenaIndex, QueryResult};
+use fxhash::FxHashMap;
+use generic_btree::{rle::Mergeable, QueryResult};
 
 use crate::Behavior;
 

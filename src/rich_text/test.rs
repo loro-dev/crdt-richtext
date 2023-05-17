@@ -244,8 +244,7 @@ mod apply {
 
 fn bold() -> Style {
     Style {
-        start_type: AnchorType::Before,
-        end_type: AnchorType::Before,
+        expand: Expand::After,
         behavior: crate::Behavior::Merge,
         type_: InternalString::from("bold"),
         value: serde_json::Value::Null,
@@ -254,8 +253,7 @@ fn bold() -> Style {
 
 fn unbold() -> Style {
     Style {
-        start_type: AnchorType::Before,
-        end_type: AnchorType::Before,
+        expand: Expand::After,
         behavior: crate::Behavior::Delete,
         type_: InternalString::from("bold"),
         value: serde_json::Value::Null,
@@ -264,8 +262,7 @@ fn unbold() -> Style {
 
 fn link() -> Style {
     Style {
-        start_type: AnchorType::Before,
-        end_type: AnchorType::After,
+        expand: Expand::None,
         behavior: crate::Behavior::Merge,
         type_: InternalString::from("link"),
         value: serde_json::Value::Null,
@@ -274,8 +271,7 @@ fn link() -> Style {
 
 fn unlink() -> Style {
     Style {
-        start_type: AnchorType::After,
-        end_type: AnchorType::Before,
+        expand: Expand::Both,
         behavior: crate::Behavior::Delete,
         type_: InternalString::from("link"),
         value: serde_json::Value::Null,
@@ -284,8 +280,7 @@ fn unlink() -> Style {
 
 fn expanding_style() -> Style {
     Style {
-        start_type: AnchorType::After,
-        end_type: AnchorType::Before,
+        expand: Expand::Both,
         behavior: crate::Behavior::Merge,
         type_: InternalString::from("expand"),
         value: serde_json::Value::Null,

@@ -405,7 +405,7 @@ impl StyleCalculator {
         let mut style_map = FxHashMap::default();
         for ann in self.inner.iter() {
             let ann = manager.get_ann_by_idx(*ann).unwrap();
-            let suffix_to_make_inclusive_work = if ann.behavior == Behavior::Inclusive {
+            let suffix_to_make_inclusive_work = if ann.behavior == Behavior::AllowMultiple {
                 Some(ann.id)
             } else {
                 None
