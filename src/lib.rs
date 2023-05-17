@@ -162,6 +162,66 @@ impl Ord for Annotation {
     }
 }
 
+pub enum Expand {
+    None,
+    Before,
+    After,
+    Both,
+}
+
+impl TryFrom<&str> for Expand {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "none" => Ok(Self::None),
+            "start" => Ok(Self::Before),
+            "after" => Ok(Self::After),
+            "both" => Ok(Self::Both),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<Option<&str>> for Expand {
+    type Error = ();
+
+    fn try_from(value: Option<&str>) -> Result<Self, Self::Error> {
+        if let Some(value) = value {
+            match value {
+                "none" => Ok(Self::None),
+                "start" => Ok(Self::Before),
+                "after" => Ok(Self::After),
+                "both" => Ok(Self::Both),
+                _ => Err(()),
+            }
+        } else {
+            Ok(Self::After)
+        }
+    }
+}
+
+impl Expand {
+    pub fn infer_from_type_name(type_: &str) -> Self {
+        match type_ {
+            "comment" => Self::None,
+            "header" => Self::None,
+            "indent" => Self::None,
+            "list" => Self::None,
+            "align" => Self::None,
+            "direction" => Self::None,
+            "code-block" => Self::None,
+            "code" => Self::None,
+            "link" => Self::None,
+            "script" => Self::None,
+            "formula" => Self::None,
+            "image" => Self::None,
+            "video" => Self::None,
+            _ => Self::After,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Style {
     pub start_type: AnchorType,
@@ -174,18 +234,17 @@ pub struct Style {
 
 impl Style {
     pub fn new_from_expand(
-        expand: Option<&str>,
+        expand: Expand,
         type_: InternalString,
         value: Value,
         behavior: Behavior,
     ) -> Result<Self, Error> {
-        let (start_type, end_type) = match expand.as_deref() {
-            None => (AnchorType::Before, AnchorType::Before),
-            Some("none") => (AnchorType::Before, AnchorType::After),
-            Some("start") => (AnchorType::After, AnchorType::After),
-            Some("after") => (AnchorType::Before, AnchorType::Before),
-            Some("both") => (AnchorType::After, AnchorType::Before),
-            _ => return Err(Error::InvalidExpand),
+        let (start_type, end_type) = match expand.try_into() {
+            Ok(Expand::None) => (AnchorType::Before, AnchorType::After),
+            Ok(Expand::Before) => (AnchorType::After, AnchorType::After),
+            Ok(Expand::After) => (AnchorType::Before, AnchorType::Before),
+            Ok(Expand::Both) => (AnchorType::After, AnchorType::Before),
+            Err(_) => return Err(Error::InvalidExpand),
         };
 
         Ok(Style {

@@ -21,8 +21,8 @@ use crate::{
         op::OpContent,
         rich_tree::utf16::{bytes_to_str, get_utf16_len_and_line_breaks, Utf16LenAndLineBreaks},
     },
-    Anchor, AnchorType, Annotation, Behavior, ClientID, Counter, IdSpan, InternalString, OpID,
-    Style,
+    Anchor, AnchorType, Annotation, Behavior, ClientID, Counter, Expand, IdSpan, InternalString,
+    OpID, Style,
 };
 
 use self::{
@@ -1523,7 +1523,13 @@ impl RichText {
                             };
                             self.annotate_inner(
                                 index..index + retain,
-                                Style::new_from_expand(None, key.into(), value, behavior).unwrap(),
+                                Style::new_from_expand(
+                                    Expand::infer_from_type_name(&key),
+                                    key.into(),
+                                    value,
+                                    behavior,
+                                )
+                                .unwrap(),
                                 index_type,
                             )
                         }
@@ -1556,7 +1562,7 @@ impl RichText {
                             self.annotate_inner(
                                 index..end,
                                 Style::new_from_expand(
-                                    None,
+                                    Expand::infer_from_type_name(&key),
                                     key.into(),
                                     Value::Null,
                                     Behavior::Delete,
@@ -1578,7 +1584,13 @@ impl RichText {
                         }
                         self.annotate_inner(
                             index..end,
-                            Style::new_from_expand(None, key.into(), value, behavior).unwrap(),
+                            Style::new_from_expand(
+                                Expand::infer_from_type_name(&key),
+                                key.into(),
+                                value,
+                                behavior,
+                            )
+                            .unwrap(),
                             index_type,
                         )
                     }
