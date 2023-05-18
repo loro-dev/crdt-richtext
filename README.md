@@ -13,8 +13,11 @@ open-source)
 _The interface is not yet stable and is subject to changes. Do not use it in
 production._
 
-This lib combines Peritext and Fugue's power with impressive performance,
-tailored specifically for rich text.
+This CRDT lib combines Peritext and Fugue's power, delivering impressive
+performance specifically tailored for rich text. It leverages the
+[generic-btree](https://github.com/loro-dev/generic-btree) library to boost
+speed, and the [serde-columnar](https://github.com/loro-dev/columnar) simplifies
+the implementation of efficient columnar encoding.
 
 ## Benchmark
 
