@@ -115,7 +115,6 @@ impl RichText {
     }
 
     fn emit(&mut self, mut event: Event) {
-        debug_log::debug_dbg!(&event);
         event.ops.retain(|x| !x.should_remove());
         for listener in &mut self.listeners {
             listener(&event);
@@ -501,17 +500,13 @@ impl RichText {
                             elem.update(start_offset, end_offset, &mut delete_fn);
                         let (len_diff, utf16_len_diff, line_break_diff) = diff.unwrap();
                         if !additions.is_empty() {
-                            let len = additions.len();
                             slice
                                 .elements
                                 .splice(start_idx + 1..start_idx + 1, additions);
-                            Elem::try_merge_arr(slice.elements, start_idx, len + 1);
-                        } else if start_idx > 0 {
-                            Elem::try_merge_arr(slice.elements, start_idx - 1, 2);
-                        } else {
-                            Elem::try_merge_arr(slice.elements, start_idx, 1);
+                            Elem::try_merge_arr(slice.elements, start_idx + 1);
                         }
 
+                        Elem::try_merge_arr(slice.elements, start_idx);
                         return (
                             true,
                             Some(CacheDiff::new_len_diff(
@@ -581,7 +576,12 @@ impl RichText {
                 }
 
                 let begin = start.saturating_sub(2);
-                Elem::try_merge_arr(slice.elements, begin, end + 2 - begin);
+                for i in begin..end {
+                    if i >= slice.elements.len() {
+                        break;
+                    }
+                    Elem::try_merge_arr(slice.elements, i);
+                }
                 (
                     true,
                     Some(CacheDiff::new_len_diff(
@@ -1030,11 +1030,7 @@ impl RichText {
     fn find_right(&mut self, elt: &op::TextInsertOp, op: &Op) -> Option<Option<QueryResult>> {
         // We use Fugue algorithm here, it has the property of "maximal non-interleaving"
         // See paper *The Art of the Fugue: Minimizing Interleaving in Collaborative Text Editing*
-        let scan_start = self.find_next_cursor_of(elt.left);
-        if scan_start.is_none() {
-            return None;
-        }
-        let scan_start = scan_start.unwrap();
+        let scan_start = self.find_next_cursor_of(elt.left)?;
         let iterator = self.content.iter_range(scan_start..);
         let elt_left_origin = elt.left;
         let elt_right_origin = elt.right;
@@ -1226,7 +1222,7 @@ impl RichText {
     fn delete_in_id_range(&mut self, mut id: OpID, mut len: usize, ans: &mut Vec<DeltaItem>) {
         // debug_log::group!("update");
         // debug_log::debug_dbg!(id, len);
-        debug_log::debug_dbg!(&self.content);
+        // debug_log::debug_dbg!(&self.content);
         // debug_log::debug_dbg!(&self.cursor_map);
         // debug_log::group_end!();
         let has_listener = self.has_listener();
@@ -1377,6 +1373,14 @@ impl RichText {
         if cfg!(debug_assertions) {
             let count = self.content.iter().count();
             debug_log::debug_log!("Elem len = {}", count);
+
+            let mut count = 0;
+            for (next, prev) in self.content.iter().skip(1).zip(self.content.iter()) {
+                if prev.can_merge(next) {
+                    count += 1;
+                }
+            }
+            debug_log::debug_log!("Can be merged elems = {}", count);
         }
 
         if include_content {
@@ -1620,7 +1624,6 @@ impl RichText {
 
     fn get_index_from_path(&self, path: QueryResult, index_type: IndexType) -> usize {
         let mut count: usize = 0;
-        debug_log::debug_dbg!(path, &self.content);
         self.content.visit_previous_caches(path, |v| match v {
             generic_btree::PreviousCache::NodeCache(cache) => {
                 count += match index_type {

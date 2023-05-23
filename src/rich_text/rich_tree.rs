@@ -306,32 +306,32 @@ impl Elem {
             && self.id.counter + self.rle_len() as Counter > id.counter as Counter
     }
 
-    pub fn try_merge_arr(arr: &mut Vec<Self>, mut from: usize, mut len: usize) -> bool {
-        len = len.min(arr.len() - from);
-        while len > 0 {
-            let mut j = from + 1;
-            while j < arr.len() {
-                let (left, right) = arr.split_at_mut(j);
-                if left[from].can_merge(&right[0]) {
-                    left[from].merge_right(&right[0]);
-                    j += 1;
-                } else {
-                    break;
-                }
-            }
-            if j > from + 1 {
-                arr.drain(from + 1..j);
-                // may continue?
-                len = len.saturating_sub(j - from);
-                from += 1;
-            } else {
-                len -= 1;
-                from += 1;
-            }
+    pub fn try_merge_arr(arr: &mut Vec<Self>, mut index: usize) -> usize {
+        let mut ans = 0;
+        while index > 0 && arr[index - 1].can_merge(&arr[index]) {
+            let (a, b) = arref::array_mut_ref!(arr, [index - 1, index]);
+            a.merge_right(b);
+            arr.remove(index);
+            ans += 1;
+            index -= 1;
         }
 
-        false
+        while index + 1 < arr.len() && arr[index].can_merge(&arr[index + 1]) {
+            let (a, b) = arref::array_mut_ref!(arr, [index, index + 1]);
+            a.merge_right(b);
+            arr.remove(index + 1);
+            ans += 1;
+        }
+
+        ans
     }
+
+    // /// return change of the length of arr
+    // pub(crate) fn insert_batch_at(index: usize, arr: &mut Vec<Self>, batch: SmallVec<[Self; 2]>) -> isize {
+    //     if batch.is_empty() {
+    //         return 0;
+    //     }
+    // }
 
     #[inline]
     pub fn has_after_anchor(&self) -> bool {
