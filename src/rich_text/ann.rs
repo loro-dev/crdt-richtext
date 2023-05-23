@@ -153,6 +153,10 @@ impl CacheAnchorSet {
     }
 
     pub fn apply_diff(&mut self, diff: &AnchorSetDiff) {
+        if diff.start.is_empty() && diff.end.is_empty() {
+            return;
+        }
+
         for ann in diff.start.iter() {
             if ann > 0 {
                 self.start.insert(ann);

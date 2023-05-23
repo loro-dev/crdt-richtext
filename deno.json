@@ -5,6 +5,7 @@
     "fuzz": "cargo +nightly fuzz run rich-text-utf16",
     "fuzz-match": "cargo +nightly fuzz run rich-text-match",
     "flame": "CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --example bench -- automerge",
+    "example": "DEBUG=\"*\" cargo run --example bench -- automerge",
     "example-encode": "cargo run --example bench -- encode",
     "bench": "cargo bench"
   }

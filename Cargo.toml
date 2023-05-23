@@ -64,3 +64,6 @@ harness = false
 [[bench]]
 name = "rich-text"
 harness = false
+
+[patch.crates-io]
+generic-btree = { path = "../generic-btree" }

@@ -1374,6 +1374,11 @@ impl RichText {
         debug_log::debug_log!("Text len = {} (utf16={})", self.len(), self.utf16_len());
         debug_log::debug_log!("Nodes len = {}", self.content.node_len());
         debug_log::debug_log!("Op len = {}", self.store.op_len());
+        if cfg!(debug_assertions) {
+            let count = self.content.iter().count();
+            debug_log::debug_log!("Elem len = {}", count);
+        }
+
         if include_content {
             let mut content_inner = format!("{:#?}", &self.content);
             const MAX: usize = 100000;
