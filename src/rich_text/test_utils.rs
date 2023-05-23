@@ -321,6 +321,7 @@ pub fn fuzzing_match_str(actions: Vec<Action>) {
                     })
                 );
                 actor.insert_utf16(pos, content);
+                // actor.check();
             }
             Action::Delete { pos, len, .. } => {
                 let mut pos = pos as usize;
@@ -341,6 +342,7 @@ pub fn fuzzing_match_str(actions: Vec<Action>) {
                     })
                 );
                 actor.delete_utf16(pos, len);
+                // actor.check();
             }
             _ => {}
         }

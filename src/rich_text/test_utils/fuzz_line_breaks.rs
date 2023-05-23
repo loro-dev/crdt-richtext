@@ -57,16 +57,26 @@ fn apply(text: &mut RichText, actions: &[Action]) {
                 content,
                 has_line_break,
             } => {
+                debug_log::group!(
+                    "insert index={} content={} linebreak={}",
+                    index,
+                    content,
+                    has_line_break
+                );
                 let mut content = content.to_string();
                 if *has_line_break {
                     content.push('\n');
                 }
                 text.insert(*index as usize, &content);
                 // text.check();
+                debug_log::group_end!();
             }
             Action::Delete { index, len } => {
+                debug_log::group!("delete index={} len={}", index, len);
+                text.debug_log(true);
                 text.delete(*index as usize..*index as usize + *len as usize);
                 // text.check();
+                debug_log::group_end!();
             }
         }
     }
@@ -491,6 +501,104 @@ mod test {
             Delete {
                 index: 2560,
                 len: 42,
+            },
+        ])
+    }
+
+    #[test]
+    fn fuzz_4() {
+        fuzzing_line_break(vec![
+            Insert {
+                index: 0,
+                content: 16896,
+                has_line_break: true,
+            },
+            Insert {
+                index: 48451,
+                content: 65468,
+                has_line_break: true,
+            },
+            Delete {
+                index: 27278,
+                len: 255,
+            },
+            Delete {
+                index: 17152,
+                len: 72,
+            },
+        ])
+    }
+
+    #[test]
+    fn fuzz_5() {
+        fuzzing_line_break(vec![
+            Insert {
+                index: 17219,
+                content: 16195,
+                has_line_break: true,
+            },
+            Delete {
+                index: 60652,
+                len: 231,
+            },
+            Delete { index: 2, len: 67 },
+            Delete {
+                index: 63489,
+                len: 236,
+            },
+        ])
+    }
+
+    #[test]
+    fn fuzz_6() {
+        fuzzing_line_break(vec![
+            Insert {
+                index: 0,
+                content: 16896,
+                has_line_break: true,
+            },
+            Insert {
+                index: 48451,
+                content: 65468,
+                has_line_break: true,
+            },
+            Insert {
+                index: 3584,
+                content: 17210,
+                has_line_break: true,
+            },
+            Insert {
+                index: 17152,
+                content: 1,
+                has_line_break: false,
+            },
+            Insert {
+                index: 64652,
+                content: 30019,
+                has_line_break: false,
+            },
+            Delete {
+                index: 65535,
+                len: 255,
+            },
+            Insert {
+                index: 74,
+                content: 37418,
+                has_line_break: false,
+            },
+            Insert {
+                index: 17152,
+                content: 72,
+                has_line_break: false,
+            },
+            Insert {
+                index: 257,
+                content: 0,
+                has_line_break: false,
+            },
+            Delete {
+                index: 65532,
+                len: 255,
             },
         ])
     }
