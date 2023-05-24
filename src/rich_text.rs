@@ -569,14 +569,15 @@ impl RichText {
                 };
 
                 for elem in slice.elements[start..end].iter_mut() {
-                    let diff = delete_fn(elem);
-                    len_diff += diff.0;
-                    utf16_len_diff += diff.1;
-                    line_break_diff += diff.2;
+                    if !elem.is_dead() {
+                        let diff = delete_fn(elem);
+                        len_diff += diff.0;
+                        utf16_len_diff += diff.1;
+                        line_break_diff += diff.2;
+                    }
                 }
 
-                let begin = start.saturating_sub(2);
-                for i in begin..end {
+                for i in start..end {
                     if i >= slice.elements.len() {
                         break;
                     }
