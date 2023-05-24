@@ -58,7 +58,7 @@ export class QuillBinding {
           const b = this.quill.getContents().ops;
           console.log(this.richtext.id(), "COMPARE AFTER CRDT_EVENT");
           if (!assertEqual(a, b as Span[])) {
-            quill.setContents(new Delta(a));
+            quill.setContents(new Delta(a), "this" as any);
           }
         }
       });
