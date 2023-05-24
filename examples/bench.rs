@@ -105,7 +105,7 @@ pub fn main() {
 fn bench(actions: Vec<TextAction>) {
     // #[global_allocator]
     // static ALLOC: dhat::Alloc = dhat::Alloc;
-    for _ in 0..10 {
+    for _ in 0..30 {
         let mut text = RichText::new(1);
         // let profiler = dhat::Profiler::builder().trim_backtraces(None).build();
         for action in actions.iter() {

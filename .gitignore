@@ -1,5 +1,5 @@
 /target
 /Cargo.lock
 *.log
-flamegraph.svg
+flamegraph*.svg
 dhat-heap.json
