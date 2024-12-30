@@ -3,9 +3,6 @@
 > Rust implementation of [Peritext](https://www.inkandswitch.com/peritext/) and
 > [Fugue](https://arxiv.org/abs/2305.00583)
 
-This crate contains a subset of [Loro CRDT](https://loro.dev/)(which is not yet
-open-source)
-
 [**📚 See the blog post**](https://loro-dev.notion.site/crdt-richtext-Rust-implementation-of-Peritext-and-Fugue-c49ef2a411c0404196170ac8daf066c0)
 
 [**🎨 Try online Demo**](https://crdt-richtext-quill-demo.vercel.app/)
